@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS ?= -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter
-CPPFLAGS = -Isrc -Isrc/dsp -include src/compat.h
+CPPFLAGS = -Isrc -Isrc/dsp -include src/compat.h $(EXTRA_CPPFLAGS)
 
 DSP_SRC = $(wildcard src/dsp/*.c)
 DSP_OBJ = $(DSP_SRC:.c=.o)

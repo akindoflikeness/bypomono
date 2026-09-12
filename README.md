@@ -8,14 +8,16 @@ roman numerals 1...8 and the ratio mode is selected using the ratio mode selecto
 
 # Operator Structures
 
-| I | `SSSS` | full FM tree: `(1→2→3)` and `4` both modulate `5` | 1 | 4 | op 1 (depth 4) |
-| II | `SSSP` | true 4-op stack `1→2→3→4`, plus sine `5` | 2 | 4 | op 1 (depth 4) |
-| III | `PSSP` | 3-op stack `1→2→3`, plus sines `4`, `5` | 3 | 3 | op 1 (depth 3) |
-| IV | `PPSP` | FM pair `1→2`, plus sines `3`, `4`, `5` | 4 | 2 | op 1 (depth 2) |
-| V | `PPPP` | five parallel sines (pure additive) | 5 | 1 | op 1 (depth 1) |
-| VI | `PPPF` | FM pair `4→5`, plus sines `1`, `2`, `3` | 4 | 2 | **op 5 (depth 1)** |
-| VII | `PPFF` | FM pairs `1→2` and `4→5`, plus sine `3` | 3 | 2 | **op 2 (depth 1)** |
-| VIII| `PFFF` | 3-op stack `1→2→3` and FM pair `4→5` | 2 | 3 | **op 3 (depth 1)** |
+| # | ID | Structure | Carriers | Max depth | Feedback on |
+|---|----|-----------|----------|-----------|-------------|
+| I    | `SSSS` | full FM tree: `(1→2→3)` and `4` both modulate `5` | 1 | 4 | op 1 (depth 4) |
+| II   | `SSSP` | true 4-op stack `1→2→3→4`, plus sine `5` | 2 | 4 | op 1 (depth 4) |
+| III  | `PSSP` | 3-op stack `1→2→3`, plus sines `4`, `5` | 3 | 3 | op 1 (depth 3) |
+| IV   | `PPSP` | FM pair `1→2`, plus sines `3`, `4`, `5` | 4 | 2 | op 1 (depth 2) |
+| V    | `PPPP` | five parallel sines (pure additive) | 5 | 1 | op 1 (depth 1) |
+| VI   | `PPPF` | FM pair `4→5`, plus sines `1`, `2`, `3` | 4 | 2 | **op 5 (depth 1)** |
+| VII  | `PPFF` | FM pairs `1→2` and `4→5`, plus sine `3` | 3 | 2 | **op 2 (depth 1)** |
+| VIII | `PFFF` | 3-op stack `1→2→3` and FM pair `4→5` | 2 | 3 | **op 3 (depth 1)** |
 
 # Phase Violence
 

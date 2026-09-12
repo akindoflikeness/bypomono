@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS ?= -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter
-CPPFLAGS = -Isrc -Isrc/dsp
+CPPFLAGS = -Isrc -Isrc/dsp -include src/compat.h
 
 DSP_SRC = $(wildcard src/dsp/*.c)
 DSP_OBJ = $(DSP_SRC:.c=.o)
@@ -51,7 +51,8 @@ dist: blow-your-phase-off-gui
 	rm -rf $(DIST)
 
 clean:
-	rm -f $(DSP_OBJ) $(TEST_OBJ) $(GUI_OBJ) src/audio.o src/midi.o src/app.o \
-	      blow-your-phase-off blow-your-phase-off-gui bypo-tests
+	rm -f $(DSP_OBJ) $(TEST_OBJ) $(GUI_OBJ) $(PIC_OBJ) src/audio.o src/midi.o \
+	      src/app.o blow-your-phase-off blow-your-phase-off-gui bypo-tests \
+	      bypo.clap
 
 .PHONY: all check clean dist

@@ -97,6 +97,7 @@ typedef struct {
     EngageGate gate;
     bool engine_alive;
     bool engaged;
+    float applied_drone_hz;
 } Plug;
 
 static double getv(const Plug *p, int id) {
@@ -175,7 +176,13 @@ static void apply_vals(Plug *p) {
     State st = voice_pair_state(&p->voice);
     st.chain = want;
     voice_pair_set_state(&p->voice, st);
-    voice_pair_glide_to_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
+    /* glide only when the hz itself moved: glide_to_hz retriggers the
+       breath gesture and overrides a sounding note's pitch */
+    float hz = (float)getv(p, P_DRONE_HZ);
+    if (hz != p->applied_drone_hz) {
+        p->applied_drone_hz = hz;
+        voice_pair_glide_to_hz(&p->voice, hz);
+    }
     atomic_store_explicit(&p->dirty, false, memory_order_relaxed);
 }
 
@@ -583,6 +590,7 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     p->sr = sr;
     voice_pair_init(&p->voice, (float)sr, patch_of_vals(p));
     voice_pair_set_freq_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
+    p->applied_drone_hz = (float)getv(p, P_DRONE_HZ);
     /* born in the right chain: nothing to crossfade from on insert */
     if (getv(p, P_DRONE) <= 0.5) {
         Chain c;

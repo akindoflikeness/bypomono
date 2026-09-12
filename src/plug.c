@@ -1,42 +1,11 @@
-#include <clap/clap.h>
 #include <math.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "dsp/dsp.h"
+#include "plug.h"
 
-extern bool session_from_json(const char *json, Session *out);
-extern char *session_to_json(const Session *s);
-
-#define BEND_SEMITONES 2.0f
-
-/* ---------- parameters (ids are permanent; append only) ---------- */
-
-enum {
-    P_DRONE, P_DRONE_HZ, P_ALGORITHM, P_RATIO_MODE, P_INDEX, P_RIP, P_FB,
-    P_GLIDE, P_FIELD, P_CURVE, P_RELEASE, P_LEVEL,
-    P_OP1, P_OP2, P_OP3, P_OP4, P_OP5,
-    P_MIX, P_GHOST, P_DECAY, P_DAMP, P_HAUNT,
-    P_CH_ON, P_CH_MIX, P_CH_SYNC, P_CH_DIV, P_CH_RATE, P_CH_SPREAD, P_CH_SIZE,
-    P_CH_WARP, P_CH_DIM, P_CH_TAIL,
-    P_SH_ON, P_SH_SRC, P_SH_TUNING, P_SH_SCALE, P_SH_ROOT, P_SH_RANGE,
-    P_SH_RATE,
-    P_WARMTH,
-    P_COUNT
-};
-
-typedef enum { K_FLOAT, K_STEP, K_ONOFF } ParamKind;
-
-typedef struct {
-    const char *name;
-    const char *module;
-    double min, max, def;
-    ParamKind kind;
-} ParamSpec;
-
-static const ParamSpec SPEC[P_COUNT] = {
+const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_DRONE] = {"DRONE", "", 0, 1, 0, K_ONOFF},
     [P_DRONE_HZ] = {"drone hz", "", 27.5, 440, 110, K_FLOAT},
     [P_ALGORITHM] = {"algorithm", "", 0, 7, 0, K_STEP},
@@ -79,37 +48,20 @@ static const ParamSpec SPEC[P_COUNT] = {
     [P_WARMTH] = {"warmth", "", 0, 1, 0.5, K_FLOAT},
 };
 
-/* ---------- the plugin ---------- */
-
-typedef struct {
-    clap_plugin_t plugin;
-    const clap_host_t *host;
-    double sr;
-    bool active;
-    _Atomic double vals[P_COUNT];
-    _Atomic bool dirty;
-    /* audio-thread engine */
-    VoicePair voice;
-    StereoVerb verb;
-    Melody melody;
-    Chandas chandas;
-    Tape tape;
-    EngageGate gate;
-    bool engine_alive;
-    bool engaged;
-    float applied_drone_hz;
-} Plug;
-
-static double getv(const Plug *p, int id) {
+double plug_getv(const Plug *p, int id) {
     return atomic_load_explicit(&((Plug *)p)->vals[id], memory_order_relaxed);
 }
 
-static void setv(Plug *p, int id, double v) {
-    const ParamSpec *s = &SPEC[id];
+void plug_setv(Plug *p, int id, double v) {
+    const ParamSpec *s = &PLUG_SPEC[id];
     if (v < s->min) v = s->min;
     if (v > s->max) v = s->max;
     atomic_store_explicit(&p->vals[id], v, memory_order_relaxed);
 }
+
+#define getv plug_getv
+#define setv plug_setv
+#define SPEC PLUG_SPEC
 
 static Patch patch_of_vals(const Plug *p) {
     int alg = (int)lround(getv(p, P_ALGORITHM));
@@ -125,6 +77,19 @@ static Patch patch_of_vals(const Plug *p) {
     for (int i = 0; i < NUM_OPS; i++)
         patch.ops[i].enabled = getv(p, P_OP1 + i) > 0.5;
     return patch;
+}
+
+static Chain chain_of_vals(const Plug *p) {
+    Chain want;
+    if (getv(p, P_DRONE) > 0.5) {
+        want = chain_default();
+    } else {
+        want.amp.kind = AMP_ENVELOPE;
+        want.amp.env = env_params_default();
+        want.amp.env.curve = (float)getv(p, P_CURVE);
+        want.amp.env.release_s = (float)getv(p, P_RELEASE);
+    }
+    return want;
 }
 
 /* audio thread: push the atomics into the engine */
@@ -164,17 +129,8 @@ static void apply_vals(Plug *p) {
 
     /* polite in the DAW: silent until notes unless DRONE is thrown */
     p->engaged = getv(p, P_DRONE) > 0.5;
-    Chain want;
-    if (p->engaged) {
-        want = chain_default();
-    } else {
-        want.amp.kind = AMP_ENVELOPE;
-        want.amp.env = env_params_default();
-        want.amp.env.curve = (float)getv(p, P_CURVE);
-        want.amp.env.release_s = (float)getv(p, P_RELEASE);
-    }
     State st = voice_pair_state(&p->voice);
-    st.chain = want;
+    st.chain = chain_of_vals(p);
     voice_pair_set_state(&p->voice, st);
     /* glide only when the hz itself moved: glide_to_hz retriggers the
        breath gesture and overrides a sounding note's pitch */
@@ -184,11 +140,12 @@ static void apply_vals(Plug *p) {
         voice_pair_glide_to_hz(&p->voice, hz);
     }
     atomic_store_explicit(&p->dirty, false, memory_order_relaxed);
+    atomic_store_explicit(&p->host_touched, true, memory_order_relaxed);
 }
 
 /* ---------- session <-> vals (state extension) ---------- */
 
-static Session session_of_vals(const Plug *p) {
+Session plug_session_of_vals(const Plug *p) {
     Session s = session_default();
     s.patch = patch_of_vals(p);
     s.verb.mix = (float)getv(p, P_MIX);
@@ -260,10 +217,110 @@ static void vals_of_session(Plug *p, const Session *s) {
     atomic_store_explicit(&p->dirty, true, memory_order_relaxed);
 }
 
+/* ---------- editor events (audio thread) ---------- */
+
+static void mirror_patch_vals(Plug *p, const Patch *patch) {
+    int alg = 0;
+    for (int i = 0; i < 8; i++)
+        if (ALGORITHMS[i] == patch->algorithm) alg = i;
+    setv(p, P_ALGORITHM, alg);
+    setv(p, P_RATIO_MODE, (double)patch->ratio_mode);
+    setv(p, P_INDEX, patch->index);
+    setv(p, P_RIP, patch->rip);
+    setv(p, P_FB, patch->feedback);
+    setv(p, P_GLIDE, patch->glide_seconds);
+    setv(p, P_FIELD, patch->field);
+    setv(p, P_CURVE, patch->curve);
+    setv(p, P_LEVEL, patch->master_level);
+    for (int i = 0; i < NUM_OPS; i++)
+        setv(p, P_OP1 + i, patch->ops[i].enabled ? 1 : 0);
+}
+
+static void apply_gui_event(Plug *p, Event ev) {
+    switch (ev.kind) {
+    case EV_SET_PATCH:
+        voice_pair_set_patch(&p->voice, ev.u.patch);
+        verb_configure(&p->verb, voice_pair_patch(&p->voice),
+                       voice_pair_compiled(&p->voice));
+        mirror_patch_vals(p, &ev.u.patch);
+        break;
+    case EV_SET_VERB:
+        verb_set_params(&p->verb, ev.u.verb);
+        setv(p, P_MIX, ev.u.verb.mix);
+        setv(p, P_GHOST, ev.u.verb.ghost);
+        setv(p, P_DECAY, ev.u.verb.decay);
+        setv(p, P_DAMP, ev.u.verb.damp);
+        setv(p, P_HAUNT, ev.u.verb.haunt);
+        break;
+    case EV_SET_MELODY:
+        if (p->melody.params.enabled && !ev.u.melody.enabled)
+            voice_pair_note_off(&p->voice);
+        melody_set_params(&p->melody, ev.u.melody);
+        setv(p, P_SH_ON, ev.u.melody.enabled ? 1 : 0);
+        setv(p, P_SH_SRC, ev.u.melody.source == HOLD_XORSHIFT ? 1 : 0);
+        setv(p, P_SH_TUNING, (double)ev.u.melody.tuning);
+        setv(p, P_SH_SCALE, (double)ev.u.melody.scale);
+        setv(p, P_SH_ROOT, (double)ev.u.melody.root_midi);
+        setv(p, P_SH_RANGE, (double)ev.u.melody.range_degrees);
+        setv(p, P_SH_RATE, ev.u.melody.rate_hz);
+        break;
+    case EV_SET_CHANDAS:
+        chandas_set_params(&p->chandas, ev.u.chandas);
+        setv(p, P_CH_ON, ev.u.chandas.enabled ? 1 : 0);
+        setv(p, P_CH_MIX, ev.u.chandas.mix);
+        setv(p, P_CH_SYNC, ev.u.chandas.sync ? 1 : 0);
+        setv(p, P_CH_DIV, (double)ev.u.chandas.division);
+        setv(p, P_CH_RATE, ev.u.chandas.rate_hz);
+        setv(p, P_CH_SPREAD, ev.u.chandas.spread);
+        setv(p, P_CH_SIZE, ev.u.chandas.size);
+        setv(p, P_CH_WARP, ev.u.chandas.warp);
+        setv(p, P_CH_DIM, ev.u.chandas.dimension);
+        setv(p, P_CH_TAIL, ev.u.chandas.tail);
+        break;
+    case EV_SET_WARMTH:
+        tape_set(&p->tape, ev.u.f);
+        setv(p, P_WARMTH, ev.u.f);
+        break;
+    case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
+    case EV_SET_TEMPO: chandas_set_tempo(&p->chandas, ev.u.f); break;
+    case EV_GLIDE_TO:
+        voice_pair_glide_to_hz(&p->voice, ev.u.f);
+        p->applied_drone_hz = ev.u.f;
+        setv(p, P_DRONE_HZ, ev.u.f);
+        break;
+    case EV_NOTE_OFF: voice_pair_note_off(&p->voice); break;
+    case EV_BEND: voice_pair_set_bend_semitones(&p->voice, ev.u.f); break;
+    case EV_NOTE_ON:
+        voice_pair_note_on(&p->voice, ev.u.note.hz, ev.u.note.velocity);
+        chandas_note_pulse(&p->chandas);
+        break;
+    case EV_SET_CHAIN: {
+        State next = voice_pair_state(&p->voice);
+        next.chain = ev.u.chain;
+        voice_pair_set_state(&p->voice, next);
+        if (ev.u.chain.amp.kind == AMP_ENVELOPE) {
+            setv(p, P_CURVE, ev.u.chain.amp.env.curve);
+            setv(p, P_RELEASE, ev.u.chain.amp.env.release_s);
+        }
+        break;
+    }
+    case EV_ENGAGE:
+        p->engaged = ev.u.flag;
+        setv(p, P_DRONE, ev.u.flag ? 1 : 0);
+        break;
+    case EV_RECORD:
+        p->rec_on = ev.u.flag;
+        break;
+    case EV_SET_MIDI_DRIVING:
+        break;
+    }
+}
+
 /* ---------- rendering ---------- */
 
 typedef struct {
     Plug *p;
+    App *gapp;
     float *l, *r;
     uint32_t base;
 } Emit;
@@ -276,11 +333,33 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     w = tape_process(&p->tape, w);
     bool notes_live = voice_pair_chain(&p->voice)->amp.kind == AMP_ENVELOPE;
     float g = engage_gate_next(&p->gate, p->engaged || notes_live);
-    e->l[e->base + n] = soft_clip(w.l * g);
-    e->r[e->base + n] = soft_clip(w.r * g);
+    float l = soft_clip(w.l * g), r = soft_clip(w.r * g);
+    e->l[e->base + n] = l;
+    e->r[e->base + n] = r;
+    App *gapp = e->gapp;
+    if (gapp) {
+        p->viz_decim++;
+        p->peak_acc[0] = fmaxf(p->peak_acc[0], fabsf(l));
+        p->peak_acc[1] = fmaxf(p->peak_acc[1], fabsf(r));
+        if (p->viz_decim >= VIZ_DECIMATE) {
+            p->viz_decim = 0;
+            VizFrame vf;
+            memcpy(vf.ops, frame->ops, sizeof vf.ops);
+            vf.l = l;
+            vf.r = r;
+            vf.peak[0] = p->peak_acc[0];
+            vf.peak[1] = p->peak_acc[1];
+            VizRing_push(&gapp->viz, vf);
+            p->peak_acc[0] = p->peak_acc[1] = 0.0f;
+        }
+        if (p->rec_on) {
+            RecRing_push(&gapp->rec, l);
+            RecRing_push(&gapp->rec, r);
+        }
+    }
 }
 
-static void render_span(Plug *p, float *l, float *r, uint32_t base,
+static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
                         uint32_t count) {
     uint32_t done = 0;
     while (done < count) {
@@ -288,7 +367,8 @@ static void render_span(Plug *p, float *l, float *r, uint32_t base,
         if (melody_samples_until_fire(&p->melody, &until) && until == 0) {
             float hz = melody_fire(&p->melody);
             voice_pair_note_off(&p->voice);
-            float vel = velocity_for_level(voice_pair_patch(&p->voice)->master_level);
+            float vel =
+                velocity_for_level(voice_pair_patch(&p->voice)->master_level);
             voice_pair_note_on(&p->voice, hz, vel);
             chandas_note_pulse(&p->chandas);
         }
@@ -296,7 +376,7 @@ static void render_span(Plug *p, float *l, float *r, uint32_t base,
         if (melody_samples_until_fire(&p->melody, &until) && until < run)
             run = (uint32_t)until;
         if (run < 1) run = 1;
-        Emit e = {p, l, r, base + done};
+        Emit e = {p, gapp, l, r, base + done};
         voice_pair_render_frames(&p->voice, run, emit_frame, &e);
         melody_advance(&p->melody, run);
         done += run;
@@ -360,6 +440,12 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
     if (pr->transport && (pr->transport->flags & CLAP_TRANSPORT_HAS_TEMPO))
         chandas_set_tempo(&p->chandas, (float)pr->transport->tempo);
 
+    App *gapp = atomic_load_explicit(&p->gui_app, memory_order_acquire);
+    if (gapp) {
+        Event ev;
+        while (EventRing_pop(&gapp->ctrl, &ev)) apply_gui_event(p, ev);
+    }
+
     if (atomic_load_explicit(&p->dirty, memory_order_relaxed)) apply_vals(p);
 
     const clap_input_events_t *in = pr->in_events;
@@ -378,11 +464,12 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
             idx++;
         }
         if (next > frame) {
-            render_span(p, l, r, frame, next - frame);
+            render_span(p, gapp, l, r, frame, next - frame);
             frame = next;
         }
     }
     while (idx < n_ev) handle_event(p, in->get(in, idx++));
+    if (gapp) pitch_store(&gapp->pitch, voice_pair_target_hz(&p->voice));
     return CLAP_PROCESS_CONTINUE;
 }
 
@@ -454,23 +541,15 @@ static bool params_value_to_text(const clap_plugin_t *pl, clap_id id,
     int v = (int)lround(value);
     switch (id) {
     case P_ALGORITHM: {
-        static const char *const ROMAN[8] = {"I", "II", "III", "IV",
-                                             "V", "VI", "VII", "VIII"};
         snprintf(out, size, "%s", ROMAN[v & 7]);
         return true;
     }
-    case P_RATIO_MODE: {
-        static const char *const M[5] = {"harmonic", "fibonacci", "golden",
-                                         "mirror", "plastic"};
-        snprintf(out, size, "%s", M[v < 0 ? 0 : (v > 4 ? 4 : v)]);
+    case P_RATIO_MODE:
+        snprintf(out, size, "%s", mode_name_of((RatioMode)(v < 0 ? 0 : v % 5)));
         return true;
-    }
-    case P_SH_SCALE: {
-        size_t n;
-        (void)n;
+    case P_SH_SCALE:
         snprintf(out, size, "%s", scale_name((Scale)(v & 7)));
         return true;
-    }
     case P_SH_TUNING:
         snprintf(out, size, "%s", tuning_name((Tuning)(v < 0 ? 0 : v % 5)));
         return true;
@@ -522,7 +601,7 @@ static const clap_plugin_params_t EXT_PARAMS = {
 
 static bool state_save(const clap_plugin_t *pl, const clap_ostream_t *stream) {
     Plug *p = pl->plugin_data;
-    Session s = session_sanitize(session_of_vals(p));
+    Session s = session_sanitize(plug_session_of_vals(p));
     char *json = session_to_json(&s);
     if (!json) return false;
     size_t len = strlen(json), at = 0;
@@ -581,6 +660,7 @@ static bool plug_init(const clap_plugin_t *plugin) { return true; }
 
 static void plug_destroy(const clap_plugin_t *plugin) {
     Plug *p = plugin->plugin_data;
+    if (p->gui_state) PLUG_EXT_GUI.destroy(plugin);
     free(p);
 }
 
@@ -592,15 +672,9 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     voice_pair_set_freq_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     p->applied_drone_hz = (float)getv(p, P_DRONE_HZ);
     /* born in the right chain: nothing to crossfade from on insert */
-    if (getv(p, P_DRONE) <= 0.5) {
-        Chain c;
-        c.amp.kind = AMP_ENVELOPE;
-        c.amp.env = env_params_default();
-        c.amp.env.curve = (float)getv(p, P_CURVE);
-        c.amp.env.release_s = (float)getv(p, P_RELEASE);
-        voice_set_chain(&p->voice.voices[0], c);
-        voice_set_chain(&p->voice.voices[1], c);
-    }
+    Chain c = chain_of_vals(p);
+    voice_set_chain(&p->voice.voices[0], c);
+    voice_set_chain(&p->voice.voices[1], c);
     verb_init(&p->verb, (float)sr);
     melody_init(&p->melody, (float)sr, melody_params_default());
     chandas_init(&p->chandas, (float)sr);
@@ -640,6 +714,9 @@ static const void *plug_get_extension(const clap_plugin_t *plugin,
     if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &EXT_NOTE_PORTS;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &EXT_PARAMS;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &EXT_STATE;
+    if (strcmp(id, CLAP_EXT_GUI) == 0) return &PLUG_EXT_GUI;
+    if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0) return &PLUG_EXT_TIMER;
+    if (strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT) == 0) return &PLUG_EXT_FD;
     return NULL;
 }
 
@@ -695,6 +772,7 @@ static const clap_plugin_t *factory_create(const clap_plugin_factory_t *f,
     p->plugin = TEMPLATE;
     p->plugin.plugin_data = p;
     p->host = host;
+    p->sr = 48000.0;
     for (int i = 0; i < P_COUNT; i++)
         atomic_store_explicit(&p->vals[i], SPEC[i].def, memory_order_relaxed);
     return &p->plugin;

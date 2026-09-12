@@ -169,6 +169,9 @@ const char *user_data_root(void) {
     if (state == 0) {
         const char *xdg = getenv("XDG_DATA_HOME");
         const char *home = getenv("HOME");
+        /* a flatpak host rewrites XDG_DATA_HOME to its app-private .var
+           dir; ignore it so the plugin shares the standalone's data home */
+        if (xdg && strstr(xdg, "/.var/app/")) xdg = NULL;
         if (xdg && xdg[0] == '/') {
             snprintf(buf, sizeof buf, "%s/bypo", xdg);
             state = 1;
@@ -295,6 +298,13 @@ const char *asset_dir(void) {
             if (!is_dir_path(buf) && exe_dir()) {
                 char cand[PATHBUF];
                 snprintf(cand, sizeof cand, "%s/assets", exe_dir());
+                if (is_dir_path(cand)) snprintf(buf, sizeof buf, "%s", cand);
+            }
+            if (!is_dir_path(buf)) {
+                /* hosted as a plugin: the exe is the DAW, so fall back to
+                   the shared data dir */
+                char cand[PATHBUF];
+                snprintf(cand, sizeof cand, "%s/assets", user_data_root());
                 if (is_dir_path(cand)) snprintf(buf, sizeof buf, "%s", cand);
                 else snprintf(buf, sizeof buf, "assets");
             }

@@ -327,10 +327,12 @@ void draw_title_bar(App *a, Ui *ui, Rct r) {
         float w = roundf(side + lw + 2.0f * GAP);
         float h = roundf(fmaxf(side, lh) + 2.0f * GAP);
         Rct ir = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        if (icon_button(ui, ui_id("record button"), ir, ICON_RECORD, label,
-                        a->recording, 1.0f))
-            console_run_line(a, "rec");
-        x = ir.x0 - GROUP;
+        if (!a->hosted) {
+            if (icon_button(ui, ui_id("record button"), ir, ICON_RECORD, label,
+                            a->recording, 1.0f))
+                console_run_line(a, "rec");
+            x = ir.x0 - GROUP;
+        }
     }
 
     draw_preset_bar(a, ui, rct(content.x0, content.y0, x, content.y1));

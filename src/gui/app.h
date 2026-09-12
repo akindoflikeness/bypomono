@@ -185,6 +185,7 @@ typedef struct App {
     Chain chain;
     bool engaged;
     bool restored;
+    bool hosted; /* running as a plugin editor: host notes always may drive */
 
     /* audio rig */
     AudioOut audio;
@@ -361,6 +362,11 @@ void console_run_line(App *a, const char *line);
 void console_tab_complete(App *a);
 void draw_footer(App *a, Ui *ui, Rct r);
 void draw_console_drawer(App *a, Ui *ui, Rct footer);
+
+/* frame.c: one full UI frame onto ui->canvas; shared by the SDL shell and
+   the plugin editor */
+void app_frame(App *a, Ui *ui);
+void app_init_defaults(App *a);
 
 /* shared app helpers (centre.c) */
 extern const char *const ROMAN[8];

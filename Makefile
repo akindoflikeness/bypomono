@@ -32,13 +32,16 @@ check: bypo-tests
 %.o: %.c src/dsp/dsp.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-PIC_OBJ = $(DSP_SRC:.c=.pic.o) src/gui/json_session.pic.o src/plug.pic.o
+GUI_PIC = $(filter-out src/gui/gui_main.pic.o,$(GUI_SRC:.c=.pic.o))
+PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/audio.pic.o src/midi.pic.o \
+          src/plug.pic.o src/plug_gui.pic.o
 
-%.pic.o: %.c src/dsp/dsp.h
-	$(CC) $(CFLAGS) $(CPPFLAGS) -fPIC -c $< -o $@
+%.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -fPIC -c $< -o $@
 
 bypo.clap: $(PIC_OBJ)
-	$(CC) $(CFLAGS) -shared -o $@ $^ -lm
+	$(CC) $(CFLAGS) -shared -o $@ $^ -lm -lasound -lpthread -lX11 \
+	      $(shell pkg-config --libs freetype2)
 
 DIST = bypomono-linux-x86_64
 

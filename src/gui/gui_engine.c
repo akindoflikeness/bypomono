@@ -383,7 +383,7 @@ void gui_drain_viz(App *a) {
 }
 
 void gui_sync_chain(App *a) {
-    bool notes_drive = midi_driving(a) || a->shadow_melody.enabled;
+    bool notes_drive = midi_driving(a) || a->shadow_melody.enabled || a->hosted;
     Chain want;
     if (notes_drive && !a->engaged) {
         want.amp.kind = AMP_ENVELOPE;

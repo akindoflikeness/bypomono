@@ -1,0 +1,63 @@
+{
+  "patch": {
+    "algorithm": 0,
+    "ratio_mode": "GoldenMirror",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 0.381966,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 0.618034,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 1.618034,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 2.6180341,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.4,
+    "index": 0.15031625,
+    "rip": 0.51,
+    "master_level": 0.455,
+    "glide_seconds": 0.000032375607,
+    "field": 0.44,
+    "curve": 0.91
+  },
+  "verb": {
+    "mix": 1.0,
+    "ghost": 0.23,
+    "rt60": 0.05,
+    "damp": 0.37,
+    "haunt": 0.56
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "PlasticPowers",
+    "scale": "PhrygianDominant",
+    "root_midi": 41,
+    "range_degrees": 13,
+    "rate_hz": 8.0,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 93.0,
+  "warmth": 0.5
+}

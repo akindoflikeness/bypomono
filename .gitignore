@@ -1,0 +1,7 @@
+*.o
+blow-your-phase-off
+blow-your-phase-off-gui
+bypo-tests
+bypomono-linux-x86_64*
+*.pic.o
+bypo.clap

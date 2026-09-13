@@ -16,17 +16,8 @@ typedef struct {
 
 static const FaceSpec FACES[FACE_COUNT] = {
     {"pixeloid_mono", "PixeloidMono.ttf", 9},
-    {"pixeloid_sans", "PixeloidSans.ttf", 9},
     {"unifontexmono", "UnifontExMono.ttf", 16},
-    {"modern_dos", "ModernDOS8x16.ttf", 16},
     {"european_teletext", "EuropeanTeletext.ttf", 16},
-    {"pixel_operator", "PixelOperator.ttf", 16},
-    {"better_vcr", "BetterVCR 25.09.ttf", 16},
-    {"enter_command", "EnterCommand.ttf", 16},
-    {"scriptorium", "Scriptorium.ttf", 16},
-    {"cyborgsister", "CyborgSister.ttf", 16},
-    {"alkhemikal", "Alkhemikal.ttf", 16},
-    {"pixantiqua", "PixAntiqua.ttf", 0},
 };
 
 static FT_Library g_ft;

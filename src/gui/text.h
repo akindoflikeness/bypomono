@@ -3,20 +3,12 @@
 
 #include "canvas.h"
 
-/* face indices mirror the Rust FACES table order */
+/* the three faces the program draws with: UI text, readouts, and a
+   fallback with wide glyph coverage for symbols the other two lack */
 enum {
     FACE_PIXELOID_MONO = 0,
-    FACE_PIXELOID_SANS,
     FACE_UNIFONTEXMONO,
-    FACE_MODERN_DOS,
     FACE_EUROPEAN_TELETEXT,
-    FACE_PIXEL_OPERATOR,
-    FACE_BETTER_VCR,
-    FACE_ENTER_COMMAND,
-    FACE_SCRIPTORIUM,
-    FACE_CYBORGSISTER,
-    FACE_ALKHEMIKAL,
-    FACE_PIXANTIQUA,
     FACE_COUNT
 };
 

@@ -23,8 +23,7 @@ one check that would have caught Xilla.
 
 ## Sprites
 
-Not a font, but it lives under the same gate and Billy asked for it to be
-tracked here (2026-08-28).
+Not a font, but it lives under the same gate and is tracked here.
 
 | role | asset | licence | attribution |
 |---|---|---|---|
@@ -71,13 +70,12 @@ line to add if the in-app credits panel wants to be generous anyway:
 Spacebar key art from Pixel Keys x16 by JoshuaJennerDev.
 ```
 
-**Still to do:** the credits panel itself. Billy, 2026-08-28: *"we can work in
-the credits ui element at the end and ship with credits in the file
-structure."* The wording above is what it has to carry; nothing renders it yet.
+**Still to do:** the credits panel itself. The wording above is what it has to
+carry; nothing renders it yet.
 
 ## The over-the-top version
 
-Billy asked for both, so: the credits should be **set in the fonts they credit.**
+The credits should be **set in the fonts they credit.**
 
 Each line is typeset in the face it names. The Junior Technician's credit appears
 in Enter Command, the Monk's in Scriptorium, the entity's in Unifont — so the

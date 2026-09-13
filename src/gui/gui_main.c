@@ -1,3 +1,6 @@
+/* SDL_MAIN_HANDLED: on Windows SDL.h otherwise renames main() and expects
+   SDL2main.lib to supply WinMain; we keep our own main and tell SDL so. */
+#define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +53,7 @@ static float pick_scale(void) {
 }
 
 int main(void) {
+    SDL_SetMainReady();
     App *a = &g_app;
     app_init_defaults(a);
     prepare_preset_dir();

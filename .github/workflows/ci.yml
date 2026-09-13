@@ -1,16 +1,23 @@
+# Linux build and engine tests on every push to main and every pull request.
+# Linux is the free lane (1x billing, and free once the repo is public); the
+# macOS and Windows runners live in release.yml and only run on a tag or a
+# manual dispatch, so nothing expensive starts on its own.
 name: ci
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -43,12 +50,5 @@ jobs:
           name: bypomono-linux-x86_64
           path: |
             bypomono-linux-x86_64.tar.gz
-            bypo.clap
-
-      - name: attach to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            bypomono-linux-x86_64.tar.gz
+            bypomono-linux-x86_64-SHA256SUMS.txt
             bypo.clap

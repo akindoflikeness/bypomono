@@ -1,8 +1,13 @@
 #include "audio.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #define CHUNK_FRAMES 256
+
+#if defined(__linux__)
+
+/* ---------- ALSA: the original backend ---------- */
 
 int audio_out_open(AudioOut *a) {
     a->pcm = NULL;
@@ -62,3 +67,68 @@ void audio_out_stop(AudioOut *a) {
     snd_pcm_close(a->pcm);
     a->pcm = NULL;
 }
+
+#else
+
+/* ---------- SDL2 audio: macOS (CoreAudio) and Windows (WASAPI) ----------
+   SDL is already a hard dependency of the GUI, and its audio subsystem
+   fronts the native API on both platforms; asking for exactly the format
+   the engine wants (48 kHz float stereo) makes SDL convert on our behalf,
+   so the engine sees the same stream it does under ALSA. */
+
+#include <SDL2/SDL.h>
+
+static void sdl_callback(void *ud, Uint8 *stream, int len) {
+    AudioOut *a = ud;
+    size_t frames = (size_t)len / ((size_t)a->channels * sizeof(float));
+    if (a->render && atomic_load(&a->running))
+        a->render(a->userdata, (float *)stream, frames, a->channels);
+    else
+        memset(stream, 0, (size_t)len);
+}
+
+int audio_out_open(AudioOut *a) {
+    a->dev = 0;
+    a->render = NULL;
+    atomic_store(&a->running, false);
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        fprintf(stderr, "audio: %s\n", SDL_GetError());
+        return -1;
+    }
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    want.freq = 48000;
+    want.format = AUDIO_F32SYS;
+    want.channels = 2;
+    want.samples = CHUNK_FRAMES;
+    want.callback = sdl_callback;
+    want.userdata = a;
+    SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (dev == 0) {
+        fprintf(stderr, "audio: %s\n", SDL_GetError());
+        return -1;
+    }
+    a->dev = dev;
+    a->rate = (unsigned)have.freq;
+    a->channels = have.channels;
+    return 0;
+}
+
+int audio_out_start(AudioOut *a, AudioRender render, void *userdata) {
+    if (!a->dev) return -1;
+    a->render = render;
+    a->userdata = userdata;
+    atomic_store(&a->running, true);
+    SDL_PauseAudioDevice((SDL_AudioDeviceID)a->dev, 0);
+    return 0;
+}
+
+void audio_out_stop(AudioOut *a) {
+    if (!a->dev) return;
+    atomic_store(&a->running, false);
+    SDL_PauseAudioDevice((SDL_AudioDeviceID)a->dev, 1);
+    SDL_CloseAudioDevice((SDL_AudioDeviceID)a->dev);
+    a->dev = 0;
+}
+
+#endif

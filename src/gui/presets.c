@@ -11,6 +11,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 #define PATHBUF 1024
 #define JOINBUF (PATHBUF + 320)
 #define STOCK_LEDGER ".stock-seen"
@@ -130,20 +136,59 @@ static void trim_into(const char *raw, char *out, size_t out_len) {
 
 /* ---------- directory resolution ---------- */
 
+/* full path of the running executable, or -1 */
+static int exe_path(char *buf, size_t len) {
+#if defined(__linux__)
+    ssize_t n = readlink("/proc/self/exe", buf, len - 1);
+    if (n <= 0) return -1;
+    buf[n] = 0;
+    return 0;
+#elif defined(__APPLE__)
+    uint32_t n = (uint32_t)len;
+    if (_NSGetExecutablePath(buf, &n) != 0) return -1;
+    char real[PATHBUF];
+    if (realpath(buf, real)) snprintf(buf, len, "%s", real);
+    return 0;
+#elif defined(_WIN32)
+    DWORD n = GetModuleFileNameA(NULL, buf, (DWORD)len);
+    if (n == 0 || n >= len) return -1;
+    for (char *p = buf; *p; p++)
+        if (*p == '\\') *p = '/';
+    return 0;
+#else
+    (void)buf; (void)len;
+    return -1;
+#endif
+}
+
+/* strip one trailing "/segment"; false if nothing is left */
+static bool strip_last(char *path) {
+    char *slash = strrchr(path, '/');
+    if (!slash || slash == path) return false;
+    *slash = 0;
+    return true;
+}
+
 static const char *exe_dir(void) {
     static char buf[PATHBUF];
     static int state = 0; /* 0 unknown, 1 ok, -1 fail */
     if (state == 0) {
-        ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
-        if (n > 0) {
-            buf[n] = 0;
-            char *slash = strrchr(buf, '/');
-            if (slash && slash != buf) {
-                *slash = 0;
-                state = 1;
-            } else {
-                state = -1;
+        if (exe_path(buf, sizeof buf) == 0 && strip_last(buf)) {
+            state = 1;
+#if defined(__APPLE__)
+            /* inside an .app bundle the binary sits at
+               Name.app/Contents/MacOS/; assets/ and presets/ travel beside
+               the .app, so anchor on the bundle's parent folder */
+            size_t n = strlen(buf);
+            const char *tail = "/Contents/MacOS";
+            size_t tn = strlen(tail);
+            if (n > tn && strcmp(buf + n - tn, tail) == 0) {
+                char up[PATHBUF];
+                snprintf(up, sizeof up, "%s", buf);
+                if (strip_last(up) && strip_last(up) && strip_last(up))
+                    snprintf(buf, sizeof buf, "%s", up);
             }
+#endif
         } else {
             state = -1;
         }
@@ -167,6 +212,27 @@ const char *user_data_root(void) {
     static char buf[PATHBUF];
     static int state = 0;
     if (state == 0) {
+#if defined(_WIN32)
+        const char *base = getenv("APPDATA");
+        if (!base) base = getenv("USERPROFILE");
+        if (base) {
+            snprintf(buf, sizeof buf, "%s/bypo", base);
+            for (char *p = buf; *p; p++)
+                if (*p == '\\') *p = '/';
+            state = 1;
+        } else {
+            state = -1;
+        }
+#elif defined(__APPLE__)
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(buf, sizeof buf, "%s/Library/Application Support/bypo",
+                     home);
+            state = 1;
+        } else {
+            state = -1;
+        }
+#else
         const char *xdg = getenv("XDG_DATA_HOME");
         const char *home = getenv("HOME");
         /* a flatpak host rewrites XDG_DATA_HOME to its app-private .var
@@ -181,6 +247,7 @@ const char *user_data_root(void) {
         } else {
             state = -1;
         }
+#endif
     }
     return state == 1 ? buf : NULL;
 }
@@ -244,6 +311,14 @@ static bool parse_user_dir(const char *text, const char *key, char *out,
 }
 
 static bool music_dir(char *out, size_t out_len) {
+#if defined(_WIN32)
+    const char *profile = getenv("USERPROFILE");
+    if (!profile) return false;
+    snprintf(out, out_len, "%s/Music", profile);
+    for (char *p = out; *p; p++)
+        if (*p == '\\') *p = '/';
+    return true;
+#else
     const char *home = getenv("HOME");
     if (home) {
         char cfg[PATHBUF];
@@ -258,6 +333,7 @@ static bool music_dir(char *out, size_t out_len) {
         return true;
     }
     return false;
+#endif
 }
 
 const char *recording_dir(void) {

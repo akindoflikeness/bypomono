@@ -1,9 +1,15 @@
+/* dladdr needs the GNU extensions visible before any libc header */
+#if !defined(_WIN32) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "app.h"
 
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -11,10 +17,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
-#elif defined(_WIN32)
-#include <windows.h>
+#endif
 #endif
 
 #define PATHBUF 1024
@@ -196,12 +205,81 @@ static const char *exe_dir(void) {
     return state == 1 ? buf : NULL;
 }
 
+/* full path of the module this code is linked into. exe_path() names the
+   host process, which for a plugin is the DAW; dladdr and
+   GetModuleHandleEx-from-address name the .clap itself. */
+static int module_path(char *buf, size_t len) {
+#if defined(_WIN32)
+    HMODULE h = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                                | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)(uintptr_t)&module_path, &h))
+        return -1;
+    DWORD n = GetModuleFileNameA(h, buf, (DWORD)len);
+    if (n == 0 || n >= len) return -1;
+    for (char *p = buf; *p; p++)
+        if (*p == '\\') *p = '/';
+    return 0;
+#else
+    Dl_info info;
+    if (!dladdr((void *)(uintptr_t)&module_path, &info) || !info.dli_fname)
+        return -1;
+    char real[PATHBUF];
+    if (realpath(info.dli_fname, real))
+        snprintf(buf, len, "%s", real);
+    else
+        snprintf(buf, len, "%s", info.dli_fname);
+    return 0;
+#endif
+}
+
+/* where resources sit relative to that module: inside a macOS bundle under
+   Contents/Resources, everywhere else beside the file */
+static const char *module_res_dir(void) {
+    static char buf[PATHBUF];
+    static int state = 0; /* 0 unknown, 1 ok, -1 fail */
+    if (state == 0) {
+        state = -1;
+        if (module_path(buf, sizeof buf) == 0 && strip_last(buf)) {
+            state = 1;
+#if defined(__APPLE__)
+            size_t n = strlen(buf);
+            const char *tail = "/Contents/MacOS";
+            size_t tn = strlen(tail);
+            if (n > tn && strcmp(buf + n - tn, tail) == 0)
+                snprintf(buf + n - tn, sizeof buf - (n - tn), "%s",
+                         "/Contents/Resources");
+#endif
+        }
+    }
+    return state == 1 ? buf : NULL;
+}
+
+/* first root that holds a directory called leaf; NULL roots are skipped */
+static bool first_dir_with(char out[PATHBUF], const char *leaf,
+                           const char *const *roots, int n) {
+    for (int i = 0; i < n; i++) {
+        if (!roots[i]) continue;
+        char cand[JOINBUF];
+        snprintf(cand, sizeof cand, "%s/%s", roots[i], leaf);
+        if (is_dir_path(cand)) {
+            snprintf(out, PATHBUF, "%.1023s", cand);
+            return true;
+        }
+    }
+    return false;
+}
+
 static const char *stock_dir(void) {
     static char buf[PATHBUF];
-    if (exe_dir()) {
-        snprintf(buf, sizeof buf, "%s/presets", exe_dir());
-    } else {
-        snprintf(buf, sizeof buf, "presets");
+    static bool done = false;
+    if (!done) {
+        const char *roots[] = {module_res_dir(), exe_dir()};
+        if (!first_dir_with(buf, "presets", roots, 2)) {
+            if (exe_dir()) snprintf(buf, sizeof buf, "%s/presets", exe_dir());
+            else snprintf(buf, sizeof buf, "presets");
+        }
+        done = true;
     }
     return buf;
 }
@@ -366,21 +444,12 @@ const char *asset_dir(void) {
     static char buf[PATHBUF];
     static bool done = false;
     if (!done) {
-        snprintf(buf, sizeof buf, "assets");
-        if (!is_dir_path(buf) && exe_dir()) {
-            char cand[PATHBUF];
-            snprintf(cand, sizeof cand, "%s/assets", exe_dir());
-            if (is_dir_path(cand)) snprintf(buf, sizeof buf, "%s", cand);
-        }
-        if (!is_dir_path(buf)) {
-            /* hosted as a plugin: the exe is the DAW, so fall back to
-               the shared data dir */
-            char cand[PATHBUF];
-            const char *root = user_data_root();
-            if (root) snprintf(cand, sizeof cand, "%s/assets", root);
-            if (root && is_dir_path(cand)) snprintf(buf, sizeof buf, "%s", cand);
-            else snprintf(buf, sizeof buf, "assets");
-        }
+        /* the module this code is linked into comes first, so a plugin finds
+           the assets that ship with it rather than the host's */
+        const char *roots[] = {module_res_dir(), ".", exe_dir(),
+                               user_data_root()};
+        if (!first_dir_with(buf, "assets", roots, 4))
+            snprintf(buf, sizeof buf, "assets");
         done = true;
     }
     return buf;

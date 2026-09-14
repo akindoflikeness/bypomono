@@ -99,6 +99,7 @@ void gui_in_text(Gui *g, const char *utf8, int n) {
 static void free_surface(Gui *g) {
     free(g->s.out_px);
     g->s.out_px = NULL;
+    g->s.src_px = NULL;
     free(g->xmap);
     g->xmap = NULL;
 }
@@ -108,6 +109,11 @@ static bool build_surface(Gui *g) {
     free_surface(g);
     s->win_w = (int)lroundf(DESIGN_W * g->scale);
     s->win_h = (int)lroundf(DESIGN_H * g->scale);
+    s->src_px = g->canvas.px;
+    s->src_w = g->canvas.w;
+    s->src_h = g->canvas.h;
+    g->have_hash = false; /* nothing on screen matches the new surface */
+    if (backend_scales_itself()) return true;
 
     s->out_px = malloc((size_t)s->win_w * s->win_h * 4);
     if (!s->out_px) return false;
@@ -141,11 +147,37 @@ static void magnify(Gui *g) {
     }
 }
 
+void gui_invalidate(Gui *g) { g->have_hash = false; }
+
+/* Content fingerprint, so a frame that redraws to the same pixels costs the
+   host nothing. Four independent lanes so the multiplies pipeline. */
+static uint64_t canvas_fingerprint(const Canvas *c) {
+    const uint64_t *p = (const uint64_t *)(const void *)c->px;
+    size_t n = (size_t)c->w * (size_t)c->h / 2;
+    uint64_t a = 0x243f6a8885a308d3ull, b = 0x13198a2e03707344ull;
+    uint64_t d = 0xa4093822299f31d0ull, e = 0x082efa98ec4e6c89ull;
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        a = (a ^ p[i]) * 0x100000001b3ull;
+        b = (b ^ p[i + 1]) * 0x100000001b3ull;
+        d = (d ^ p[i + 2]) * 0x100000001b3ull;
+        e = (e ^ p[i + 3]) * 0x100000001b3ull;
+    }
+    for (; i < n; i++) a = (a ^ p[i]) * 0x100000001b3ull;
+    return a ^ (b + 0x9e3779b97f4a7c15ull) ^ (d << 17) ^ (e >> 13);
+}
+
 /* ---------- one editor frame ---------- */
 
 static void gui_tick(Plug *p, Gui *g) {
     if (!g->created || !g->parented) return;
     backend_pump(g);
+    if (!g->shown) {
+        /* nothing to draw into; keep the clock current so the first frame
+           back does not see one huge dt */
+        g->last_time = now_s() - g->t0;
+        return;
+    }
 
     Ui *ui = &g->ui;
     ui->in = g->pending;
@@ -174,7 +206,12 @@ static void gui_tick(Plug *p, Gui *g) {
     app_frame(g->app, ui);
     ui->drag_prev = ui->in.mouse;
     g->app->quit = false; /* nothing in a plugin may end the host */
-    magnify(g);
+
+    uint64_t h = canvas_fingerprint(&g->canvas);
+    if (g->have_hash && h == g->last_hash) return;
+    g->last_hash = h;
+    g->have_hash = true;
+    if (!backend_scales_itself()) magnify(g);
     backend_present(g);
 }
 
@@ -211,9 +248,7 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
     static bool fonts_ready = false;
     if (!fonts_ready) {
         prepare_preset_dir();
-        if (text_init(asset_dir()) != 0)
-            fprintf(stderr, "bypo: fonts not found under %s/fonts\n",
-                    asset_dir());
+        text_init(asset_dir()); /* reports the source it loaded from itself */
         fonts_ready = true;
     }
 
@@ -366,6 +401,7 @@ static bool gui_show(const clap_plugin_t *pl) {
     if (!g || !g->parented) return false;
     backend_show(g);
     g->shown = true;
+    g->have_hash = false; /* the window may have come back empty */
     return true;
 }
 

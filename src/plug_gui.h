@@ -17,6 +17,8 @@ struct Gui {
     bool timer_on, fd_on;
     int fd; /* what fd_on registered */
     double t0, last_time;
+    uint64_t last_hash; /* canvas fingerprint last presented */
+    bool have_hash;
     /* input accumulated between timer ticks */
     UiInput pending;
     double last_click_time;

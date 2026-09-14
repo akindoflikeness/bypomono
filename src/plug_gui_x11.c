@@ -26,6 +26,8 @@ static void drop_image(X11Back *b) {
     b->img = NULL;
 }
 
+bool backend_scales_itself(void) { return false; }
+
 bool backend_open(Gui *g) {
     X11Back *b = calloc(1, sizeof *b);
     if (!b) return false;
@@ -185,6 +187,7 @@ void backend_pump(Gui *g) {
             break;
         case KeyPress: x_key(g, &e.xkey, true); break;
         case KeyRelease: x_key(g, &e.xkey, false); break;
+        case Expose: gui_invalidate(g); break;
         case EnterNotify: gui_in_inside(g, true); break;
         case LeaveNotify: gui_in_inside(g, false); break;
         default: break;

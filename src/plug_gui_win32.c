@@ -179,6 +179,8 @@ static bool register_class(void) {
 
 /* ---------- backend interface ---------- */
 
+bool backend_scales_itself(void) { return false; }
+
 bool backend_open(Gui *g) {
     W32Back *b = calloc(1, sizeof *b);
     if (!b) return false;

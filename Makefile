@@ -129,6 +129,19 @@ PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
 %.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h src/plug_gui.h src/plug_gui_backend.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -fPIC -c $< -o $@
 
+# A .clap installed on Linux or Windows is one file with nothing beside it,
+# so the plugin build carries the faces inside it. .incbin reads them relative
+# to this directory. The standalone keeps using assets/, so its object is the
+# empty half of the file.
+FONT_FILES = assets/fonts/pixeloid_mono/PixeloidMono.ttf \
+             assets/fonts/unifontexmono/UnifontExMono.ttf \
+             assets/fonts/european_teletext/EuropeanTeletext.ttf
+
+src/gui/fonts_embedded.pic.o: src/gui/fonts_embedded.c src/gui/text.h \
+                              $(FONT_FILES)
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -DBYPO_EMBED_FONTS -fPIC \
+	      -c $< -o $@
+
 # manual retain/release, so no -fobjc-arc
 src/plug_gui_cocoa.pic.o: src/plug_gui_cocoa.m src/plug_gui_backend.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) \
@@ -158,6 +171,9 @@ bypo.clap: $(PIC_OBJ)
 	  '	<key>CFBundleVersion</key><string>$(VERSION)</string>' \
 	  '</dict>' \
 	  '</plist>' > $@/Contents/Info.plist
+	@# assets inside the bundle, before the signature so it seals them
+	mkdir -p $@/Contents/Resources
+	cp -R assets $@/Contents/Resources/
 	codesign --force --sign - $@
 else
 bypo.clap: $(PIC_OBJ)

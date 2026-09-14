@@ -29,8 +29,7 @@ int main(void) {
     app_init_defaults(a);
     prepare_preset_dir();
 
-    if (text_init(asset_dir()) != 0)
-        fprintf(stderr, "fonts not found under %s/fonts\n", asset_dir());
+    text_init(asset_dir()); /* reports the source it loaded from itself */
 
     a->restored = app_restore_state(a);
     preset_rescan(a);

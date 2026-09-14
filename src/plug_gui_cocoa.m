@@ -1,8 +1,10 @@
-/* Cocoa backend: an NSView subview of the host's view. The editor's output
-   buffer is device pixels; the view frame is points, so it is divided by the
-   backing scale factor before it becomes a frame. No ARC. */
+/* Cocoa backend: a layer-backed NSView subview of the host's view. The core
+   hands over the 1:1 design canvas and Core Animation magnifies it on the GPU
+   with nearest-neighbour filtering, so nothing scales on the host's main
+   thread. The view frame is points, the surface size device pixels. No ARC. */
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -69,36 +71,6 @@ static CGFloat backing_of(BypoView *v) {
         [area release];
     }
     [super dealloc];
-}
-
-- (void)drawRect:(NSRect)dirty {
-    GuiSurface *s = gui ? gui_surface(gui) : NULL;
-    if (!s || !s->out_px) return;
-    CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
-    if (!ctx) return;
-    size_t w = (size_t)s->win_w, h = (size_t)s->win_h;
-    CGDataProviderRef prov =
-        CGDataProviderCreateWithData(NULL, s->out_px, w * h * 4, NULL);
-    if (!prov) return;
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    /* the buffer is XRGB words, so BGRX bytes on a little-endian machine */
-    CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cs,
-                                   kCGImageAlphaNoneSkipFirst
-                                       | kCGBitmapByteOrder32Little,
-                                   prov, NULL, false, kCGRenderingIntentDefault);
-    NSRect b = [self bounds];
-    if (img) {
-        CGContextSaveGState(ctx);
-        CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
-        /* the view is flipped; undo that for CGImage's bottom-left origin */
-        CGContextTranslateCTM(ctx, 0.0, NSHeight(b));
-        CGContextScaleCTM(ctx, 1.0, -1.0);
-        CGContextDrawImage(ctx, CGRectMake(0, 0, NSWidth(b), NSHeight(b)), img);
-        CGContextRestoreGState(ctx);
-        CGImageRelease(img);
-    }
-    CGColorSpaceRelease(cs);
-    CGDataProviderRelease(prov);
 }
 
 /* ---------- input ---------- */
@@ -173,6 +145,8 @@ static CGFloat backing_of(BypoView *v) {
 
 /* ---------- backend interface ---------- */
 
+bool backend_scales_itself(void) { return true; }
+
 bool backend_open(Gui *g) {
     CocoaBack *b = calloc(1, sizeof *b);
     if (!b) return false;
@@ -213,6 +187,15 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
     b->view = [[BypoView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
     if (!b->view) return false;
     [b->view setGui:g];
+    [b->view setWantsLayer:YES];
+    CALayer *l = [b->view layer];
+    [l setMagnificationFilter:kCAFilterNearest];
+    [l setMinificationFilter:kCAFilterNearest];
+    [l setContentsGravity:kCAGravityResize];
+    [l setOpaque:YES];
+    /* a leaf layer: nothing is positioned in its coordinates, so keep the
+       contents upright whatever the flipped view asks for */
+    [l setGeometryFlipped:NO];
     [parent addSubview:b->view];
     return true;
 }
@@ -220,19 +203,38 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
 bool backend_resize(Gui *g) {
     CocoaBack *b = back_of(g);
     GuiSurface *s = gui_surface(g);
-    if (!b || !b->view || !s->out_px) return false;
+    if (!b || !b->view || !s->src_px) return false;
     CGFloat bs = backing_of(b->view);
     [b->view setFrame:NSMakeRect(0, 0, (CGFloat)s->win_w / bs,
                                  (CGFloat)s->win_h / bs)];
-    [b->view setNeedsDisplay:YES];
+    [[b->view layer] setContentsScale:bs];
     return true;
 }
 
 void backend_present(Gui *g) {
     CocoaBack *b = back_of(g);
-    if (!b || !b->view) return;
-    [b->view setNeedsDisplay:YES];
-    [b->view displayIfNeeded];
+    GuiSurface *s = gui_surface(g);
+    if (!b || !b->view || !s->src_px) return;
+    size_t w = (size_t)s->src_w, h = (size_t)s->src_h;
+    /* the layer reads its contents whenever it likes, so hand it a private
+       copy rather than the canvas the core keeps drawing into */
+    CFDataRef data = CFDataCreate(NULL, (const UInt8 *)s->src_px,
+                                  (CFIndex)(w * h * 4));
+    if (!data) return;
+    CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
+    CFRelease(data);
+    if (!prov) return;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    /* the buffer is XRGB words, so BGRX bytes on a little-endian machine */
+    CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cs,
+                                   kCGImageAlphaNoneSkipFirst
+                                       | kCGBitmapByteOrder32Little,
+                                   prov, NULL, false, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(cs);
+    CGDataProviderRelease(prov);
+    if (!img) return;
+    [[b->view layer] setContents:(id)img];
+    CGImageRelease(img);
 }
 
 void backend_show(Gui *g) {

@@ -27,8 +27,11 @@ typedef enum {
     ALIGN_LEFT_BOTTOM, ALIGN_CENTER_BOTTOM, ALIGN_RIGHT_BOTTOM
 } Align;
 
-/* loads faces from <assets>/fonts/<slug>/<file>; missing faces are skipped */
+/* loads faces from <assets>/fonts/<slug>/<file>, falling back to the copy
+   compiled into the binary; reports the source it used on stderr */
 int text_init(const char *assets_dir);
+/* the face compiled into this build, or NULL when it embeds none */
+const unsigned char *embedded_face(int face, size_t *len);
 void text_shutdown(void);
 
 /* quantise a wanted size to the face's native pixel grid (ppp = 1 here) */

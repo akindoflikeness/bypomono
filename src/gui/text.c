@@ -38,19 +38,35 @@ static GlyphEntry g_cache[GLYPH_CACHE];
 
 int text_init(const char *assets_dir) {
     if (FT_Init_FreeType(&g_ft)) return -1;
-    int loaded = 0;
+    int from_file = 0, from_mem = 0;
     for (int i = 0; i < FACE_COUNT; i++) {
         char path[512];
         snprintf(path, sizeof path, "%s/fonts/%s/%s", assets_dir,
                  FACES[i].slug, FACES[i].file);
-        if (FT_New_Face(g_ft, path, 0, &g_face[i]) == 0)
-            loaded++;
-        else {
-            g_face[i] = NULL;
-            fprintf(stderr, "font missing: %s\n", path);
+        g_face[i] = NULL;
+        if (FT_New_Face(g_ft, path, 0, &g_face[i]) == 0) {
+            from_file++;
+            continue;
         }
+        g_face[i] = NULL;
+        size_t n = 0;
+        const unsigned char *data = embedded_face(i, &n);
+        if (data && n
+            && FT_New_Memory_Face(g_ft, data, (FT_Long)n, 0, &g_face[i]) == 0)
+            from_mem++;
+        else
+            g_face[i] = NULL;
     }
-    return loaded > 0 ? 0 : -1;
+    if (from_file && from_mem)
+        fprintf(stderr, "fonts: %d from %s/fonts, %d embedded\n", from_file,
+                assets_dir, from_mem);
+    else if (from_mem)
+        fprintf(stderr, "fonts: embedded\n");
+    else if (from_file)
+        fprintf(stderr, "fonts: %s/fonts\n", assets_dir);
+    else
+        fprintf(stderr, "fonts: none, looked under %s/fonts\n", assets_dir);
+    return from_file + from_mem > 0 ? 0 : -1;
 }
 
 void text_shutdown(void) {

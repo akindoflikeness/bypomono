@@ -36,8 +36,11 @@ enum {
 /* the part of the editor state a backend reads and writes */
 typedef struct {
     void *back;       /* platform window state, owned by the backend */
-    uint32_t *out_px; /* the canvas magnified by scale, win_w * win_h */
-    int win_w, win_h; /* out_px size, always device pixels */
+    uint32_t *out_px; /* the canvas magnified by scale, win_w * win_h;
+                         NULL when the backend magnifies it itself */
+    int win_w, win_h; /* window size, always device pixels */
+    uint32_t *src_px; /* the design canvas at 1:1, src_w * src_h */
+    int src_w, src_h;
     float host_scale; /* the host's factor, 1.0 until it says otherwise */
 } GuiSurface;
 
@@ -45,6 +48,9 @@ GuiSurface *gui_surface(Gui *g);
 
 /* ---------- backend: one implementation per platform ---------- */
 
+/* true when the backend magnifies the design canvas itself (a compositor or
+   the GPU), so the core hands it src_px and skips the CPU copy into out_px */
+bool backend_scales_itself(void);
 bool backend_open(Gui *g);  /* connect to the window system */
 void backend_close(Gui *g); /* release everything the backend holds */
 /* usable desktop in device pixels, for pick_display_scale */
@@ -69,5 +75,9 @@ void gui_in_wheel(Gui *g, float delta);            /* + is down, 1 per notch */
 void gui_in_inside(Gui *g, bool inside);
 void gui_in_key(Gui *g, int scancode, bool down);
 void gui_in_text(Gui *g, const char *utf8, int n);
+
+/* the window lost its content: present again even if the editor did not
+   change anything (X11 Expose) */
+void gui_invalidate(Gui *g);
 
 #endif

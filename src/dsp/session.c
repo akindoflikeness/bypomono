@@ -9,6 +9,8 @@ Session session_default(void) {
     s.chandas = chandas_params_default();
     s.tempo_bpm = CHANDAS_DEFAULT_BPM;
     s.warmth = 0.5f;
+    s.release_s = env_params_default().release_s;
+    s.drone = false;
     return s;
 }
 
@@ -66,5 +68,6 @@ Session session_sanitize(Session s) {
     s.chandas.tail = clampf(s.chandas.tail, 0.0f, 1.0f);
     s.tempo_bpm = clampf(s.tempo_bpm, CHANDAS_MIN_BPM, CHANDAS_MAX_BPM);
     s.warmth = clampf(s.warmth, MIN_WARMTH, MAX_WARMTH);
+    s.release_s = clampf(s.release_s, 0.05f, 8.0f);
     return s;
 }

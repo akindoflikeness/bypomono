@@ -186,6 +186,8 @@ Session plug_session_of_vals(const Plug *p) {
     s.chandas.dimension = (float)getv(p, P_CH_DIM);
     s.chandas.tail = (float)getv(p, P_CH_TAIL);
     s.warmth = (float)getv(p, P_WARMTH);
+    s.release_s = (float)getv(p, P_RELEASE);
+    s.drone = getv(p, P_DRONE) > 0.5;
     return s;
 }
 
@@ -228,6 +230,8 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_SH_RANGE, (double)s->melody.range_degrees);
     setv(p, P_SH_RATE, s->melody.rate_hz);
     setv(p, P_WARMTH, s->warmth);
+    setv(p, P_RELEASE, s->release_s);
+    setv(p, P_DRONE, s->drone ? 1 : 0);
     atomic_store_explicit(&p->dirty, true, memory_order_relaxed);
 }
 

@@ -652,6 +652,8 @@ typedef struct {
     ChandasParams chandas;
     float tempo_bpm;
     float warmth;
+    float release_s; /* Chain.amp.env.release_s, which lives outside Patch */
+    bool drone;
 } Session;
 
 Session session_default(void);

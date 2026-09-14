@@ -89,6 +89,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
+            curl
             git
             make
             zip
@@ -120,6 +121,96 @@ jobs:
             Linux)  tar tzf bypomono-*.tar.gz ;;
             *)      unzip -l bypomono-*.zip ;;
           esac | grep -v 'assets/fonts\|presets/BYPO/' || true
+
+      # `dist` removes the staged folder once it is archived; stage it again so
+      # the smoke steps exercise the exact tree that ships.
+      - name: restage for smoke
+        run: |
+          make stage
+          mkdir -p smoke
+          echo "DIST=$(ls -d bypomono-*/ | head -1 | tr -d '/')" >> "$GITHUB_ENV"
+
+      # The runner has no sound card and the standalone refuses to start
+      # without an output device, so `default` is pointed at ALSA's null pcm.
+      - name: smoke deps (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb imagemagick x11-apps
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "$HOME/.asoundrc"
+
+      - name: 'smoke: plugin'
+        env:
+          CLAP_VALIDATOR: 0.4.1-127-g152b982
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   asset=ubuntu-22.04 ;;
+            macOS)   asset=macos-universal ;;
+            Windows) asset=windows ;;
+          esac
+          cvdir="$PWD/.clap-validator"
+          mkdir -p "$cvdir"
+          curl -sSfL -o "$cvdir/cv.zip" \
+            "https://github.com/free-audio/clap-validator/releases/download/0.4.1/clap-validator-$CLAP_VALIDATOR-$asset.zip"
+          unzip -oq "$cvdir/cv.zip" -d "$cvdir"
+          if ls "$cvdir"/*.tar.gz >/dev/null 2>&1; then
+            tar xzf "$cvdir"/*.tar.gz -C "$cvdir"
+          fi
+          cv="$(find "$cvdir" -maxdepth 2 -type f -name 'clap-validator*' \
+                ! -name '*.zip' ! -name '*.tar.gz' | head -1)"
+          chmod +x "$cv"
+          "$cv" --version
+          cd "$DIST"
+          "$cv" validate bypo.clap
+
+      - name: 'smoke: standalone'
+        if: runner.os == 'Linux'
+        env:
+          BYPO_SCALE: '1'
+        run: |
+          cd "$DIST"
+          xvfb-run -a -s '-screen 0 1280x1024x24' bash -c '
+            set -e
+            ./blow-your-phase-off-gui &
+            pid=$!
+            trap "kill -TERM $pid 2>/dev/null || true" EXIT
+            sleep 6
+            import -window root ../smoke/${{ matrix.runner }}.png \
+              || xwd -root -silent | convert xwd:- ../smoke/${{ matrix.runner }}.png
+            kill -0 "$pid" || { echo "standalone exited before termination" >&2; exit 1; }
+          '
+
+      - name: 'smoke: standalone'
+        if: runner.os == 'macOS'
+        env:
+          BYPO_SCALE: '1'
+          SDL_AUDIODRIVER: dummy
+        run: |
+          cd "$DIST"
+          ./BYPO.app/Contents/MacOS/blow-your-phase-off-gui &
+          pid=$!
+          trap "kill -TERM $pid 2>/dev/null || true" EXIT
+          sleep 6
+          screencapture -x "../smoke/${{ matrix.runner }}.png"
+          kill -0 "$pid" || { echo "standalone exited before termination" >&2; exit 1; }
+
+      - name: 'smoke: standalone'
+        if: runner.os == 'Windows'
+        env:
+          BYPO_SCALE: '1'
+          SDL_AUDIODRIVER: dummy
+        run: |
+          powershell -ExecutionPolicy Bypass \
+            -File "$(cygpath -w "$PWD/.github/smoke-windows.ps1")" \
+            -Exe "$(cygpath -w "$PWD/$DIST/blow-your-phase-off-gui.exe")" \
+            -Shot "$(cygpath -w "$PWD/smoke/${{ matrix.runner }}.png")"
+
+      - name: screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.runner }}
+          if-no-files-found: warn
+          path: smoke/
 
       - uses: actions/upload-artifact@v4
         with:

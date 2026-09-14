@@ -15,28 +15,6 @@
 **One tone, many voices.** An untamed, opinionated instrument that uses
 mathematical irrationality to reach uniquely stable inharmonic timbres.
 
-## Install
-
-Download the file for your platform from [Releases](https://github.com/wraithsys/bypomono/releases).
-Each one is a folder with everything inside it. Unpack it anywhere you like and it's installed.
-Delete the folder and it's gone. Recordings go to your Music folder.
-
-**Linux.** `bypomono-linux-x86_64.tar.gz`. Unpack it by double-clicking, or with
-`tar xzf bypomono-linux-x86_64.tar.gz`. Then, from a terminal in the unpacked folder:
-
-```
-./blow-your-phase-off-gui
-```
-
-**macOS.** `bypomono-macos-arm64.zip` for Apple silicon, `bypomono-macos-x86_64.zip` for Intel.
-Unzip, then right-click the app and choose Open the first time. It isn't signed, so macOS
-will refuse a plain double-click once and then remember your answer.
-
-**Windows.** `bypomono-windows-x64.zip`. Unzip and run `blow-your-phase-off-gui.exe`.
-
-**From source.** C11, SDL2, FreeType, and make. `make` builds the standalone, `make bypo.clap`
-the plugin, `make check` runs the engine tests.
-
 ## Algorithmic Phase Modulation
 
 The architecture is PM with a dual algorithm selector: the arrangement of

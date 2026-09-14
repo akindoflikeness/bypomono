@@ -891,6 +891,8 @@ Session app_session(const App *a) {
     s.chandas = a->shadow_chandas;
     s.tempo_bpm = a->tempo_bpm;
     s.warmth = a->shadow_warmth;
+    s.release_s = a->shadow_release_s;
+    s.drone = a->engaged;
     return s;
 }
 
@@ -902,6 +904,9 @@ void app_apply_session(App *a, Session s) {
     a->tempo_bpm = s.tempo_bpm;
     a->shadow_warmth = s.warmth;
     a->drone_hz = s.drone_hz;
+    a->shadow_release_s = s.release_s;
+    /* s.drone is carried for the plugin's host state; loading a preset here
+       must not start or stop the standalone's drone under the player */
     app_send(a, (Event){.kind = EV_SET_PATCH, .u.patch = a->shadow});
     app_send(a, (Event){.kind = EV_SET_VERB, .u.verb = a->shadow_verb});
     app_send(a, (Event){.kind = EV_SET_MELODY, .u.melody = a->shadow_melody});

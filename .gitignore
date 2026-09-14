@@ -7,3 +7,6 @@ bypo-tests
 bypo.clap
 bypomono-*
 .claude/
+
+smoke/
+.clap-validator/

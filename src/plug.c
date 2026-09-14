@@ -743,7 +743,9 @@ static const void *plug_get_extension(const clap_plugin_t *plugin,
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &EXT_STATE;
     if (strcmp(id, CLAP_EXT_GUI) == 0) return &PLUG_EXT_GUI;
     if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0) return &PLUG_EXT_TIMER;
+#if BYPO_GUI_POSIX_FD
     if (strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT) == 0) return &PLUG_EXT_FD;
+#endif
     return NULL;
 }
 

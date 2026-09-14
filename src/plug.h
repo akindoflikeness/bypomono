@@ -60,9 +60,18 @@ double plug_getv(const Plug *p, int id);
 void plug_setv(Plug *p, int id, double v);
 Session plug_session_of_vals(const Plug *p);
 
+/* X11 alone delivers editor input on a pollable fd */
+#if defined(_WIN32) || defined(__APPLE__)
+#define BYPO_GUI_POSIX_FD 0
+#else
+#define BYPO_GUI_POSIX_FD 1
+#endif
+
 /* plug_gui.c */
 extern const clap_plugin_gui_t PLUG_EXT_GUI;
 extern const clap_plugin_timer_support_t PLUG_EXT_TIMER;
+#if BYPO_GUI_POSIX_FD
 extern const clap_plugin_posix_fd_support_t PLUG_EXT_FD;
+#endif
 
 #endif

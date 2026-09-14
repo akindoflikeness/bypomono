@@ -1,42 +1,16 @@
-#include <X11/Xatom.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/keysym.h>
-#include <SDL2/SDL_scancode.h>
+/* Platform-independent half of the CLAP editor: it owns the App, renders the
+   fixed DESIGN_W x DESIGN_H canvas, magnifies it into out_px and hands that to
+   a backend (plug_gui_x11.c / plug_gui_win32.c / plug_gui_cocoa.m). */
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#include "plug.h"
+#include "plug_gui.h"
 
 #define TIMER_MS 16
-
-typedef struct {
-    App *app;
-    Ui ui;
-    Canvas canvas;
-    Display *dpy;
-    Window win;
-    GC gc;
-    XImage *img;
-    uint32_t *out_px; /* scaled output buffer owned by img */
-    int *xmap;
-    float fit;        /* largest scale this display fits */
-    float host_scale; /* the host's factor, 1.0 until it says otherwise */
-    float scale;      /* fit * host_scale, snapped */
-    int win_w, win_h;
-    bool created, parented, shown;
-    clap_id timer_id;
-    bool timer_on, fd_on;
-    double t0, last_time;
-    /* input accumulated between timer ticks */
-    UiInput pending;
-    double last_click_time;
-    P2 last_click_pos;
-    bool have_x_error;
-} Gui;
 
 static double now_s(void) {
     struct timespec ts;
@@ -46,32 +20,6 @@ static double now_s(void) {
 
 static Gui *gui_of(const clap_plugin_t *pl) {
     return ((Plug *)pl->plugin_data)->gui_state;
-}
-
-/* ---------- magnification ---------- */
-
-/* Usable desktop of the default screen, which spans every head, not one. */
-static void x_usable_size(Display *dpy, int *w, int *h) {
-    int scr = DefaultScreen(dpy);
-    *w = DisplayWidth(dpy, scr);
-    *h = DisplayHeight(dpy, scr);
-
-    Atom prop = XInternAtom(dpy, "_NET_WORKAREA", True);
-    if (prop == None) return;
-    Atom type = None;
-    int fmt = 0;
-    unsigned long n = 0, after = 0;
-    unsigned char *data = NULL;
-    if (XGetWindowProperty(dpy, RootWindow(dpy, scr), prop, 0, 4, False,
-                           XA_CARDINAL, &type, &fmt, &n, &after, &data)
-        != Success)
-        return;
-    if (data && type == XA_CARDINAL && fmt == 32 && n >= 4) {
-        const long *a = (const long *)(const void *)data;
-        if (a[2] > 0 && a[2] < *w) *w = (int)a[2];
-        if (a[3] > 0 && a[3] < *h) *h = (int)a[3];
-    }
-    if (data) XFree(data);
 }
 
 static float compose_scale(const Gui *g) {
@@ -92,119 +40,79 @@ static void refresh_shadows(App *a, Plug *p) {
     a->engaged = plug_getv(p, P_DRONE) > 0.5;
 }
 
-/* ---------- input translation ---------- */
+/* ---------- input ---------- */
 
-static void note_press(Gui *g, double t) {
+void gui_in_motion(Gui *g, int px, int py) {
+    g->pending.mouse.x = (float)px / g->scale;
+    g->pending.mouse.y = (float)py / g->scale;
+    g->pending.mouse_in_window = true;
+}
+
+void gui_in_button(Gui *g, int button, bool down) {
+    if (button != 1) return; /* the editor reads the left button only */
     UiInput *in = &g->pending;
+    if (!down) {
+        in->down = false;
+        in->released = true;
+        return;
+    }
+    double t = now_s();
     in->down = true;
     in->pressed = true;
-    if (t - g->last_click_time < 0.4 && fabsf(in->mouse.x - g->last_click_pos.x) < 6.0f
+    if (t - g->last_click_time < 0.4
+        && fabsf(in->mouse.x - g->last_click_pos.x) < 6.0f
         && fabsf(in->mouse.y - g->last_click_pos.y) < 6.0f)
         in->double_clicked = true;
     g->last_click_time = t;
     g->last_click_pos = in->mouse;
 }
 
-static void x_key(Gui *g, XKeyEvent *ev, bool down) {
-    char buf[8] = {0};
-    KeySym ks = 0;
-    int n = XLookupString(ev, buf, sizeof buf - 1, &ks, NULL);
-    int sc = -1;
-    switch (ks) {
-    case XK_Return: case XK_KP_Enter: sc = SDL_SCANCODE_RETURN; break;
-    case XK_Escape: sc = SDL_SCANCODE_ESCAPE; break;
-    case XK_Tab: sc = SDL_SCANCODE_TAB; break;
-    case XK_BackSpace: sc = SDL_SCANCODE_BACKSPACE; break;
-    case XK_F2: sc = SDL_SCANCODE_F2; break;
-    default: break;
-    }
-    if (sc >= 0 && sc < 512) {
-        if (down) {
-            g->pending.key_pressed[sc] = true;
-            g->pending.key_down[sc] = true;
-        } else {
-            g->pending.key_down[sc] = false;
-        }
-    }
+void gui_in_wheel(Gui *g, float delta) { g->pending.wheel += delta; }
+
+void gui_in_inside(Gui *g, bool inside) {
+    g->pending.mouse_in_window = inside;
+}
+
+void gui_in_key(Gui *g, int scancode, bool down) {
+    if (scancode < 0 || scancode >= 512) return;
     if (down) {
-        if (ks == XK_BackSpace) g->pending.backspace_repeat = true;
-        if (n > 0 && (unsigned char)buf[0] >= 32 && buf[0] != 127) {
-            size_t cur = strlen(g->pending.text);
-            if (cur + (size_t)n < sizeof g->pending.text) {
-                memcpy(g->pending.text + cur, buf, (size_t)n);
-                g->pending.text[cur + (size_t)n] = '\0';
-            }
-        }
+        g->pending.key_pressed[scancode] = true;
+        g->pending.key_down[scancode] = true;
+        if (scancode == KEY_BACKSPACE) g->pending.backspace_repeat = true;
+    } else {
+        g->pending.key_down[scancode] = false;
     }
 }
 
-static void pump_x(Gui *g) {
-    if (!g->dpy) return;
-    while (XPending(g->dpy)) {
-        XEvent e;
-        XNextEvent(g->dpy, &e);
-        UiInput *in = &g->pending;
-        switch (e.type) {
-        case MotionNotify:
-            in->mouse.x = (float)e.xmotion.x / g->scale;
-            in->mouse.y = (float)e.xmotion.y / g->scale;
-            in->mouse_in_window = true;
-            break;
-        case ButtonPress:
-            in->mouse.x = (float)e.xbutton.x / g->scale;
-            in->mouse.y = (float)e.xbutton.y / g->scale;
-            if (e.xbutton.button == Button1) {
-                note_press(g, now_s());
-                XSetInputFocus(g->dpy, g->win, RevertToParent, CurrentTime);
-            } else if (e.xbutton.button == Button4) {
-                in->wheel -= 1.0f;
-            } else if (e.xbutton.button == Button5) {
-                in->wheel += 1.0f;
-            }
-            break;
-        case ButtonRelease:
-            if (e.xbutton.button == Button1) {
-                in->down = false;
-                in->released = true;
-            }
-            break;
-        case KeyPress: x_key(g, &e.xkey, true); break;
-        case KeyRelease: x_key(g, &e.xkey, false); break;
-        case EnterNotify: in->mouse_in_window = true; break;
-        case LeaveNotify: in->mouse_in_window = false; break;
-        default: break;
-        }
-    }
+void gui_in_text(Gui *g, const char *utf8, int n) {
+    if (n <= 0) return;
+    size_t cur = strlen(g->pending.text);
+    if (cur + (size_t)n >= sizeof g->pending.text) return;
+    memcpy(g->pending.text + cur, utf8, (size_t)n);
+    g->pending.text[cur + (size_t)n] = '\0';
 }
 
 /* ---------- output surface ---------- */
 
+static void free_surface(Gui *g) {
+    free(g->out_px);
+    g->out_px = NULL;
+    free(g->xmap);
+    g->xmap = NULL;
+}
+
 static bool build_surface(Gui *g) {
-    int screen = DefaultScreen(g->dpy);
+    free_surface(g);
     g->win_w = (int)lroundf(DESIGN_W * g->scale);
     g->win_h = (int)lroundf(DESIGN_H * g->scale);
 
-    if (g->img) {
-        XDestroyImage(g->img); /* frees out_px */
-        g->img = NULL;
-        g->out_px = NULL;
-    }
-    free(g->xmap);
-    g->xmap = NULL;
-
     g->out_px = malloc((size_t)g->win_w * g->win_h * 4);
     if (!g->out_px) return false;
-    g->img = XCreateImage(g->dpy, DefaultVisual(g->dpy, screen),
-                          (unsigned)DefaultDepth(g->dpy, screen), ZPixmap, 0,
-                          (char *)g->out_px, (unsigned)g->win_w,
-                          (unsigned)g->win_h, 32, 0);
-    if (!g->img) {
-        free(g->out_px);
-        g->out_px = NULL;
+    g->xmap = malloc((size_t)g->win_w * sizeof *g->xmap);
+    if (!g->xmap) {
+        free_surface(g);
         return false;
     }
-    g->xmap = malloc((size_t)g->win_w * sizeof *g->xmap);
-    if (!g->xmap) return false;
     for (int x = 0; x < g->win_w; x++) {
         int sx = (int)((float)x / g->scale);
         g->xmap[x] = sx < g->canvas.w ? sx : g->canvas.w - 1;
@@ -212,34 +120,29 @@ static bool build_surface(Gui *g) {
     return true;
 }
 
-/* ---------- blit ---------- */
-
-static void blit(Gui *g) {
-    if (!g->dpy || !g->parented || !g->img) return;
+static void magnify(Gui *g) {
+    if (!g->out_px) return;
     const uint32_t *src = g->canvas.px;
     uint32_t *dst = g->out_px;
     int dw = g->win_w, dh = g->win_h;
     if (g->scale == 1.0f) {
         memcpy(dst, src, (size_t)dw * dh * 4);
-    } else {
-        for (int y = 0; y < dh; y++) {
-            int sy = (int)((float)y / g->scale);
-            if (sy >= g->canvas.h) sy = g->canvas.h - 1;
-            const uint32_t *row = src + (size_t)sy * g->canvas.w;
-            uint32_t *orow = dst + (size_t)y * dw;
-            for (int x = 0; x < dw; x++) orow[x] = row[g->xmap[x]];
-        }
+        return;
     }
-    XPutImage(g->dpy, g->win, g->gc, g->img, 0, 0, 0, 0, (unsigned)dw,
-              (unsigned)dh);
-    XFlush(g->dpy);
+    for (int y = 0; y < dh; y++) {
+        int sy = (int)((float)y / g->scale);
+        if (sy >= g->canvas.h) sy = g->canvas.h - 1;
+        const uint32_t *row = src + (size_t)sy * g->canvas.w;
+        uint32_t *orow = dst + (size_t)y * dw;
+        for (int x = 0; x < dw; x++) orow[x] = row[g->xmap[x]];
+    }
 }
 
 /* ---------- one editor frame ---------- */
 
 static void gui_tick(Plug *p, Gui *g) {
     if (!g->created || !g->parented) return;
-    pump_x(g);
+    backend_pump(g);
 
     Ui *ui = &g->ui;
     ui->in = g->pending;
@@ -268,19 +171,20 @@ static void gui_tick(Plug *p, Gui *g) {
     app_frame(g->app, ui);
     ui->drag_prev = ui->in.mouse;
     g->app->quit = false; /* nothing in a plugin may end the host */
-    blit(g);
+    magnify(g);
+    backend_present(g);
 }
 
 /* ---------- clap gui extension ---------- */
 
 static bool gui_is_api_supported(const clap_plugin_t *pl, const char *api,
                                  bool is_floating) {
-    return strcmp(api, CLAP_WINDOW_API_X11) == 0 && !is_floating;
+    return strcmp(api, BACKEND_WINDOW_API) == 0 && !is_floating;
 }
 
 static bool gui_get_preferred_api(const clap_plugin_t *pl, const char **api,
                                   bool *is_floating) {
-    *api = CLAP_WINDOW_API_X11;
+    *api = BACKEND_WINDOW_API;
     *is_floating = false;
     return true;
 }
@@ -297,6 +201,7 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         g->fit = WINDOW_SCALE_MIN;
         g->host_scale = 1.0f;
         g->scale = WINDOW_SCALE_MIN;
+        g->fd = -1;
     }
     if (g->created) return true;
 
@@ -309,12 +214,11 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         fonts_ready = true;
     }
 
-    g->dpy = XOpenDisplay(NULL);
-    if (!g->dpy) return false;
+    if (!backend_open(g)) return false;
 
     /* settled before the host can ask for a size */
     int avail_w = 0, avail_h = 0;
-    x_usable_size(g->dpy, &avail_w, &avail_h);
+    backend_usable_screen(g, &avail_w, &avail_h);
     g->fit = pick_display_scale(avail_w, avail_h);
     g->scale = compose_scale(g);
 
@@ -342,12 +246,15 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
     if (ht && ht->register_timer(p->host, TIMER_MS, &g->timer_id))
         g->timer_on = true;
-    const clap_host_posix_fd_support_t *hf =
-        p->host->get_extension(p->host, CLAP_EXT_POSIX_FD_SUPPORT);
-    if (hf
-        && hf->register_fd(p->host, ConnectionNumber(g->dpy),
-                           CLAP_POSIX_FD_READ))
-        g->fd_on = true;
+    int fd = backend_event_fd(g);
+    if (fd >= 0) {
+        const clap_host_posix_fd_support_t *hf =
+            p->host->get_extension(p->host, CLAP_EXT_POSIX_FD_SUPPORT);
+        if (hf && hf->register_fd(p->host, fd, CLAP_POSIX_FD_READ)) {
+            g->fd_on = true;
+            g->fd = fd;
+        }
+    }
 
     g->created = true;
     return true;
@@ -364,29 +271,20 @@ static void gui_destroy(const clap_plugin_t *pl) {
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
     if (g->timer_on && ht) ht->unregister_timer(p->host, g->timer_id);
     g->timer_on = false;
-    const clap_host_posix_fd_support_t *hf =
-        p->host->get_extension(p->host, CLAP_EXT_POSIX_FD_SUPPORT);
-    if (g->fd_on && hf && g->dpy)
-        hf->unregister_fd(p->host, ConnectionNumber(g->dpy));
-    g->fd_on = false;
-    if (g->dpy) {
-        if (g->img) {
-            XDestroyImage(g->img); /* frees out_px */
-            g->img = NULL;
-            g->out_px = NULL;
-        }
-        if (g->gc) XFreeGC(g->dpy, g->gc);
-        g->gc = NULL;
-        if (g->win) XDestroyWindow(g->dpy, g->win);
-        g->win = 0;
-        XCloseDisplay(g->dpy);
-        g->dpy = NULL;
+    if (g->fd_on) {
+        const clap_host_posix_fd_support_t *hf =
+            p->host->get_extension(p->host, CLAP_EXT_POSIX_FD_SUPPORT);
+        if (hf) hf->unregister_fd(p->host, g->fd);
+        g->fd_on = false;
+        g->fd = -1;
     }
-    free(g->xmap);
-    g->xmap = NULL;
+    backend_close(g);
+    free_surface(g);
     canvas_free(&g->canvas);
     g->created = g->parented = g->shown = false;
 }
+
+static bool gui_get_size(const clap_plugin_t *pl, uint32_t *w, uint32_t *h);
 
 static bool gui_set_scale(const clap_plugin_t *pl, double scale) {
     Plug *p = pl->plugin_data;
@@ -398,20 +296,22 @@ static bool gui_set_scale(const clap_plugin_t *pl, double scale) {
     g->scale = s;
     if (!g->parented) return true;
 
-    if (!build_surface(g)) return false;
-    XResizeWindow(g->dpy, g->win, (unsigned)g->win_w, (unsigned)g->win_h);
-    XFlush(g->dpy);
+    if (!build_surface(g) || !backend_resize(g)) return false;
     const clap_host_gui_t *hg = p->host->get_extension(p->host, CLAP_EXT_GUI);
-    if (hg && hg->request_resize)
-        hg->request_resize(p->host, (uint32_t)g->win_w, (uint32_t)g->win_h);
+    uint32_t w, h;
+    gui_get_size(pl, &w, &h);
+    if (hg && hg->request_resize) hg->request_resize(p->host, w, h);
     return true;
 }
 
 static bool gui_get_size(const clap_plugin_t *pl, uint32_t *w, uint32_t *h) {
     Gui *g = gui_of(pl);
     float s = g ? g->scale : 1.0f;
-    *w = (uint32_t)lroundf(DESIGN_W * s);
-    *h = (uint32_t)lroundf(DESIGN_H * s);
+    /* Cocoa reports logical points, X11 and Win32 device pixels */
+    float pp = g ? backend_px_per_point(g) : 1.0f;
+    if (pp <= 0.0f) pp = 1.0f;
+    *w = (uint32_t)lroundf(DESIGN_W * s / pp);
+    *h = (uint32_t)lroundf(DESIGN_H * s / pp);
     return true;
 }
 
@@ -436,24 +336,16 @@ static bool gui_set_parent(const clap_plugin_t *pl,
                            const clap_window_t *window) {
     Plug *p = pl->plugin_data;
     Gui *g = p->gui_state;
-    if (!g || !g->created || !g->dpy) return false;
+    if (!g || !g->created) return false;
 
-    if (!build_surface(g)) return false;
+    /* attach first: the backend may learn the monitor's scale from the parent */
+    if (!backend_attach(g, window)) return false;
+    g->scale = compose_scale(g);
+    if (!build_surface(g) || !backend_resize(g)) return false;
 
-    int screen = DefaultScreen(g->dpy);
-    g->win = XCreateSimpleWindow(g->dpy, (Window)window->x11, 0, 0,
-                                 (unsigned)g->win_w, (unsigned)g->win_h, 0,
-                                 BlackPixel(g->dpy, screen),
-                                 BlackPixel(g->dpy, screen));
-    XSelectInput(g->dpy, g->win,
-                 ExposureMask | ButtonPressMask | ButtonReleaseMask
-                     | PointerMotionMask | KeyPressMask | KeyReleaseMask
-                     | EnterWindowMask | LeaveWindowMask);
-    g->gc = XCreateGC(g->dpy, g->win, 0, NULL);
-
-    XMapWindow(g->dpy, g->win);
-    XFlush(g->dpy);
+    backend_show(g);
     g->parented = true;
+    g->shown = true;
     /* the editor is real now: let the audio thread feed it */
     atomic_store_explicit(&p->gui_app, g->app, memory_order_release);
     return true;
@@ -469,8 +361,7 @@ static void gui_suggest_title(const clap_plugin_t *pl, const char *title) {}
 static bool gui_show(const clap_plugin_t *pl) {
     Gui *g = gui_of(pl);
     if (!g || !g->parented) return false;
-    XMapWindow(g->dpy, g->win);
-    XFlush(g->dpy);
+    backend_show(g);
     g->shown = true;
     return true;
 }
@@ -478,8 +369,7 @@ static bool gui_show(const clap_plugin_t *pl) {
 static bool gui_hide(const clap_plugin_t *pl) {
     Gui *g = gui_of(pl);
     if (!g || !g->parented) return false;
-    XUnmapWindow(g->dpy, g->win);
-    XFlush(g->dpy);
+    backend_hide(g);
     g->shown = false;
     return true;
 }
@@ -501,9 +391,11 @@ static void on_timer(const clap_plugin_t *pl, clap_id timer_id) {
 
 const clap_plugin_timer_support_t PLUG_EXT_TIMER = {on_timer};
 
+#if BYPO_GUI_POSIX_FD
 static void on_fd(const clap_plugin_t *pl, int fd, clap_posix_fd_flags_t flags) {
     Gui *g = gui_of(pl);
-    if (g && g->created) pump_x(g);
+    if (g && g->created) backend_pump(g);
 }
 
 const clap_plugin_posix_fd_support_t PLUG_EXT_FD = {on_fd};
+#endif

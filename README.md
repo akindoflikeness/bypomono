@@ -10,7 +10,7 @@
   <a href="https://github.com/wraithsys/bypomono/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/release-v1.1.0-000000?style=flat-square&labelColor=000000&color=ffffff" alt="v1.1.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-000000?style=flat-square&labelColor=000000&color=ffffff" alt="MIT"></a>
   <img src="https://img.shields.io/badge/format-standalone%20%2B%20CLAP-000000?style=flat-square&labelColor=000000&color=ffffff&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExLjMsMTQuMmgxLjFjLTAuMSwwLjUtMC4yLDEtMC4yLDEuNXYxLjVoLTAuOWMtMS4yLDAtMi4xLDEtMi4xLDIuMWMwLDEuMiwxLDIuMSwyLjEsMi4xczIuMS0xLDIuMS0yLjF2LTMuN2MwLTIuOSwyLjMtNS4yLDUuMi01LjJjMC4yLDAsMC4zLDAsMC41LDBMMTYsNS4ybC01LjIsOUMxMSwxNC4yLDExLjEsMTQuMiwxMS4zLDE0LjJ6Ii8%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIzLjMsMTcuOWMtMC44LDEuOC0yLjYsMy00LjcsM2gtMS4xYzAuMS0wLjUsMC4yLTEsMC4yLTEuNXYtMS41aDAuOWMxLjIsMCwyLjEtMSwyLjEtMi4xYzAtMS4yLTEtMi4xLTIuMS0yLjFjLTEuMiwwLTIuMSwxLTIuMSwyLjFsMCwzLjdjMCwyLjktMi4zLDUuMi01LjIsNS4yYy0yLjEsMC0zLjktMS4yLTQuNy0zTDQsMjZoMjRMMjMuMywxNy45eiIvPjwvc3ZnPg%3D%3D" alt="standalone + CLAP">
-  <img src="https://img.shields.io/badge/audio-48%20kHz%20%C2%B7%2032--bit%20float-000000?style=flat-square&labelColor=000000&color=ffffff" alt="48 kHz 32-bit float">
+  <a href="https://discord.com/invite/xBtGXU7Etf"><img src="https://img.shields.io/badge/discord-invite-000000?style=flat-square&labelColor=000000&color=ffffff&logo=discord&logoColor=ffffff" alt="Discord"></a>
   <img src="https://img.shields.io/badge/os-linux%20%C2%B7%20macos%20%C2%B7%20windows-000000?style=flat-square&labelColor=000000&color=ffffff" alt="linux · macos · windows">
 </p>
 

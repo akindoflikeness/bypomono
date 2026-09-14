@@ -53,7 +53,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libfreetype-dev libasound2-dev libx11-dev
-          git clone --depth 1 https://github.com/free-audio/clap /tmp/clap
 
       - name: deps (macos)
         if: runner.os == 'macOS'
@@ -66,6 +65,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
+            git
             make
             zip
             unzip
@@ -74,12 +74,16 @@ jobs:
             mingw-w64-x86_64-SDL2
             mingw-w64-x86_64-freetype
 
+      - name: clap headers
+        run: git clone --depth 1 https://github.com/free-audio/clap /tmp/clap
+
       - name: engine tests
         run: |
           make -j4 check
 
-      - name: clap (linux)
-        if: runner.os == 'Linux'
+      # every platform embeds its own editor, so the plugin builds everywhere
+      # and has to exist before `dist` stages the archive
+      - name: clap
         run: make -j4 bypo.clap EXTRA_CPPFLAGS=-I/tmp/clap/include
 
       - name: dist

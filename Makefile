@@ -5,7 +5,7 @@ CPPFLAGS = -Isrc -Isrc/dsp -include src/compat.h $(EXTRA_CPPFLAGS)
 # ---------- platform ----------
 # Linux: ALSA for audio and MIDI, X11 for the CLAP editor.
 # Darwin / MINGW (MSYS2): SDL2 fronts CoreAudio or WASAPI for audio, CoreMIDI
-# or WinMM for MIDI; the CLAP needs an X11 host so it is Linux-only for now.
+# or WinMM for MIDI; the CLAP editor embeds in Cocoa and Win32 respectively.
 UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 UNAME_M := $(shell uname -m 2>/dev/null || echo unknown)
 ifeq ($(UNAME_S),Linux)
@@ -17,6 +17,7 @@ ifeq ($(UNAME_S),Linux)
 else ifeq ($(UNAME_S),Darwin)
   OS := macos
   ARCH := $(UNAME_M)
+  MACOS_MIN = -mmacosx-version-min=10.13
   SYS_LIBS = -lm -lpthread -framework CoreMIDI -framework CoreFoundation
   EXE :=
   GUI_LDFLAGS =
@@ -92,19 +93,33 @@ tests/%.o: tests/%.c tests/test.h src/dsp/dsp.h src/gui/app.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # ---------- CLAP ----------
+# The plugin embeds its editor natively (X11 / Cocoa / Win32) and takes its
+# audio from the host, so it links FreeType and the window system but no SDL.
+FT_ONLY_LIBS := $(shell pkg-config --libs freetype2)
 ifeq ($(OS),linux)
-  CLAP_LIBS = $(SYS_LIBS) -lX11 $(shell pkg-config --libs freetype2)
+  CLAP_LIBS = $(SYS_LIBS) -lX11 $(FT_ONLY_LIBS) -Wl,--no-undefined
+  GUI_BACKEND_SRC = src/plug_gui_x11.c
+else ifeq ($(OS),macos)
+  CLAP_LIBS = -lm -lpthread -framework CoreMIDI -framework CoreFoundation \
+              -framework Cocoa -framework QuartzCore $(FT_ONLY_LIBS) $(MACOS_MIN)
+  GUI_BACKEND_SRC = src/plug_gui_cocoa.m
 else
-  # a library has no main and no subsystem of its own
-  CLAP_LIBS = $(SYS_LIBS) $(filter-out -lSDL2main -mwindows,$(FT_LIBS))
+  CLAP_LIBS = -lm -lpthread -lwinmm -lgdi32 -luser32 $(FT_ONLY_LIBS)
+  GUI_BACKEND_SRC = src/plug_gui_win32.c
 endif
+GUI_BACKEND_OBJ = $(basename $(GUI_BACKEND_SRC)).pic.o
 
 GUI_PIC = $(filter-out src/gui/gui_main.pic.o,$(GUI_SRC:.c=.pic.o))
-PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/audio.pic.o src/midi.pic.o \
-          src/plug.pic.o src/plug_gui.pic.o
+PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
+          src/plug.pic.o src/plug_gui.pic.o $(GUI_BACKEND_OBJ)
 
-%.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -fPIC -c $< -o $@
+%.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h src/plug_gui.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) $(MACOS_MIN) -fPIC -c $< -o $@
+
+# manual retain/release, so no -fobjc-arc
+src/plug_gui_cocoa.pic.o: src/plug_gui_cocoa.m src/plug_gui.h src/plug.h
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) $(MACOS_MIN) \
+	      -x objective-c -fno-objc-arc -fPIC -c $< -o $@
 
 ifeq ($(OS),macos)
 # A macOS CLAP is a bundle directory; Apple silicon refuses to load one that
@@ -112,7 +127,7 @@ ifeq ($(OS),macos)
 bypo.clap: $(PIC_OBJ)
 	rm -rf $@
 	mkdir -p $@/Contents/MacOS
-	$(CC) $(CFLAGS) -dynamiclib -Wl,-install_name,@rpath/bypo \
+	$(CC) $(CFLAGS) $(MACOS_MIN) -dynamiclib -Wl,-install_name,@rpath/bypo \
 	      -o $@/Contents/MacOS/bypo $^ $(CLAP_LIBS)
 	printf 'BNDL????' > $@/Contents/PkgInfo
 	printf '%s\n' \

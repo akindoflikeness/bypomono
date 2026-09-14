@@ -479,9 +479,17 @@ static void rm_rf(const char *path) {
 
 /* must run before anything calls preset_dir(), which caches its answer */
 static bool tmp_home_open(void) {
+#if defined(_WIN32)
+    const char *base = getenv("TEMP");
+    if (!base) base = getenv("TMP");
+    if (!base) return false;
+#else
     const char *base = getenv("TMPDIR");
     if (!base || base[0] != '/') base = "/tmp";
+#endif
     snprintf(g_tmp, sizeof g_tmp, "%s/bypo-hostile-%ld", base, (long)getpid());
+    for (char *c = g_tmp; *c; c++)
+        if (*c == '\\') *c = '/';
     rm_rf(g_tmp);
     if (mkdir(g_tmp, 0700) != 0) return false;
     /* each platform reads a different variable for the data home */

@@ -76,11 +76,12 @@ static void stats_emit(Gui *g) {
     double gap_avg = st->gaps ? st->gap_s / (double)st->gaps : 0.0;
     fprintf(st->out,
             "gui: ticks=%ld presents=%ld frame=%.2fms fp=%.2fms mag=%.2fms "
-            "present=%.2fms tick_gap=%.2f/%.2f ms scale=%.2f win=%dx%d\n",
+            "present=%.2fms tick_gap=%.2f/%.2f ms src=%s scale=%.2f win=%dx%d\n",
             st->ticks, st->presents, st->frame_s * per_tick * 1e3,
             st->fp_s * per_tick * 1e3, st->mag_s * per_present * 1e3,
             st->present_s * per_present * 1e3, gap_avg * 1e3, st->gap_max * 1e3,
-            g->scale, g->s.win_w, g->s.win_h);
+            g->native_timer ? "native" : "host", g->scale, g->s.win_w,
+            g->s.win_h);
     fflush(st->out);
 }
 
@@ -247,7 +248,7 @@ static uint64_t canvas_fingerprint(const Canvas *c) {
 
 /* ---------- one editor frame ---------- */
 
-static void gui_tick(Plug *p, Gui *g) {
+static void gui_frame(Plug *p, Gui *g) {
     if (!g->created || !g->parented) return;
     GuiStats *st = g->stats.out ? &g->stats : NULL;
     if (st) stats_tick(g, now_s());
@@ -308,6 +309,30 @@ static void gui_tick(Plug *p, Gui *g) {
     }
 }
 
+/* Both timers land here. A frame that overruns its interval leaves the next
+   one to be dropped rather than nested. */
+static void gui_tick(Plug *p, Gui *g) {
+    if (g->in_tick) return;
+    g->in_tick = true;
+    gui_frame(p, g);
+    g->in_tick = false;
+}
+
+static void gui_frame_cb(Gui *g) {
+    if (g->plug) gui_tick(g->plug, g);
+}
+
+static void start_native_timer(Gui *g) {
+    if (g->native_timer || !g->parented) return;
+    g->native_timer = backend_start_frame_timer(g, gui_frame_cb);
+}
+
+static void stop_native_timer(Gui *g) {
+    if (!g->native_timer) return;
+    backend_stop_frame_timer(g);
+    g->native_timer = false;
+}
+
 /* ---------- clap gui extension ---------- */
 
 static bool gui_is_api_supported(const clap_plugin_t *pl, const char *api,
@@ -331,6 +356,7 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         g = calloc(1, sizeof *g);
         if (!g) return false;
         p->gui_state = g;
+        g->plug = p;
         g->fit = WINDOW_SCALE_MIN;
         g->s.host_scale = 1.0f;
         g->scale = WINDOW_SCALE_MIN;
@@ -374,6 +400,8 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
     g->last_time = 0.0;
     memset(&g->pending, 0, sizeof g->pending);
 
+    /* the fallback: a backend with a frame timer of its own takes over on
+       parent, and then this one stops rendering */
     const clap_host_timer_support_t *ht =
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
     if (ht && ht->register_timer(p->host, TIMER_MS, &g->timer_id))
@@ -409,6 +437,7 @@ static void gui_destroy(const clap_plugin_t *pl) {
     /* unhook the audio thread first; the App itself stays allocated so the
        renderer can never race a free */
     atomic_store_explicit(&p->gui_app, NULL, memory_order_release);
+    stop_native_timer(g);
     const clap_host_timer_support_t *ht =
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
     if (g->timer_on && ht) ht->unregister_timer(p->host, g->timer_id);
@@ -489,6 +518,7 @@ static bool gui_set_parent(const clap_plugin_t *pl,
     backend_show(g);
     g->parented = true;
     g->shown = true;
+    start_native_timer(g);
     if (g->stats.out) {
         int hw = 0, hh = 0;
         char host[32];
@@ -496,8 +526,10 @@ static bool gui_set_parent(const clap_plugin_t *pl,
             snprintf(host, sizeof host, "%dx%d", hw, hh);
         else
             snprintf(host, sizeof host, "unknown");
-        fprintf(g->stats.out, "gui: parented win=%dx%d host=%s scale=%.2f\n",
-                g->s.win_w, g->s.win_h, host, g->scale);
+        fprintf(g->stats.out,
+                "gui: parented win=%dx%d host=%s scale=%.2f src=%s\n",
+                g->s.win_w, g->s.win_h, host, g->scale,
+                g->native_timer ? "native" : "host");
         fflush(g->stats.out);
     }
     /* the editor is real now: let the audio thread feed it */
@@ -518,12 +550,14 @@ static bool gui_show(const clap_plugin_t *pl) {
     backend_show(g);
     g->shown = true;
     g->have_hash = false; /* the window may have come back empty */
+    start_native_timer(g);
     return true;
 }
 
 static bool gui_hide(const clap_plugin_t *pl) {
     Gui *g = gui_of(pl);
     if (!g || !g->parented) return false;
+    stop_native_timer(g);
     backend_hide(g);
     g->shown = false;
     return true;
@@ -541,7 +575,9 @@ const clap_plugin_gui_t PLUG_EXT_GUI = {
 static void on_timer(const clap_plugin_t *pl, clap_id timer_id) {
     Plug *p = pl->plugin_data;
     Gui *g = p->gui_state;
-    if (g && g->timer_on && timer_id == g->timer_id) gui_tick(p, g);
+    if (!g || !g->timer_on || timer_id != g->timer_id) return;
+    if (g->native_timer) return; /* the backend timer renders instead */
+    gui_tick(p, g);
 }
 
 const clap_plugin_timer_support_t PLUG_EXT_TIMER = {on_timer};

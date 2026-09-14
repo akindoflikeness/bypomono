@@ -114,7 +114,8 @@ ifeq ($(OS),linux)
   GUI_BACKEND_SRC = src/plug_gui_x11.c
 else ifeq ($(OS),macos)
   CLAP_LIBS = -lm -lpthread -framework CoreMIDI -framework CoreFoundation \
-              -framework Cocoa -framework QuartzCore $(FT_ONLY_LIBS)
+              -framework Cocoa -framework QuartzCore -framework CoreVideo \
+              $(FT_ONLY_LIBS)
   GUI_BACKEND_SRC = src/plug_gui_cocoa.m
 else
   CLAP_LIBS = -lm -lpthread -lwinmm -lgdi32 -luser32 $(FT_ONLY_LIBS)

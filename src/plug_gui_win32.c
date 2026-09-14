@@ -12,12 +12,17 @@
 #include "plug_gui_backend.h"
 
 #define BYPO_WNDCLASS L"BypoClapEditor"
+/* The system tick is ~15.6 ms, so a 16 ms timer lands one frame per tick. */
+#define FRAME_TIMER_ID 1
+#define FRAME_TIMER_MS 16
 
 typedef struct {
     HWND hwnd;
     HWND host; /* the window the host handed over */
     BITMAPINFO bmi;
     bool tracking; /* a WM_MOUSELEAVE is armed */
+    void (*frame_cb)(Gui *g);
+    bool frame_on;
 } W32Back;
 
 static W32Back *back_of(Gui *g) { return gui_surface(g)->back; }
@@ -105,6 +110,11 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC dc = BeginPaint(hwnd, &ps);
         blit_to(g, dc);
         EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_TIMER: {
+        W32Back *b = back_of(g);
+        if (wp == FRAME_TIMER_ID && b && b->frame_cb) b->frame_cb(g);
         return 0;
     }
     case WM_ERASEBKGND: return 1; /* every pixel is painted anyway */
@@ -276,3 +286,23 @@ void backend_hide(Gui *g) {
 int backend_event_fd(Gui *g) { return -1; }
 
 void backend_pump(Gui *g) {}
+
+/* WM_TIMER on the child window: the host's message loop dispatches it to
+   wndproc, so the frame runs on the thread that owns the window. */
+bool backend_start_frame_timer(Gui *g, void (*cb)(Gui *g)) {
+    W32Back *b = back_of(g);
+    if (!b || !b->hwnd) return false;
+    if (b->frame_on) return true;
+    if (!SetTimer(b->hwnd, FRAME_TIMER_ID, FRAME_TIMER_MS, NULL)) return false;
+    b->frame_cb = cb;
+    b->frame_on = true;
+    return true;
+}
+
+void backend_stop_frame_timer(Gui *g) {
+    W32Back *b = back_of(g);
+    if (!b || !b->frame_on) return;
+    KillTimer(b->hwnd, FRAME_TIMER_ID);
+    b->frame_cb = NULL;
+    b->frame_on = false;
+}

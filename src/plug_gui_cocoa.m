@@ -4,8 +4,10 @@
    thread. The view frame is points, the surface size device pixels. No ARC. */
 
 #import <Cocoa/Cocoa.h>
+#import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/QuartzCore.h>
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -28,8 +30,11 @@ enum {
 - (void)setGui:(Gui *)g;
 @end
 
+typedef struct FrameLink FrameLink; /* the display link, at end of file */
+
 typedef struct {
     BypoView *view;
+    FrameLink *fl; /* NULL unless a display link is running */
     /* Two present buffers used in turn. The layer keeps the image from the
        last present, and that image reads its bytes straight out of one of
        these, so the next frame is written into the other one. */
@@ -163,6 +168,7 @@ bool backend_open(Gui *g) {
 void backend_close(Gui *g) {
     CocoaBack *b = back_of(g);
     if (!b) return;
+    backend_stop_frame_timer(g);
     if (b->view) {
         /* drop the image before the buffer it reads from goes away */
         [[b->view layer] setContents:nil];
@@ -289,3 +295,80 @@ void backend_hide(Gui *g) {
 int backend_event_fd(Gui *g) { return -1; }
 
 void backend_pump(Gui *g) {}
+
+/* ---------- display link ---------- */
+/* CVDisplayLink is deprecated from macOS 15 and the NSView call that replaces
+   it is 14 and later, while this builds back to 12. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+struct FrameLink {
+    CVDisplayLinkRef link;
+    Gui *gui;
+    void (*cb)(Gui *g);
+    atomic_bool queued; /* a frame is already waiting on the main queue */
+    atomic_bool alive;  /* cleared by stop; a queued block then frees this */
+};
+
+/* Runs on the link's own thread, so all it does is hand the frame to the main
+   queue. Rendering never happens here. */
+static CVReturn frame_tick(CVDisplayLinkRef link, const CVTimeStamp *now,
+                           const CVTimeStamp *out, CVOptionFlags flags,
+                           CVOptionFlags *out_flags, void *ctx) {
+    FrameLink *fl = (FrameLink *)ctx;
+    /* a frame slower than the refresh must not build a backlog */
+    if (atomic_exchange(&fl->queued, true)) return kCVReturnSuccess;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!atomic_load(&fl->alive)) {
+            free(fl); /* stop ran while this was in flight */
+            return;
+        }
+        atomic_store(&fl->queued, false);
+        void (*cb)(Gui *) = fl->cb;
+        Gui *g = fl->gui;
+        cb(g); /* read both out first: the frame may stop the link */
+    });
+    return kCVReturnSuccess;
+}
+
+bool backend_start_frame_timer(Gui *g, void (*cb)(Gui *g)) {
+    CocoaBack *b = back_of(g);
+    if (!b || !b->view) return false;
+    if (b->fl) return true;
+    FrameLink *fl = calloc(1, sizeof *fl);
+    if (!fl) return false;
+    fl->gui = g;
+    fl->cb = cb;
+    atomic_init(&fl->queued, false);
+    atomic_init(&fl->alive, true);
+    if (CVDisplayLinkCreateWithActiveCGDisplays(&fl->link) != kCVReturnSuccess
+        || !fl->link) {
+        free(fl);
+        return false;
+    }
+    if (CVDisplayLinkSetOutputCallback(fl->link, frame_tick, fl)
+            != kCVReturnSuccess
+        || CVDisplayLinkStart(fl->link) != kCVReturnSuccess) {
+        CVDisplayLinkRelease(fl->link);
+        free(fl);
+        return false;
+    }
+    b->fl = fl;
+    return true;
+}
+
+void backend_stop_frame_timer(Gui *g) {
+    CocoaBack *b = back_of(g);
+    if (!b || !b->fl) return;
+    FrameLink *fl = b->fl;
+    b->fl = NULL;
+    CVDisplayLinkStop(fl->link); /* no further callback after this returns */
+    CVDisplayLinkRelease(fl->link);
+    fl->link = NULL;
+    /* this is the main thread, so a queued block is waiting, not running:
+       leave the free to it and do it here only when there is none */
+    atomic_store(&fl->alive, false);
+    if (!atomic_load(&fl->queued)) free(fl);
+}
+
+#pragma clang diagnostic pop

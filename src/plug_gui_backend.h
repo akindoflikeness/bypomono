@@ -70,6 +70,13 @@ void backend_hide(Gui *g);
 int backend_event_fd(Gui *g); /* fd the host should poll, or -1 */
 void backend_pump(Gui *g);    /* drain queued events into pending */
 
+/* Drive one frame per display refresh from a platform timer on the main
+   thread, because a host's CLAP timer can run far slower than it was asked
+   for. False when the backend has none and the host timer must keep driving;
+   cb is then never called. */
+bool backend_start_frame_timer(Gui *g, void (*cb)(Gui *g));
+void backend_stop_frame_timer(Gui *g);
+
 /* ---------- input: fed by the backends, main thread ---------- */
 
 void gui_in_motion(Gui *g, int px, int py);        /* window device pixels */

@@ -18,6 +18,7 @@ typedef struct {
 
 struct Gui {
     GuiSurface s;     /* the only part a backend may touch */
+    Plug *plug;       /* the owner, so a backend timer can reach it */
     App *app;
     Ui ui;
     Canvas canvas;
@@ -27,6 +28,8 @@ struct Gui {
     bool created, parented, shown;
     clap_id timer_id;
     bool timer_on, fd_on;
+    bool native_timer; /* a backend timer drives the frames, not the host */
+    bool in_tick;      /* a frame is running; a timer that fires is dropped */
     int fd; /* what fd_on registered */
     double t0, last_time;
     uint64_t last_hash; /* canvas fingerprint last presented */

@@ -155,6 +155,12 @@ int backend_event_fd(Gui *g) {
     return b && b->dpy ? ConnectionNumber(b->dpy) : -1;
 }
 
+/* Xlib has no main-thread timer of its own; anything finer than the host's
+   would need a thread, so the host timer keeps driving here. */
+bool backend_start_frame_timer(Gui *g, void (*cb)(Gui *g)) { return false; }
+
+void backend_stop_frame_timer(Gui *g) {}
+
 static void x_key(Gui *g, XKeyEvent *ev, bool down) {
     char buf[8] = {0};
     KeySym ks = 0;

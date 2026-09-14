@@ -1,0 +1,69 @@
+{
+  "patch": {
+    "algorithm": "PSSP",
+    "ratio_mode": "Fibonacci",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.0,
+    "index": 0.029787906,
+    "rip": 0.0,
+    "master_level": 0.6,
+    "glide_seconds": 0.020339329,
+    "field": 0.0,
+    "curve": 0.5
+  },
+  "verb": {
+    "mix": 0.0,
+    "ghost": 0.0,
+    "decay": 0.05,
+    "damp": 0.0,
+    "haunt": 0.0
+  },
+  "melody": {
+    "enabled": false,
+    "tuning": "Scale",
+    "scale": "Phrygian",
+    "root_midi": 56,
+    "range_degrees": 5,
+    "rate_hz": 5.5,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 30.0,
+  "stair": {
+    "depth": 0.0,
+    "rate": 0.01,
+    "span": 0.05,
+    "resonance": 0.0
+  },
+  "warmth": 0.5
+}

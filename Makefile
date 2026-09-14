@@ -56,6 +56,8 @@ else
   AUDIO_LIBS = $(SDL_LIBS)
 endif
 
+VERSION := $(shell sed -n 's/^#define APP_VERSION "\(.*\)"/\1/p' src/gui/app.h)
+
 CLI = blow-your-phase-off$(EXE)
 GUI = blow-your-phase-off-gui$(EXE)
 TESTS = bypo-tests$(EXE)
@@ -89,7 +91,14 @@ check: $(TESTS)
 tests/%.o: tests/%.c tests/test.h src/dsp/dsp.h src/gui/app.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-# ---------- CLAP (Linux only: the editor embeds via X11) ----------
+# ---------- CLAP ----------
+ifeq ($(OS),linux)
+  CLAP_LIBS = $(SYS_LIBS) -lX11 $(shell pkg-config --libs freetype2)
+else
+  # a library has no main and no subsystem of its own
+  CLAP_LIBS = $(SYS_LIBS) $(filter-out -lSDL2main -mwindows,$(FT_LIBS))
+endif
+
 GUI_PIC = $(filter-out src/gui/gui_main.pic.o,$(GUI_SRC:.c=.pic.o))
 PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/audio.pic.o src/midi.pic.o \
           src/plug.pic.o src/plug_gui.pic.o
@@ -97,9 +106,43 @@ PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/audio.pic.o src/midi.pic.o \
 %.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -fPIC -c $< -o $@
 
+ifeq ($(OS),macos)
+# A macOS CLAP is a bundle directory; Apple silicon refuses to load one that
+# carries no signature, hence the ad hoc (`-`) codesign.
 bypo.clap: $(PIC_OBJ)
-	$(CC) $(CFLAGS) -shared -o $@ $^ -lm -lasound -lpthread -lX11 \
-	      $(shell pkg-config --libs freetype2)
+	rm -rf $@
+	mkdir -p $@/Contents/MacOS
+	$(CC) $(CFLAGS) -dynamiclib -Wl,-install_name,@rpath/bypo \
+	      -o $@/Contents/MacOS/bypo $^ $(CLAP_LIBS)
+	printf 'BNDL????' > $@/Contents/PkgInfo
+	printf '%s\n' \
+	  '<?xml version="1.0" encoding="UTF-8"?>' \
+	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+	  '<plist version="1.0">' \
+	  '<dict>' \
+	  '	<key>CFBundleIdentifier</key><string>com.akol.bypo</string>' \
+	  '	<key>CFBundleName</key><string>BYPO</string>' \
+	  '	<key>CFBundleExecutable</key><string>bypo</string>' \
+	  '	<key>CFBundlePackageType</key><string>BNDL</string>' \
+	  '	<key>CFBundleSignature</key><string>????</string>' \
+	  '	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>' \
+	  '	<key>CFBundleShortVersionString</key><string>$(VERSION)</string>' \
+	  '	<key>CFBundleVersion</key><string>$(VERSION)</string>' \
+	  '</dict>' \
+	  '</plist>' > $@/Contents/Info.plist
+	@# Homebrew's dylibs are linked by absolute path; pull them into the bundle
+	@if command -v dylibbundler >/dev/null; then \
+	  dylibbundler -od -b -x $@/Contents/MacOS/bypo -d $@/Contents/libs \
+	               -p @loader_path/../libs && \
+	  codesign --force --sign - $@/Contents/libs/*.dylib; \
+	else \
+	  echo "warning: dylibbundler not found; bypo.clap still links Homebrew dylibs by absolute path" >&2; \
+	fi
+	codesign --force --sign - $@
+else
+bypo.clap: $(PIC_OBJ)
+	$(CC) $(CFLAGS) -shared -o $@ $^ $(CLAP_LIBS)
+endif
 
 # ---------- dist ----------
 # One drop-anywhere folder on every platform: the GUI binary with README,
@@ -120,12 +163,13 @@ stage: $(GUI)
 	mkdir $(DIST)
 	cp $(GUI) README.md LICENSE THIRD-PARTY-LICENSES.txt $(DIST)/
 	cp -r assets $(DIST)/
-	@# the stock bank is optional; without it the app starts on a default patch
-	@if [ -d presets/BYPO ]; then \
-	  mkdir -p $(DIST)/presets && cp -r presets/BYPO $(DIST)/presets/; \
-	fi
+	mkdir -p $(DIST)/presets && cp -r presets/BYPO $(DIST)/presets/
+	@# bypo.clap has its own target because it needs the CLAP headers; ship it
+	@# if it was built, and -R so the macOS bundle directory survives the copy
+	@if [ -e bypo.clap ]; then cp -R bypo.clap $(DIST)/; \
+	else echo "warning: bypo.clap not built; this archive ships the app only" >&2; fi
 ifeq ($(OS),windows)
-	ldd $(GUI) | awk '/mingw64|ucrt64|clang64/ {print $$3}' | sort -u | xargs -r -I{} cp {} $(DIST)/
+	ldd $(GUI) $$([ -e bypo.clap ] && echo bypo.clap) | awk '/mingw64|ucrt64|clang64/ {print $$3}' | sort -u | xargs -r -I{} cp {} $(DIST)/
 endif
 ifeq ($(OS),macos)
 	@# Homebrew's SDL2 and FreeType are linked by absolute path; pull them
@@ -160,7 +204,7 @@ endif
 
 clean:
 	rm -f $(DSP_OBJ) $(TEST_OBJ) $(GUI_OBJ) $(PIC_OBJ) src/audio.o src/midi.o \
-	      src/app.o $(CLI) $(GUI) $(TESTS) bypo.clap
-	rm -rf bypomono-*
+	      src/app.o $(CLI) $(GUI) $(TESTS)
+	rm -rf bypomono-* bypo.clap
 
 .PHONY: all check clean stage dist

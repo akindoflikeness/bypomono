@@ -1,0 +1,77 @@
+{
+  "patch": {
+    "algorithm": "SSSS",
+    "ratio_mode": "Golden",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 1.618034,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": false,
+        "ratio": 2.6180341,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 4.2360682,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 6.854102,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.5,
+    "index": 1.0,
+    "rip": 0.0,
+    "master_level": 0.32,
+    "glide_seconds": 0.00058394,
+    "field": 1.0,
+    "curve": 0.5
+  },
+  "verb": {
+    "mix": 0.27691916,
+    "ghost": 0.4,
+    "decay": 4.0,
+    "damp": 0.4,
+    "haunt": 0.0
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "Scale",
+    "scale": "Phrygian",
+    "root_midi": 45,
+    "range_degrees": 8,
+    "rate_hz": 1.618034,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 110.0,
+  "harmony": {
+    "enabled": true,
+    "mix": 0.583322,
+    "sync": false,
+    "division": 12,
+    "rate_hz": 1.0,
+    "spread": 0.8334749,
+    "size": 1.498959,
+    "warp": 0.2756114,
+    "feedback": 0.607072,
+    "dimension": 0.53649795,
+    "tail": 0.72661346
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.5
+}

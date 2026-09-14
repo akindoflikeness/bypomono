@@ -1,3 +1,4 @@
+#include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
@@ -22,7 +23,9 @@ typedef struct {
     XImage *img;
     uint32_t *out_px; /* scaled output buffer owned by img */
     int *xmap;
-    float scale;
+    float fit;        /* largest scale this display fits */
+    float host_scale; /* the host's factor, 1.0 until it says otherwise */
+    float scale;      /* fit * host_scale, snapped */
     int win_w, win_h;
     bool created, parented, shown;
     clap_id timer_id;
@@ -43,6 +46,36 @@ static double now_s(void) {
 
 static Gui *gui_of(const clap_plugin_t *pl) {
     return ((Plug *)pl->plugin_data)->gui_state;
+}
+
+/* ---------- magnification ---------- */
+
+/* Usable desktop of the default screen, which spans every head, not one. */
+static void x_usable_size(Display *dpy, int *w, int *h) {
+    int scr = DefaultScreen(dpy);
+    *w = DisplayWidth(dpy, scr);
+    *h = DisplayHeight(dpy, scr);
+
+    Atom prop = XInternAtom(dpy, "_NET_WORKAREA", True);
+    if (prop == None) return;
+    Atom type = None;
+    int fmt = 0;
+    unsigned long n = 0, after = 0;
+    unsigned char *data = NULL;
+    if (XGetWindowProperty(dpy, RootWindow(dpy, scr), prop, 0, 4, False,
+                           XA_CARDINAL, &type, &fmt, &n, &after, &data)
+        != Success)
+        return;
+    if (data && type == XA_CARDINAL && fmt == 32 && n >= 4) {
+        const long *a = (const long *)(const void *)data;
+        if (a[2] > 0 && a[2] < *w) *w = (int)a[2];
+        if (a[3] > 0 && a[3] < *h) *h = (int)a[3];
+    }
+    if (data) XFree(data);
+}
+
+static float compose_scale(const Gui *g) {
+    return snap_scale(g->fit * g->host_scale);
 }
 
 /* ---------- shadows <- host params ---------- */
@@ -144,6 +177,41 @@ static void pump_x(Gui *g) {
     }
 }
 
+/* ---------- output surface ---------- */
+
+static bool build_surface(Gui *g) {
+    int screen = DefaultScreen(g->dpy);
+    g->win_w = (int)lroundf(DESIGN_W * g->scale);
+    g->win_h = (int)lroundf(DESIGN_H * g->scale);
+
+    if (g->img) {
+        XDestroyImage(g->img); /* frees out_px */
+        g->img = NULL;
+        g->out_px = NULL;
+    }
+    free(g->xmap);
+    g->xmap = NULL;
+
+    g->out_px = malloc((size_t)g->win_w * g->win_h * 4);
+    if (!g->out_px) return false;
+    g->img = XCreateImage(g->dpy, DefaultVisual(g->dpy, screen),
+                          (unsigned)DefaultDepth(g->dpy, screen), ZPixmap, 0,
+                          (char *)g->out_px, (unsigned)g->win_w,
+                          (unsigned)g->win_h, 32, 0);
+    if (!g->img) {
+        free(g->out_px);
+        g->out_px = NULL;
+        return false;
+    }
+    g->xmap = malloc((size_t)g->win_w * sizeof *g->xmap);
+    if (!g->xmap) return false;
+    for (int x = 0; x < g->win_w; x++) {
+        int sx = (int)((float)x / g->scale);
+        g->xmap[x] = sx < g->canvas.w ? sx : g->canvas.w - 1;
+    }
+    return true;
+}
+
 /* ---------- blit ---------- */
 
 static void blit(Gui *g) {
@@ -226,7 +294,9 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         g = calloc(1, sizeof *g);
         if (!g) return false;
         p->gui_state = g;
-        g->scale = 1.0f;
+        g->fit = WINDOW_SCALE_MIN;
+        g->host_scale = 1.0f;
+        g->scale = WINDOW_SCALE_MIN;
     }
     if (g->created) return true;
 
@@ -241,6 +311,12 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
 
     g->dpy = XOpenDisplay(NULL);
     if (!g->dpy) return false;
+
+    /* settled before the host can ask for a size */
+    int avail_w = 0, avail_h = 0;
+    x_usable_size(g->dpy, &avail_w, &avail_h);
+    g->fit = pick_display_scale(avail_w, avail_h);
+    g->scale = compose_scale(g);
 
     if (!g->app) {
         g->app = calloc(1, sizeof *g->app);
@@ -313,10 +389,21 @@ static void gui_destroy(const clap_plugin_t *pl) {
 }
 
 static bool gui_set_scale(const clap_plugin_t *pl, double scale) {
-    Gui *g = gui_of(pl);
+    Plug *p = pl->plugin_data;
+    Gui *g = p->gui_state;
     if (!g) return false;
-    float s = (float)(round(scale * 4.0) / 4.0);
-    g->scale = clampf(s, 1.0f, 2.0f);
+    g->host_scale = scale > 0.0 ? (float)scale : 1.0f;
+    float s = compose_scale(g);
+    if (s == g->scale) return true;
+    g->scale = s;
+    if (!g->parented) return true;
+
+    if (!build_surface(g)) return false;
+    XResizeWindow(g->dpy, g->win, (unsigned)g->win_w, (unsigned)g->win_h);
+    XFlush(g->dpy);
+    const clap_host_gui_t *hg = p->host->get_extension(p->host, CLAP_EXT_GUI);
+    if (hg && hg->request_resize)
+        hg->request_resize(p->host, (uint32_t)g->win_w, (uint32_t)g->win_h);
     return true;
 }
 
@@ -351,8 +438,7 @@ static bool gui_set_parent(const clap_plugin_t *pl,
     Gui *g = p->gui_state;
     if (!g || !g->created || !g->dpy) return false;
 
-    g->win_w = (int)lroundf(DESIGN_W * g->scale);
-    g->win_h = (int)lroundf(DESIGN_H * g->scale);
+    if (!build_surface(g)) return false;
 
     int screen = DefaultScreen(g->dpy);
     g->win = XCreateSimpleWindow(g->dpy, (Window)window->x11, 0, 0,
@@ -364,18 +450,6 @@ static bool gui_set_parent(const clap_plugin_t *pl,
                      | PointerMotionMask | KeyPressMask | KeyReleaseMask
                      | EnterWindowMask | LeaveWindowMask);
     g->gc = XCreateGC(g->dpy, g->win, 0, NULL);
-
-    g->out_px = malloc((size_t)g->win_w * g->win_h * 4);
-    if (!g->out_px) return false;
-    g->img = XCreateImage(g->dpy, DefaultVisual(g->dpy, screen),
-                          (unsigned)DefaultDepth(g->dpy, screen), ZPixmap, 0,
-                          (char *)g->out_px, (unsigned)g->win_w,
-                          (unsigned)g->win_h, 32, 0);
-    g->xmap = malloc((size_t)g->win_w * sizeof(int));
-    for (int x = 0; x < g->win_w; x++) {
-        int sx = (int)((float)x / g->scale);
-        g->xmap[x] = sx < g->canvas.w ? sx : g->canvas.w - 1;
-    }
 
     XMapWindow(g->dpy, g->win);
     XFlush(g->dpy);

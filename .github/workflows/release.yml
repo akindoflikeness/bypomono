@@ -101,7 +101,6 @@ jobs:
             bypomono-*.tar.gz
             bypomono-*.zip
             bypomono-*-SHA256SUMS.txt
-            bypo.clap
 
   draft-release:
     name: draft release
@@ -138,4 +137,3 @@ jobs:
             out/bypomono-*.tar.gz
             out/bypomono-*.zip
             out/bypomono-*-SHA256SUMS.txt
-            out/bypo.clap

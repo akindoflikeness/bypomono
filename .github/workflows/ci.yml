@@ -45,4 +45,3 @@ jobs:
           path: |
             bypomono-linux-x86_64.tar.gz
             bypomono-linux-x86_64-SHA256SUMS.txt
-            bypo.clap

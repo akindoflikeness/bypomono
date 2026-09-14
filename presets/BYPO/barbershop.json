@@ -1,0 +1,69 @@
+{
+  "patch": {
+    "algorithm": "SSSS",
+    "ratio_mode": "Golden",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 1.618034,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 2.6180341,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 4.2360682,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": false,
+        "ratio": 6.854102,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.0,
+    "index": 0.79825217,
+    "rip": 1.0,
+    "master_level": 1.0,
+    "glide_seconds": 0.022619743,
+    "field": 0.09,
+    "curve": 0.5
+  },
+  "verb": {
+    "mix": 0.65,
+    "ghost": 0.8,
+    "decay": 1.2,
+    "damp": 0.76,
+    "haunt": 0.25
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "GoldenWalk",
+    "scale": "PhrygianDominant",
+    "root_midi": 33,
+    "range_degrees": 2,
+    "rate_hz": 0.42,
+    "source": "Xorshift"
+  },
+  "drone_hz": 45.0,
+  "stair": {
+    "depth": 0.53,
+    "rate": 0.35,
+    "span": 0.43,
+    "resonance": 0.66
+  },
+  "warmth": 0.5
+}

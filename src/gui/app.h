@@ -19,6 +19,12 @@
 #define MIN_WINDOW_W 233.0f
 #define MIN_WINDOW_H 144.0f
 
+/* Quarter steps: the blit is nearest-neighbour, so a fractional factor
+   gives alternating fat/thin pixel rows rather than blur. */
+#define WINDOW_SCALE_MIN 1.0f
+#define WINDOW_SCALE_MAX 4.0f
+#define WINDOW_SCALE_STEP 0.25f
+
 #define TIGHT 2.0f
 #define SNUG 3.0f
 #define GAP 5.0f
@@ -50,6 +56,13 @@
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
 #define APP_VERSION "1.1.0"
+
+/* scale.c */
+/* largest quarter step whose magnified grid fits avail_w x avail_h less
+   window chrome; BYPO_SCALE overrides */
+float pick_display_scale(int avail_w, int avail_h);
+/* nearest quarter step, clamped to the same range */
+float snap_scale(float s);
 
 /* ---------- audio<->ui protocol ---------- */
 

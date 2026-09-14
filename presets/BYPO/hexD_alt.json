@@ -1,0 +1,76 @@
+{
+  "patch": {
+    "algorithm": "SSSS",
+    "ratio_mode": "Harmonic",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 4.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.0,
+    "index": 0.0,
+    "rip": 0.0,
+    "master_level": 0.8,
+    "glide_seconds": 5.3782014e-7,
+    "field": 0.0,
+    "curve": 0.5
+  },
+  "verb": {
+    "mix": 0.35,
+    "ghost": 0.4,
+    "decay": 4.0,
+    "damp": 0.4,
+    "haunt": 0.0
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "Scale",
+    "scale": "Phrygian",
+    "root_midi": 50,
+    "range_degrees": 10,
+    "rate_hz": 8.0,
+    "source": "Xorshift"
+  },
+  "drone_hz": 110.0,
+  "chandas": {
+    "enabled": true,
+    "mix": 0.69582427,
+    "sync": true,
+    "division": 8,
+    "rate_hz": 1.0,
+    "spread": 0.3940195,
+    "size": 1.6507506,
+    "warp": 0.8012077,
+    "dimension": 0.22095047,
+    "tail": 0.12307246
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.660525
+}

@@ -1,12 +1,32 @@
-# BYPO_mono
+<p align="center">
+  <img src=".github/wordmark.png" width="560" alt="BLOW YOUR PHASE OFF">
+</p>
 
-# One Tone, Many Voices
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1f6feb" alt="MIT"></a>
+  <img src="https://img.shields.io/badge/CLAP-plugin-8957e5" alt="CLAP">
+</p>
 
-Blow Your Phase Off is an untamed opinionated instrument designed using mathematical irrationality to access uniquely stable inharmonic timbres.
-The architecture is PM using a dual algorithm selector. The arrangement of modulators, carriers and feedback are selected using
-roman numerals 1...8 and the ratio mode is selected using the ratio mode selector providing 5 separate irrational ratio configurations. PM modulation depth is tuned via these recursive algorithms.
+<p align="center">
+  <a href="https://akindoflikeness.net"><b>Website</b></a> ·
+  <a href="https://www.youtube.com/@akindoflikeness"><b>YouTube</b></a>
+</p>
 
-# Operator Structures
+**One tone, many voices.** An untamed, opinionated instrument that uses
+mathematical irrationality to reach uniquely stable inharmonic timbres.
+The architecture is PM with a dual algorithm selector: the arrangement of
+modulators, carriers and feedback is chosen by roman numeral I to VIII, and the
+ratio mode selector gives five separate irrational ratio configurations.
+PM depth is tuned through these recursive algorithms.
+Pure C11, SDL2, one binary, and a CLAP for your DAW.
+
+```
+$ ./blow-your-phase-off
+audio out: default @ 48000 Hz, 2 ch
+BLOW YOUR PHASE OFF — droning at 110 Hz (A2), golden mode, algorithm I
+```
+
+## Operator Structures
 
 | # | ID | Structure | Carriers | Max depth | Feedback on |
 |---|----|-----------|----------|-----------|-------------|
@@ -19,36 +39,36 @@ roman numerals 1...8 and the ratio mode is selected using the ratio mode selecto
 | VII  | `PPFF` | FM pairs `1→2` and `4→5`, plus sine `3` | 3 | 2 | **op 2 (depth 1)** |
 | VIII | `PFFF` | 3-op stack `1→2→3` and FM pair `4→5` | 2 | 3 | **op 3 (depth 1)** |
 
-# Phase Violence
+## Phase Violence
 
 There are some additional controls that allow for even deeper timbric exploration that I encourage you to experiment with those being
 RIP, haunt, and ghost. Operators can be turned off removing not only its signal from the output but from the modulation signal chain.
 I'd highly recommend experimenting with turning off operators to find unique mixtures (especially in conjunction with The Room's ghost).
 
-# Chambers
+## Chambers
 
 The Room is a uniquely close sounding reverb with a dirty tank and a modulation linked dampener (via field).
 It has its own tricks with haunt and ghost that have novel effects, and of course The Room was structured using fibonacci recursion.
 Here it was used to define phase offsets via the all pass filter networks.
 
-# Progenitor
+## Progenitor
 
 Chandas listens to the signal before and after we do. It's a unique granular delay that can sync with the internal sequencer.
 Whilst syncing it has a polyrhythmic texture though Chandas also features its own massive lush reverb with two multi controls to tune
 its bloom.
 
-# Textural Utility
+## Textural Utility
 
 And finally warmth, it's mainly an output level utility - with some extra juice packed into the slider's range. Near the top end
 of its range it starts upward multiband compression, even-bias clipping, spectral processing and an auto-release limiter stage.
 
-# Output
+## Output
 
 You can record takes within the application that records 48khz 32bit float .wav files to your Music folder.
 The instrument runs at 48khz sample rate, selects your default output device and is fully midi compatible.
 A console accessed using "/" is available for mapping MIDI CC to parameters.
 A release is planned for Linux, Windows and MacOS as a standalone application and CLAP plugin for DAWs.
 
-# On AI 
+## On AI 
 
 Without AI this wouldn't exist. Primarily it has been programmed by AI agents. Every change is read, committed and tested by hand and the design and audio architecture are mine (akindoflikeness/AKOL). I've tried my best to model what I think responsible AI usage looks like - because AI is not exclusively a force for good. In my view AI is a tool and this is written to be open so that you can make an informed decision about whether to engage with it or not. If your worldview precludes you from engaging with something a lone musician designed with care, then perhaps your worldview is the thing that needs adjusting. 

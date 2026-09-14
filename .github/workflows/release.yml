@@ -149,7 +149,7 @@ jobs:
           esac
           cvdir="$PWD/.clap-validator"
           mkdir -p "$cvdir"
-          curl -sSfL -o "$cvdir/cv.zip" \
+          curl -sSfL --retry 5 --retry-delay 10 --retry-all-errors -o "$cvdir/cv.zip" \
             "https://github.com/free-audio/clap-validator/releases/download/0.4.1/clap-validator-$CLAP_VALIDATOR-$asset.zip"
           unzip -oq "$cvdir/cv.zip" -d "$cvdir"
           if ls "$cvdir"/*.tar.gz >/dev/null 2>&1; then

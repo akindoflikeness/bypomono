@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -28,6 +29,17 @@
 
 #define PATHBUF 1024
 #define JOINBUF (PATHBUF + 320)
+/* realpath may fill its destination to PATH_MAX, and a fortified libc
+   aborts outright when the destination is provably smaller, however short
+   the resolved path turns out to be. Every realpath destination gets this. */
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#if PATH_MAX > PATHBUF
+#define RESOLVEDBUF PATH_MAX
+#else
+#define RESOLVEDBUF PATHBUF
+#endif
 #define STOCK_LEDGER ".stock-seen"
 #define DRAINED_LEDGER ".drained-from"
 #define SELECTED_WORD "selected"
@@ -155,7 +167,7 @@ static int exe_path(char *buf, size_t len) {
 #elif defined(__APPLE__)
     uint32_t n = (uint32_t)len;
     if (_NSGetExecutablePath(buf, &n) != 0) return -1;
-    char real[PATHBUF];
+    char real[RESOLVEDBUF];
     if (realpath(buf, real)) snprintf(buf, len, "%s", real);
     return 0;
 #elif defined(_WIN32)
@@ -224,7 +236,7 @@ static int module_path(char *buf, size_t len) {
     Dl_info info;
     if (!dladdr((void *)(uintptr_t)&module_path, &info) || !info.dli_fname)
         return -1;
-    char real[PATHBUF];
+    char real[RESOLVEDBUF];
     if (realpath(info.dli_fname, real))
         snprintf(buf, len, "%s", real);
     else
@@ -724,7 +736,7 @@ void prepare_preset_dir(void) {
         char ledger_path[JOINBUF];
         snprintf(ledger_path, sizeof ledger_path, "%s/%s", dir, DRAINED_LEDGER);
         char *drained = read_all(ledger_path);
-        char key[PATHBUF];
+        char key[RESOLVEDBUF];
         if (!realpath(stock, key)) snprintf(key, sizeof key, "%s", stock);
         bool done = false;
         if (drained) {

@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "plug_gui.h"
+#include "plug_gui_backend.h"
 
 typedef struct {
     Display *dpy;
@@ -17,7 +17,7 @@ typedef struct {
     XImage *img;
 } X11Back;
 
-static X11Back *back_of(Gui *g) { return g->back; }
+static X11Back *back_of(Gui *g) { return gui_surface(g)->back; }
 
 static void drop_image(X11Back *b) {
     if (!b->img) return;
@@ -34,7 +34,7 @@ bool backend_open(Gui *g) {
         free(b);
         return false;
     }
-    g->back = b;
+    gui_surface(g)->back = b;
     return true;
 }
 
@@ -48,7 +48,7 @@ void backend_close(Gui *g) {
         XCloseDisplay(b->dpy);
     }
     free(b);
-    g->back = NULL;
+    gui_surface(g)->back = NULL;
 }
 
 /* Usable desktop of the default screen, which spans every head, not one. */
@@ -96,24 +96,26 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
 
 bool backend_resize(Gui *g) {
     X11Back *b = back_of(g);
-    if (!b || !b->win || !g->out_px) return false;
+    GuiSurface *s = gui_surface(g);
+    if (!b || !b->win || !s->out_px) return false;
     int screen = DefaultScreen(b->dpy);
     drop_image(b);
     b->img = XCreateImage(b->dpy, DefaultVisual(b->dpy, screen),
                           (unsigned)DefaultDepth(b->dpy, screen), ZPixmap, 0,
-                          (char *)g->out_px, (unsigned)g->win_w,
-                          (unsigned)g->win_h, 32, 0);
+                          (char *)s->out_px, (unsigned)s->win_w,
+                          (unsigned)s->win_h, 32, 0);
     if (!b->img) return false;
-    XResizeWindow(b->dpy, b->win, (unsigned)g->win_w, (unsigned)g->win_h);
+    XResizeWindow(b->dpy, b->win, (unsigned)s->win_w, (unsigned)s->win_h);
     XFlush(b->dpy);
     return true;
 }
 
 void backend_present(Gui *g) {
     X11Back *b = back_of(g);
+    GuiSurface *s = gui_surface(g);
     if (!b || !b->win || !b->img) return;
-    XPutImage(b->dpy, b->win, b->gc, b->img, 0, 0, 0, 0, (unsigned)g->win_w,
-              (unsigned)g->win_h);
+    XPutImage(b->dpy, b->win, b->gc, b->img, 0, 0, 0, 0, (unsigned)s->win_w,
+              (unsigned)s->win_h);
     XFlush(b->dpy);
 }
 

@@ -5,12 +5,11 @@
 #define _UNICODE
 #include <windows.h>
 #include <windowsx.h>
-#undef CC_NONE /* wingdi.h spells a curve capability the way app.h spells a CC */
 
 #include <stdlib.h>
 #include <string.h>
 
-#include "plug_gui.h"
+#include "plug_gui_backend.h"
 
 #define BYPO_WNDCLASS L"BypoClapEditor"
 
@@ -20,7 +19,7 @@ typedef struct {
     bool tracking; /* a WM_MOUSELEAVE is armed */
 } W32Back;
 
-static W32Back *back_of(Gui *g) { return g->back; }
+static W32Back *back_of(Gui *g) { return gui_surface(g)->back; }
 
 static HINSTANCE self_instance(void) {
     HMODULE h = NULL;
@@ -47,9 +46,10 @@ static UINT win_dpi(HWND hwnd) {
 
 static void blit_to(Gui *g, HDC dc) {
     W32Back *b = back_of(g);
-    if (!b || !g->out_px) return;
-    StretchDIBits(dc, 0, 0, g->win_w, g->win_h, 0, 0, g->win_w, g->win_h,
-                  g->out_px, &b->bmi, DIB_RGB_COLORS, SRCCOPY);
+    GuiSurface *s = gui_surface(g);
+    if (!b || !s->out_px) return;
+    StretchDIBits(dc, 0, 0, s->win_w, s->win_h, 0, 0, s->win_w, s->win_h,
+                  s->out_px, &b->bmi, DIB_RGB_COLORS, SRCCOPY);
 }
 
 /* ---------- input ---------- */
@@ -186,7 +186,7 @@ bool backend_open(Gui *g) {
     b->bmi.bmiHeader.biPlanes = 1;
     b->bmi.bmiHeader.biBitCount = 32;
     b->bmi.bmiHeader.biCompression = BI_RGB;
-    g->back = b;
+    gui_surface(g)->back = b;
     return true;
 }
 
@@ -198,7 +198,7 @@ void backend_close(Gui *g) {
         DestroyWindow(b->hwnd);
     }
     free(b);
-    g->back = NULL;
+    gui_surface(g)->back = NULL;
 }
 
 void backend_usable_screen(Gui *g, int *w, int *h) {
@@ -224,16 +224,18 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
     SetWindowLongPtrW(b->hwnd, GWLP_USERDATA, (LONG_PTR)(void *)g);
     /* a host that never calls set_scale still tells us the monitor density */
     UINT dpi = win_dpi(b->hwnd);
-    if (dpi != 96 && g->host_scale == 1.0f) g->host_scale = (float)dpi / 96.0f;
+    GuiSurface *s = gui_surface(g);
+    if (dpi != 96 && s->host_scale == 1.0f) s->host_scale = (float)dpi / 96.0f;
     return true;
 }
 
 bool backend_resize(Gui *g) {
     W32Back *b = back_of(g);
-    if (!b || !b->hwnd || !g->out_px) return false;
-    b->bmi.bmiHeader.biWidth = g->win_w;
-    b->bmi.bmiHeader.biHeight = -g->win_h; /* negative: top-down rows */
-    SetWindowPos(b->hwnd, NULL, 0, 0, g->win_w, g->win_h,
+    GuiSurface *s = gui_surface(g);
+    if (!b || !b->hwnd || !s->out_px) return false;
+    b->bmi.bmiHeader.biWidth = s->win_w;
+    b->bmi.bmiHeader.biHeight = -s->win_h; /* negative: top-down rows */
+    SetWindowPos(b->hwnd, NULL, 0, 0, s->win_w, s->win_h,
                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
     return true;
 }

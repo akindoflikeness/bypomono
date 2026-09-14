@@ -113,11 +113,11 @@ GUI_PIC = $(filter-out src/gui/gui_main.pic.o,$(GUI_SRC:.c=.pic.o))
 PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
           src/plug.pic.o src/plug_gui.pic.o $(GUI_BACKEND_OBJ)
 
-%.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h src/plug_gui.h
+%.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h src/plug_gui.h src/plug_gui_backend.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) $(MACOS_MIN) -fPIC -c $< -o $@
 
 # manual retain/release, so no -fobjc-arc
-src/plug_gui_cocoa.pic.o: src/plug_gui_cocoa.m src/plug_gui.h src/plug.h
+src/plug_gui_cocoa.pic.o: src/plug_gui_cocoa.m src/plug_gui_backend.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) $(MACOS_MIN) \
 	      -x objective-c -fno-objc-arc -fPIC -c $< -o $@
 

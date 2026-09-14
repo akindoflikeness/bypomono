@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "plug_gui.h"
+#include "plug_gui_backend.h"
 
 /* hardware key codes, kHIDUsage / Carbon kVK_* values */
 enum {
@@ -30,7 +30,7 @@ typedef struct {
     BypoView *view;
 } CocoaBack;
 
-static CocoaBack *back_of(Gui *g) { return (CocoaBack *)g->back; }
+static CocoaBack *back_of(Gui *g) { return (CocoaBack *)gui_surface(g)->back; }
 
 static CGFloat backing_of(BypoView *v) {
     NSWindow *w = v ? [v window] : nil;
@@ -72,12 +72,13 @@ static CGFloat backing_of(BypoView *v) {
 }
 
 - (void)drawRect:(NSRect)dirty {
-    if (!gui || !gui->out_px) return;
+    GuiSurface *s = gui ? gui_surface(gui) : NULL;
+    if (!s || !s->out_px) return;
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
     if (!ctx) return;
-    size_t w = (size_t)gui->win_w, h = (size_t)gui->win_h;
+    size_t w = (size_t)s->win_w, h = (size_t)s->win_h;
     CGDataProviderRef prov =
-        CGDataProviderCreateWithData(NULL, gui->out_px, w * h * 4, NULL);
+        CGDataProviderCreateWithData(NULL, s->out_px, w * h * 4, NULL);
     if (!prov) return;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     /* the buffer is XRGB words, so BGRX bytes on a little-endian machine */
@@ -175,7 +176,7 @@ static CGFloat backing_of(BypoView *v) {
 bool backend_open(Gui *g) {
     CocoaBack *b = calloc(1, sizeof *b);
     if (!b) return false;
-    g->back = b;
+    gui_surface(g)->back = b;
     return true;
 }
 
@@ -187,7 +188,7 @@ void backend_close(Gui *g) {
         [b->view release];
     }
     free(b);
-    g->back = NULL;
+    gui_surface(g)->back = NULL;
 }
 
 void backend_usable_screen(Gui *g, int *w, int *h) {
@@ -218,10 +219,11 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
 
 bool backend_resize(Gui *g) {
     CocoaBack *b = back_of(g);
-    if (!b || !b->view || !g->out_px) return false;
-    CGFloat s = backing_of(b->view);
-    [b->view setFrame:NSMakeRect(0, 0, (CGFloat)g->win_w / s,
-                                 (CGFloat)g->win_h / s)];
+    GuiSurface *s = gui_surface(g);
+    if (!b || !b->view || !s->out_px) return false;
+    CGFloat bs = backing_of(b->view);
+    [b->view setFrame:NSMakeRect(0, 0, (CGFloat)s->win_w / bs,
+                                 (CGFloat)s->win_h / bs)];
     [b->view setNeedsDisplay:YES];
     return true;
 }

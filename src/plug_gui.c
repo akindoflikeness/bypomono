@@ -23,8 +23,10 @@ static Gui *gui_of(const clap_plugin_t *pl) {
 }
 
 static float compose_scale(const Gui *g) {
-    return snap_scale(g->fit * g->host_scale);
+    return snap_scale(g->fit * g->s.host_scale);
 }
+
+GuiSurface *gui_surface(Gui *g) { return &g->s; }
 
 /* ---------- shadows <- host params ---------- */
 
@@ -95,25 +97,26 @@ void gui_in_text(Gui *g, const char *utf8, int n) {
 /* ---------- output surface ---------- */
 
 static void free_surface(Gui *g) {
-    free(g->out_px);
-    g->out_px = NULL;
+    free(g->s.out_px);
+    g->s.out_px = NULL;
     free(g->xmap);
     g->xmap = NULL;
 }
 
 static bool build_surface(Gui *g) {
+    GuiSurface *s = &g->s;
     free_surface(g);
-    g->win_w = (int)lroundf(DESIGN_W * g->scale);
-    g->win_h = (int)lroundf(DESIGN_H * g->scale);
+    s->win_w = (int)lroundf(DESIGN_W * g->scale);
+    s->win_h = (int)lroundf(DESIGN_H * g->scale);
 
-    g->out_px = malloc((size_t)g->win_w * g->win_h * 4);
-    if (!g->out_px) return false;
-    g->xmap = malloc((size_t)g->win_w * sizeof *g->xmap);
+    s->out_px = malloc((size_t)s->win_w * s->win_h * 4);
+    if (!s->out_px) return false;
+    g->xmap = malloc((size_t)s->win_w * sizeof *g->xmap);
     if (!g->xmap) {
         free_surface(g);
         return false;
     }
-    for (int x = 0; x < g->win_w; x++) {
+    for (int x = 0; x < s->win_w; x++) {
         int sx = (int)((float)x / g->scale);
         g->xmap[x] = sx < g->canvas.w ? sx : g->canvas.w - 1;
     }
@@ -121,10 +124,10 @@ static bool build_surface(Gui *g) {
 }
 
 static void magnify(Gui *g) {
-    if (!g->out_px) return;
+    if (!g->s.out_px) return;
     const uint32_t *src = g->canvas.px;
-    uint32_t *dst = g->out_px;
-    int dw = g->win_w, dh = g->win_h;
+    uint32_t *dst = g->s.out_px;
+    int dw = g->s.win_w, dh = g->s.win_h;
     if (g->scale == 1.0f) {
         memcpy(dst, src, (size_t)dw * dh * 4);
         return;
@@ -199,7 +202,7 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         if (!g) return false;
         p->gui_state = g;
         g->fit = WINDOW_SCALE_MIN;
-        g->host_scale = 1.0f;
+        g->s.host_scale = 1.0f;
         g->scale = WINDOW_SCALE_MIN;
         g->fd = -1;
     }
@@ -290,7 +293,7 @@ static bool gui_set_scale(const clap_plugin_t *pl, double scale) {
     Plug *p = pl->plugin_data;
     Gui *g = p->gui_state;
     if (!g) return false;
-    g->host_scale = scale > 0.0 ? (float)scale : 1.0f;
+    g->s.host_scale = scale > 0.0 ? (float)scale : 1.0f;
     float s = compose_scale(g);
     if (s == g->scale) return true;
     g->scale = s;

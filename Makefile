@@ -57,7 +57,7 @@ else
   AUDIO_LIBS = $(SDL_LIBS)
 endif
 
-VERSION := $(shell grep '^#define APP_VERSION' src/gui/app.h | cut -d'"' -f2)
+VERSION := $(shell grep 'define APP_VERSION' src/gui/app.h | cut -d'"' -f2)
 
 CLI = blow-your-phase-off$(EXE)
 GUI = blow-your-phase-off-gui$(EXE)

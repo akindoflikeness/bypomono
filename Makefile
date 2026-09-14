@@ -17,7 +17,11 @@ ifeq ($(UNAME_S),Linux)
 else ifeq ($(UNAME_S),Darwin)
   OS := macos
   ARCH := $(UNAME_M)
-  MACOS_MIN = -mmacosx-version-min=10.13
+  # Deployment target for our own code and for the from-source static deps.
+  # CFLAGS is on every macOS compile and link line, so setting it here covers
+  # the C, Objective-C and link steps alike.
+  MACOS_MIN := 12.0
+  CFLAGS += -mmacosx-version-min=$(MACOS_MIN)
   SYS_LIBS = -lm -lpthread -framework CoreMIDI -framework CoreFoundation
   EXE :=
   GUI_LDFLAGS =
@@ -38,12 +42,21 @@ TEST_OBJ = $(TEST_SRC:.c=.o)
 
 GUI_SRC = $(wildcard src/gui/*.c)
 GUI_OBJ = $(GUI_SRC:.c=.o)
+# macOS links SDL2, FreeType, libpng and zlib as static archives built from
+# source, so ask pkg-config for the private deps too (the system frameworks
+# SDL2 needs come out of sdl2.pc, same list as `sdl2-config --static-libs`).
+ifeq ($(OS),macos)
+  PKG_LIBS := pkg-config --static --libs
+else
+  PKG_LIBS := pkg-config --libs
+endif
+
 # MSYS2's sdl2.pc adds -Dmain=SDL_main; gui_main.c handles main itself
 FT_CFLAGS := $(filter-out -Dmain=SDL_main,$(shell pkg-config --cflags freetype2 sdl2))
-FT_LIBS := $(shell pkg-config --libs freetype2 sdl2)
+FT_LIBS := $(shell $(PKG_LIBS) freetype2 sdl2)
 SDL_CFLAGS := $(filter-out -Dmain=SDL_main,$(shell pkg-config --cflags sdl2))
-SDL_LIBS := $(shell pkg-config --libs sdl2)
-# <SDL2/SDL.h> is spelt using its directory; Homebrew's include root is not
+SDL_LIBS := $(shell $(PKG_LIBS) sdl2)
+# <SDL2/SDL.h> is spelt using its directory; the prefix include root is not
 # on the default search path, so add it (a no-op on Linux and MSYS2).
 SDL_INCROOT := $(shell pkg-config --variable=includedir sdl2)
 ifneq ($(SDL_INCROOT),)
@@ -95,13 +108,13 @@ tests/%.o: tests/%.c tests/test.h src/dsp/dsp.h src/gui/app.h
 # ---------- CLAP ----------
 # The plugin embeds its editor natively (X11 / Cocoa / Win32) and takes its
 # audio from the host, so it links FreeType and the window system but no SDL.
-FT_ONLY_LIBS := $(shell pkg-config --libs freetype2)
+FT_ONLY_LIBS := $(shell $(PKG_LIBS) freetype2)
 ifeq ($(OS),linux)
   CLAP_LIBS = $(SYS_LIBS) -lX11 $(FT_ONLY_LIBS) -Wl,--no-undefined
   GUI_BACKEND_SRC = src/plug_gui_x11.c
 else ifeq ($(OS),macos)
   CLAP_LIBS = -lm -lpthread -framework CoreMIDI -framework CoreFoundation \
-              -framework Cocoa -framework QuartzCore $(FT_ONLY_LIBS) $(MACOS_MIN)
+              -framework Cocoa -framework QuartzCore $(FT_ONLY_LIBS)
   GUI_BACKEND_SRC = src/plug_gui_cocoa.m
 else
   CLAP_LIBS = -lm -lpthread -lwinmm -lgdi32 -luser32 $(FT_ONLY_LIBS)
@@ -114,11 +127,11 @@ PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
           src/plug.pic.o src/plug_gui.pic.o $(GUI_BACKEND_OBJ)
 
 %.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h src/plug_gui.h src/plug_gui_backend.h
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) $(MACOS_MIN) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -fPIC -c $< -o $@
 
 # manual retain/release, so no -fobjc-arc
 src/plug_gui_cocoa.pic.o: src/plug_gui_cocoa.m src/plug_gui_backend.h
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) $(MACOS_MIN) \
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) \
 	      -x objective-c -fno-objc-arc -fPIC -c $< -o $@
 
 ifeq ($(OS),macos)
@@ -127,7 +140,7 @@ ifeq ($(OS),macos)
 bypo.clap: $(PIC_OBJ)
 	rm -rf $@
 	mkdir -p $@/Contents/MacOS
-	$(CC) $(CFLAGS) $(MACOS_MIN) -dynamiclib -Wl,-install_name,@rpath/bypo \
+	$(CC) $(CFLAGS) -dynamiclib -Wl,-install_name,@rpath/bypo \
 	      -o $@/Contents/MacOS/bypo $^ $(CLAP_LIBS)
 	printf 'BNDL????' > $@/Contents/PkgInfo
 	printf '%s\n' \
@@ -145,14 +158,6 @@ bypo.clap: $(PIC_OBJ)
 	  '	<key>CFBundleVersion</key><string>$(VERSION)</string>' \
 	  '</dict>' \
 	  '</plist>' > $@/Contents/Info.plist
-	@# Homebrew's dylibs are linked by absolute path; pull them into the bundle
-	@if command -v dylibbundler >/dev/null; then \
-	  dylibbundler -od -b -x $@/Contents/MacOS/bypo -d $@/Contents/libs \
-	               -p @loader_path/../libs && \
-	  codesign --force --sign - $@/Contents/libs/*.dylib; \
-	else \
-	  echo "warning: dylibbundler not found; bypo.clap still links Homebrew dylibs by absolute path" >&2; \
-	fi
 	codesign --force --sign - $@
 else
 bypo.clap: $(PIC_OBJ)
@@ -177,7 +182,6 @@ endif
 MACAPP = BYPO.app
 MACAPP_DIR = $(DIST)/$(MACAPP)
 MACAPP_BIN = $(MACAPP_DIR)/Contents/MacOS/$(GUI)
-MACAPP_FW = $(MACAPP_DIR)/Contents/Frameworks
 
 stage: $(GUI)
 	rm -rf $(DIST)
@@ -211,38 +215,13 @@ ifeq ($(OS),macos)
 	  '	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>' \
 	  '	<key>CFBundleShortVersionString</key><string>$(VERSION)</string>' \
 	  '	<key>CFBundleVersion</key><string>$(VERSION)</string>' \
-	  '	<key>LSMinimumSystemVersion</key><string>10.13</string>' \
+	  '	<key>LSMinimumSystemVersion</key><string>$(MACOS_MIN)</string>' \
 	  '	<key>NSHighResolutionCapable</key><true/>' \
 	  '</dict>' \
 	  '</plist>' > $(MACAPP_DIR)/Contents/Info.plist
-	@# Homebrew's SDL2 and FreeType are linked by absolute path; pull them
-	@# (and their dependencies) into Contents/Frameworks and repoint the binary.
-	@if command -v dylibbundler >/dev/null; then \
-	  dylibbundler -od -b -x $(MACAPP_BIN) -d $(MACAPP_FW) -p @executable_path/../Frameworks; \
-	else \
-	  echo "warning: dylibbundler not found; $(GUI) still links Homebrew dylibs by absolute path" >&2; \
-	fi
-	@# Homebrew ships sdl2-compat under the sdl2 name: a shim that reaches
-	@# SDL3 by dlopen, so no load command names it and dylibbundler cannot
-	@# see it. The shim tries @loader_path first, so a copy beside it is all
-	@# it needs; without this the app aborts with "Failed loading SDL3".
-	@if grep -qa libSDL3.dylib $(MACAPP_FW)/*.dylib 2>/dev/null; then \
-	  d="$$(pkg-config --variable=libdir sdl3 2>/dev/null)"; \
-	  [ -n "$$d" ] || d="$$(brew --prefix sdl3 2>/dev/null)/lib"; \
-	  if [ -f "$$d/libSDL3.dylib" ]; then \
-	    cp -L "$$d/libSDL3.dylib" $(MACAPP_FW)/libSDL3.dylib && \
-	    chmod u+w $(MACAPP_FW)/libSDL3.dylib && \
-	    install_name_tool -id @executable_path/../Frameworks/libSDL3.dylib \
-	                      $(MACAPP_FW)/libSDL3.dylib; \
-	  else \
-	    echo "error: bundled SDL2 is sdl2-compat but no libSDL3.dylib was found beside it" >&2; \
-	    exit 1; \
-	  fi; \
-	fi
-	@# editing a Mach-O breaks its signature, so re-sign ad hoc inside out:
-	@# Apple silicon refuses to run an unsigned binary, and a sealed bundle
-	@# is what lets Finder offer right-click-Open.
-	@if [ -d $(MACAPP_FW) ]; then codesign --force --sign - $(MACAPP_FW)/*.dylib; fi
+	@# The binary links SDL2, FreeType, libpng and zlib statically, so there is
+	@# nothing to bundle; sign the bundle ad hoc so Finder offers right-click-Open
+	@# and Apple silicon will run it.
 	codesign --force --sign - $(MACAPP_DIR)
 endif
 

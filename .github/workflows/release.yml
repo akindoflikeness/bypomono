@@ -54,11 +54,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libfreetype-dev libasound2-dev libx11-dev
 
+      # Homebrew bottles carry the runner's minimum-OS floor, so SDL2,
+      # FreeType, libpng and zlib are built from source as static libraries
+      # against a fixed deployment target and linked in; see macos-deps.sh.
+      - name: cache deps (macos)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/deps
+          key: macos-deps-${{ runner.arch }}-${{ hashFiles('.github/macos-deps.sh') }}
+
       - name: deps (macos)
         if: runner.os == 'macOS'
         run: |
-          brew install sdl2 sdl3 freetype pkg-config dylibbundler make
+          brew install pkg-config make cmake
           echo "$(brew --prefix)/opt/make/libexec/gnubin" >> "$GITHUB_PATH"
+          prefix="$HOME/deps"
+          if [ ! -f "$prefix/lib/libSDL2.a" ]; then
+            .github/macos-deps.sh "$prefix"
+          else
+            echo "reusing cached $prefix"
+          fi
+          export PATH="$prefix/bin:$PATH" PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "sdl2-config --static-libs: $(sdl2-config --static-libs)"
+          echo "pkg-config --static --libs sdl2: $(pkg-config --static --libs sdl2)"
+          echo "pkg-config --static --libs freetype2: $(pkg-config --static --libs freetype2)"
 
       - name: deps (windows)
         if: runner.os == 'Windows'

@@ -4,6 +4,18 @@
 #include "plug.h"
 #include "plug_gui_backend.h"
 
+/* Where an editor frame spends its time, summed over one second. Off unless
+   BYPO_GUI_STATS is set, and then out is the only thing a tick tests. */
+typedef struct {
+    FILE *out;    /* NULL when off */
+    bool own_out; /* out is a file this opened, not stderr */
+    double win_t0;
+    double last_tick;
+    long ticks, presents, gaps;
+    double frame_s, fp_s, mag_s, present_s; /* summed over the window */
+    double gap_s, gap_max;                  /* interval between timer calls */
+} GuiStats;
+
 struct Gui {
     GuiSurface s;     /* the only part a backend may touch */
     App *app;
@@ -23,6 +35,7 @@ struct Gui {
     UiInput pending;
     double last_click_time;
     P2 last_click_pos;
+    GuiStats stats;
 };
 
 #endif

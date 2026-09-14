@@ -13,6 +13,7 @@
 typedef struct {
     Display *dpy;
     Window win;
+    Window host; /* the window the host handed over */
     GC gc;
     XImage *img;
 } X11Back;
@@ -80,10 +81,24 @@ void backend_usable_screen(Gui *g, int *w, int *h) {
 
 float backend_px_per_point(Gui *g) { return 1.0f; }
 
+bool backend_host_size(Gui *g, int *w, int *h) {
+    X11Back *b = back_of(g);
+    if (!b || !b->dpy || !b->host) return false;
+    Window root;
+    int x = 0, y = 0;
+    unsigned gw = 0, gh = 0, border = 0, depth = 0;
+    if (!XGetGeometry(b->dpy, b->host, &root, &x, &y, &gw, &gh, &border, &depth))
+        return false;
+    *w = (int)gw;
+    *h = (int)gh;
+    return true;
+}
+
 bool backend_attach(Gui *g, const clap_window_t *window) {
     X11Back *b = back_of(g);
     if (!b || !b->dpy || b->win) return false;
     int screen = DefaultScreen(b->dpy);
+    b->host = (Window)window->x11;
     b->win = XCreateSimpleWindow(b->dpy, (Window)window->x11, 0, 0, 1, 1, 0,
                                  BlackPixel(b->dpy, screen),
                                  BlackPixel(b->dpy, screen));

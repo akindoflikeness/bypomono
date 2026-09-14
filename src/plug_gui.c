@@ -12,11 +12,30 @@
 
 #define TIMER_MS 16
 
+#if defined(_WIN32)
+/* <windows.h> cannot come in here: it spells enumerator names the engine
+   headers also use, so the two counters are declared by hand. */
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(long long *count);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long *freq);
+
+static double now_s(void) {
+    static double period = 0.0;
+    if (period == 0.0) {
+        long long f = 0;
+        QueryPerformanceFrequency(&f);
+        period = f > 0 ? 1.0 / (double)f : 1e-7;
+    }
+    long long c = 0;
+    QueryPerformanceCounter(&c);
+    return (double)c * period;
+}
+#else
 static double now_s(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
+#endif
 
 static Gui *gui_of(const clap_plugin_t *pl) {
     return ((Plug *)pl->plugin_data)->gui_state;
@@ -27,6 +46,65 @@ static float compose_scale(const Gui *g) {
 }
 
 GuiSurface *gui_surface(Gui *g) { return &g->s; }
+
+/* ---------- frame stats ---------- */
+/* BYPO_GUI_STATS=1 writes to stderr, any other value names a file to append
+   to. Nothing here runs unless the editor was opened with it set. */
+
+static void stats_open(Gui *g) {
+    const char *env = getenv("BYPO_GUI_STATS");
+    if (!env || !*env || strcmp(env, "0") == 0) return;
+    if (strcmp(env, "1") == 0) {
+        g->stats.out = stderr;
+        return;
+    }
+    g->stats.out = fopen(env, "a");
+    if (g->stats.out) g->stats.own_out = true;
+}
+
+static void stats_close(Gui *g) {
+    if (g->stats.out && g->stats.own_out) fclose(g->stats.out);
+    memset(&g->stats, 0, sizeof g->stats);
+}
+
+/* frame and fp run on every tick, mag and present only on a tick that
+   reaches the screen, so each is averaged over the count it belongs to */
+static void stats_emit(Gui *g) {
+    GuiStats *st = &g->stats;
+    double per_tick = st->ticks ? 1.0 / (double)st->ticks : 0.0;
+    double per_present = st->presents ? 1.0 / (double)st->presents : 0.0;
+    double gap_avg = st->gaps ? st->gap_s / (double)st->gaps : 0.0;
+    fprintf(st->out,
+            "gui: ticks=%ld presents=%ld frame=%.2fms fp=%.2fms mag=%.2fms "
+            "present=%.2fms tick_gap=%.2f/%.2f ms scale=%.2f win=%dx%d\n",
+            st->ticks, st->presents, st->frame_s * per_tick * 1e3,
+            st->fp_s * per_tick * 1e3, st->mag_s * per_present * 1e3,
+            st->present_s * per_present * 1e3, gap_avg * 1e3, st->gap_max * 1e3,
+            g->scale, g->s.win_w, g->s.win_h);
+    fflush(st->out);
+}
+
+/* close the reporting window if a second has passed, then book this tick */
+static void stats_tick(Gui *g, double now) {
+    GuiStats *st = &g->stats;
+    if (st->win_t0 == 0.0) {
+        st->win_t0 = now;
+    } else if (now - st->win_t0 >= 1.0) {
+        stats_emit(g);
+        st->win_t0 = now;
+        st->ticks = st->presents = st->gaps = 0;
+        st->frame_s = st->fp_s = st->mag_s = st->present_s = 0.0;
+        st->gap_s = st->gap_max = 0.0;
+    }
+    if (st->last_tick > 0.0) {
+        double gap = now - st->last_tick;
+        st->gap_s += gap;
+        st->gaps++;
+        if (gap > st->gap_max) st->gap_max = gap;
+    }
+    st->last_tick = now;
+    st->ticks++;
+}
 
 /* ---------- shadows <- host params ---------- */
 
@@ -171,6 +249,8 @@ static uint64_t canvas_fingerprint(const Canvas *c) {
 
 static void gui_tick(Plug *p, Gui *g) {
     if (!g->created || !g->parented) return;
+    GuiStats *st = g->stats.out ? &g->stats : NULL;
+    if (st) stats_tick(g, now_s());
     backend_pump(g);
     if (!g->shown) {
         /* nothing to draw into; keep the clock current so the first frame
@@ -203,16 +283,29 @@ static void gui_tick(Plug *p, Gui *g) {
     if (atomic_exchange_explicit(&p->host_touched, false, memory_order_relaxed))
         refresh_shadows(g->app, p);
 
+    double t_frame = st ? now_s() : 0.0;
     app_frame(g->app, ui);
+    double t_fp = st ? now_s() : 0.0;
     ui->drag_prev = ui->in.mouse;
     g->app->quit = false; /* nothing in a plugin may end the host */
 
     uint64_t h = canvas_fingerprint(&g->canvas);
+    double t_mag = st ? now_s() : 0.0;
+    if (st) {
+        st->frame_s += t_fp - t_frame;
+        st->fp_s += t_mag - t_fp;
+    }
     if (g->have_hash && h == g->last_hash) return;
     g->last_hash = h;
     g->have_hash = true;
     if (!backend_scales_itself()) magnify(g);
+    double t_present = st ? now_s() : 0.0;
     backend_present(g);
+    if (st) {
+        st->mag_s += t_present - t_mag;
+        st->present_s += now_s() - t_present;
+        st->presents++;
+    }
 }
 
 /* ---------- clap gui extension ---------- */
@@ -244,6 +337,7 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         g->fd = -1;
     }
     if (g->created) return true;
+    stats_open(g);
 
     static bool fonts_ready = false;
     if (!fonts_ready) {
@@ -294,6 +388,16 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         }
     }
 
+    if (g->stats.out) {
+        fprintf(g->stats.out,
+                "gui: backend=%s scales_itself=%d px_per_point=%.2f fit=%.2f "
+                "host_scale=%.2f scale=%.2f timer=%s/%dms\n",
+                BACKEND_WINDOW_API, backend_scales_itself() ? 1 : 0,
+                backend_px_per_point(g), g->fit, g->s.host_scale, g->scale,
+                g->timer_on ? "on" : "off", TIMER_MS);
+        fflush(g->stats.out);
+    }
+
     g->created = true;
     return true;
 }
@@ -319,6 +423,7 @@ static void gui_destroy(const clap_plugin_t *pl) {
     backend_close(g);
     free_surface(g);
     canvas_free(&g->canvas);
+    stats_close(g);
     g->created = g->parented = g->shown = false;
 }
 
@@ -384,6 +489,17 @@ static bool gui_set_parent(const clap_plugin_t *pl,
     backend_show(g);
     g->parented = true;
     g->shown = true;
+    if (g->stats.out) {
+        int hw = 0, hh = 0;
+        char host[32];
+        if (backend_host_size(g, &hw, &hh))
+            snprintf(host, sizeof host, "%dx%d", hw, hh);
+        else
+            snprintf(host, sizeof host, "unknown");
+        fprintf(g->stats.out, "gui: parented win=%dx%d host=%s scale=%.2f\n",
+                g->s.win_w, g->s.win_h, host, g->scale);
+        fflush(g->stats.out);
+    }
     /* the editor is real now: let the audio thread feed it */
     atomic_store_explicit(&p->gui_app, g->app, memory_order_release);
     return true;

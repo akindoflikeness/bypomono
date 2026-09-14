@@ -57,6 +57,9 @@ void backend_close(Gui *g); /* release everything the backend holds */
 void backend_usable_screen(Gui *g, int *w, int *h);
 /* device pixels per logical point; 1.0 outside Cocoa */
 float backend_px_per_point(Gui *g);
+/* the host's own window in device pixels, false when it cannot be read;
+   only the stats log asks, so it may be as slow as it likes */
+bool backend_host_size(Gui *g, int *w, int *h);
 /* create the child window inside the host's; it is sized by backend_resize */
 bool backend_attach(Gui *g, const clap_window_t *window);
 /* match the child window and any platform image to win_w/win_h/out_px */

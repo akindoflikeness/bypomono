@@ -15,6 +15,7 @@
 
 typedef struct {
     HWND hwnd;
+    HWND host; /* the window the host handed over */
     BITMAPINFO bmi;
     bool tracking; /* a WM_MOUSELEAVE is armed */
 } W32Back;
@@ -216,10 +217,20 @@ void backend_usable_screen(Gui *g, int *w, int *h) {
 
 float backend_px_per_point(Gui *g) { return 1.0f; }
 
+bool backend_host_size(Gui *g, int *w, int *h) {
+    W32Back *b = back_of(g);
+    RECT r;
+    if (!b || !b->host || !GetClientRect(b->host, &r)) return false;
+    *w = (int)(r.right - r.left);
+    *h = (int)(r.bottom - r.top);
+    return true;
+}
+
 bool backend_attach(Gui *g, const clap_window_t *window) {
     W32Back *b = back_of(g);
     if (!b || b->hwnd || !register_class()) return false;
     HWND parent = (HWND)window->win32;
+    b->host = parent;
     b->hwnd = CreateWindowExW(0, BYPO_WNDCLASS, L"", WS_CHILD, 0, 0, 1, 1,
                               parent, NULL, self_instance(), NULL);
     if (!b->hwnd) return false;

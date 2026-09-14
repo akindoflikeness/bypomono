@@ -30,6 +30,12 @@ enum {
 
 typedef struct {
     BypoView *view;
+    /* Two present buffers used in turn. The layer keeps the image from the
+       last present, and that image reads its bytes straight out of one of
+       these, so the next frame is written into the other one. */
+    unsigned char *buf[2];
+    size_t buf_bytes;
+    int next;
 } CocoaBack;
 
 static CocoaBack *back_of(Gui *g) { return (CocoaBack *)gui_surface(g)->back; }
@@ -158,9 +164,13 @@ void backend_close(Gui *g) {
     CocoaBack *b = back_of(g);
     if (!b) return;
     if (b->view) {
+        /* drop the image before the buffer it reads from goes away */
+        [[b->view layer] setContents:nil];
         [b->view removeFromSuperview];
         [b->view release];
     }
+    free(b->buf[0]);
+    free(b->buf[1]);
     free(b);
     gui_surface(g)->back = NULL;
 }
@@ -177,6 +187,17 @@ void backend_usable_screen(Gui *g, int *w, int *h) {
 float backend_px_per_point(Gui *g) {
     CocoaBack *b = back_of(g);
     return (float)backing_of(b ? b->view : nil);
+}
+
+bool backend_host_size(Gui *g, int *w, int *h) {
+    CocoaBack *b = back_of(g);
+    NSView *parent = (b && b->view) ? [b->view superview] : nil;
+    if (!parent) return false;
+    NSRect r = [parent bounds];
+    CGFloat s = backing_of(b->view);
+    *w = (int)(NSWidth(r) * s);
+    *h = (int)(NSHeight(r) * s);
+    return true;
 }
 
 bool backend_attach(Gui *g, const clap_window_t *window) {
@@ -216,13 +237,30 @@ void backend_present(Gui *g) {
     GuiSurface *s = gui_surface(g);
     if (!b || !b->view || !s->src_px) return;
     size_t w = (size_t)s->src_w, h = (size_t)s->src_h;
+    size_t bytes = w * h * 4;
+    if (bytes != b->buf_bytes) {
+        free(b->buf[0]);
+        free(b->buf[1]);
+        b->buf[0] = malloc(bytes);
+        b->buf[1] = malloc(bytes);
+        b->next = 0;
+        b->buf_bytes = bytes;
+        if (!b->buf[0] || !b->buf[1]) {
+            free(b->buf[0]);
+            free(b->buf[1]);
+            b->buf[0] = b->buf[1] = NULL;
+            b->buf_bytes = 0;
+            return;
+        }
+    }
     /* the layer reads its contents whenever it likes, so hand it a private
        copy rather than the canvas the core keeps drawing into */
-    CFDataRef data = CFDataCreate(NULL, (const UInt8 *)s->src_px,
-                                  (CFIndex)(w * h * 4));
-    if (!data) return;
-    CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
-    CFRelease(data);
+    unsigned char *px = b->buf[b->next];
+    b->next ^= 1;
+    memcpy(px, s->src_px, bytes);
+    /* the provider is thrown away with the image it backs, so the buffer is
+       free again one present later, which is what the pair is for */
+    CGDataProviderRef prov = CGDataProviderCreateWithData(NULL, px, bytes, NULL);
     if (!prov) return;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     /* the buffer is XRGB words, so BGRX bytes on a little-endian machine */

@@ -14,30 +14,48 @@
 
 **One tone, many voices.** An untamed, opinionated instrument that uses
 mathematical irrationality to reach uniquely stable inharmonic timbres.
+
+## Install
+
+Download the file for your platform from [Releases](https://github.com/wraithsys/bypomono/releases).
+Each one is a folder with everything inside it. Unpack it anywhere you like and it's installed.
+Delete the folder and it's gone. Recordings go to your Music folder.
+
+**Linux.** `bypomono-linux-x86_64.tar.gz`. Unpack it by double-clicking, or with
+`tar xzf bypomono-linux-x86_64.tar.gz`. Then, from a terminal in the unpacked folder:
+
+```
+./blow-your-phase-off-gui
+```
+
+**macOS.** `bypomono-macos-arm64.zip` for Apple silicon, `bypomono-macos-x86_64.zip` for Intel.
+Unzip, then right-click the app and choose Open the first time. It isn't signed, so macOS
+will refuse a plain double-click once and then remember your answer.
+
+**Windows.** `bypomono-windows-x64.zip`. Unzip and run `blow-your-phase-off-gui.exe`.
+
+**From source.** C11, SDL2, FreeType, and make. `make` builds the standalone, `make bypo.clap`
+the plugin, `make check` runs the engine tests.
+
+## Algorithmic Phase Modulation
+
 The architecture is PM with a dual algorithm selector: the arrangement of
 modulators, carriers and feedback is chosen by roman numeral I to VIII, and the
 ratio mode selector gives five separate irrational ratio configurations.
-PM depth is tuned through these recursive algorithms.
-Pure C11, SDL2, one binary, and a CLAP for your DAW.
-
-```
-$ ./blow-your-phase-off
-audio out: default @ 48000 Hz, 2 ch
-BLOW YOUR PHASE OFF — droning at 110 Hz (A2), golden mode, algorithm I
-```
+PM depth is tuned through these recursive algorithms
 
 ## Operator Structures
 
-| # | ID | Structure | Carriers | Max depth | Feedback on |
-|---|----|-----------|----------|-----------|-------------|
-| I    | `SSSS` | full FM tree: `(1→2→3)` and `4` both modulate `5` | 1 | 4 | op 1 (depth 4) |
-| II   | `SSSP` | true 4-op stack `1→2→3→4`, plus sine `5` | 2 | 4 | op 1 (depth 4) |
-| III  | `PSSP` | 3-op stack `1→2→3`, plus sines `4`, `5` | 3 | 3 | op 1 (depth 3) |
-| IV   | `PPSP` | FM pair `1→2`, plus sines `3`, `4`, `5` | 4 | 2 | op 1 (depth 2) |
-| V    | `PPPP` | five parallel sines (pure additive) | 5 | 1 | op 1 (depth 1) |
-| VI   | `PPPF` | FM pair `4→5`, plus sines `1`, `2`, `3` | 4 | 2 | **op 5 (depth 1)** |
-| VII  | `PPFF` | FM pairs `1→2` and `4→5`, plus sine `3` | 3 | 2 | **op 2 (depth 1)** |
-| VIII | `PFFF` | 3-op stack `1→2→3` and FM pair `4→5` | 2 | 3 | **op 3 (depth 1)** |
+| #    | ID     | Structure                                         | Carriers | Max depth | Feedback on        |
+| ---- | ------ | ------------------------------------------------- | -------- | --------- | ------------------ |
+| I    | `SSSS` | full FM tree: `(1→2→3)` and `4` both modulate `5` | 1        | 4         | op 1 (depth 4)     |
+| II   | `SSSP` | true 4-op stack `1→2→3→4`, plus sine `5`          | 2        | 4         | op 1 (depth 4)     |
+| III  | `PSSP` | 3-op stack `1→2→3`, plus sines `4`, `5`           | 3        | 3         | op 1 (depth 3)     |
+| IV   | `PPSP` | FM pair `1→2`, plus sines `3`, `4`, `5`           | 4        | 2         | op 1 (depth 2)     |
+| V    | `PPPP` | five parallel sines (pure additive)               | 5        | 1         | op 1 (depth 1)     |
+| VI   | `PPPF` | FM pair `4→5`, plus sines `1`, `2`, `3`           | 4        | 2         | **op 5 (depth 1)** |
+| VII  | `PPFF` | FM pairs `1→2` and `4→5`, plus sine `3`           | 3        | 2         | **op 2 (depth 1)** |
+| VIII | `PFFF` | 3-op stack `1→2→3` and FM pair `4→5`              | 2        | 3         | **op 3 (depth 1)** |
 
 ## Phase Violence
 
@@ -69,6 +87,6 @@ The instrument runs at 48khz sample rate, selects your default output device and
 A console accessed using "/" is available for mapping MIDI CC to parameters.
 A release is planned for Linux, Windows and MacOS as a standalone application and CLAP plugin for DAWs.
 
-## On AI 
+## On AI
 
-Without AI this wouldn't exist. Primarily it has been programmed by AI agents. Every change is read, committed and tested by hand and the design and audio architecture are mine (akindoflikeness/AKOL). I've tried my best to model what I think responsible AI usage looks like - because AI is not exclusively a force for good. In my view AI is a tool and this is written to be open so that you can make an informed decision about whether to engage with it or not. If your worldview precludes you from engaging with something a lone musician designed with care, then perhaps your worldview is the thing that needs adjusting. 
+Without AI this wouldn't exist. Primarily it has been programmed by AI agents. Every change is read, committed and tested by hand and the design and audio architecture are mine (akindoflikeness/AKOL). I've tried my best to model what I think responsible AI usage looks like - because AI is not exclusively a force for good. In my view AI is a tool and this is written to be open so that you can make an informed decision about whether to engage with it or not. If your worldview precludes you from engaging with something a lone musician designed with care, then perhaps your worldview is the thing that needs adjusting.

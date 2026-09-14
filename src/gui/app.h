@@ -49,7 +49,7 @@
 #define CONTROLS_SHARE (CONTROLS_HOUSE_W / REFERENCE_CENTRE_W)
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
-#define APP_VERSION "1.1.0-dev.1"
+#define APP_VERSION "1.1.0"
 
 /* ---------- audio<->ui protocol ---------- */
 

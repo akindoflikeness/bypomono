@@ -1,0 +1,403 @@
+#ifndef BYPO_APP_H
+#define BYPO_APP_H
+
+#include <stdatomic.h>
+#include <stdio.h>
+
+#include "../audio.h"
+#include "../dsp/dsp.h"
+#include "../midi.h"
+#include "../ring.h"
+#include "canvas.h"
+#include "text.h"
+#include "ui.h"
+
+/* ---------- design grid ---------- */
+
+#define DESIGN_W 1180.0f
+#define DESIGN_H 780.0f
+#define MIN_WINDOW_W 233.0f
+#define MIN_WINDOW_H 144.0f
+
+#define TIGHT 2.0f
+#define SNUG 3.0f
+#define GAP 5.0f
+#define GROUP 8.0f
+#define SECTION 13.0f
+#define MARGIN_BAR_W 21.0f
+#define FADER_H 23.0f
+#define FOOTER_LINE_H 23.0f
+#define ROOM_ART_H 144.0f
+#define TREE_H 150.0f
+#define ENGAGE_H 34.0f
+#define TITLE_BAR_H 34.0f
+#define CELL_GUTTER GAP
+#define HINT_CHIP_H 15.0f
+#define HINT_ROW_H 21.0f
+#define FOOTER_OPEN_H 144.0f
+#define SEAM_GRAB 9.0f
+#define VIZ_DECIMATE 4
+#define REPAINT_FLOOR_MS 10
+#define GOLDEN_MAJOR (1.0f / PHI)
+#define OPS_COL_W 250.0f
+#define STATS_COL_W 233.0f
+#define CONTROLS_HOUSE_W 325.0f
+#define REFERENCE_ROW_W (DESIGN_W - 2.0f * MARGIN_BAR_W)
+#define REFERENCE_CENTRE_W (REFERENCE_ROW_W - STATS_COL_W - OPS_COL_W)
+#define OPS_COL_SHARE (OPS_COL_W / REFERENCE_ROW_W)
+#define STATS_COL_SHARE (STATS_COL_W / REFERENCE_ROW_W)
+#define CONTROLS_SHARE (CONTROLS_HOUSE_W / REFERENCE_CENTRE_W)
+#define BEND_SEMITONES 2.0f
+#define VEIL 0.5f
+#define APP_VERSION "1.1.0-dev.1"
+
+/* ---------- audio<->ui protocol ---------- */
+
+typedef enum {
+    EV_SET_PATCH, EV_SET_VERB, EV_SET_MELODY, EV_SET_CHANDAS, EV_SET_WARMTH,
+    EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
+    EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING
+} EventKind;
+
+typedef struct {
+    EventKind kind;
+    union {
+        Patch patch;
+        VerbParams verb;
+        MelodyParams melody;
+        ChandasParams chandas;
+        Chain chain;
+        float f;
+        bool flag;
+        struct { float hz, velocity; } note;
+    } u;
+} Event;
+
+typedef struct {
+    float ops[NUM_OPS];
+    float l, r;
+    float peak[2];
+} VizFrame;
+
+RING_DECLARE(EventRing, Event, 256)
+RING_DECLARE(VizRing, VizFrame, 16384)
+RING_DECLARE(RecRing, float, (1 << 19))
+
+/* fixed-point atomics, all relaxed */
+typedef struct { _Atomic int32_t note; } MidiNoteAtom; /* -1 = none */
+void midi_note_press(MidiNoteAtom *m, uint8_t note);
+void midi_note_release(MidiNoteAtom *m, uint8_t note);
+void midi_note_clear(MidiNoteAtom *m);
+int midi_note_get(const MidiNoteAtom *m);
+
+typedef struct { _Atomic uint32_t q16; } PitchAtom; /* hz * 65536 */
+void pitch_store(PitchAtom *p, float hz);
+float pitch_load(const PitchAtom *p);
+
+typedef struct { _Atomic uint32_t word[128]; } CcState; /* (seq<<8)|value */
+void cc_write(CcState *c, uint8_t cc, uint8_t value);
+uint32_t cc_read(const CcState *c, uint8_t cc);
+float cc_position(uint32_t word);
+
+typedef struct {
+    _Atomic uint32_t load_q16, peak_q16, frames;
+} AudioMeter;
+
+/* ---------- recorder ---------- */
+
+typedef struct {
+    FILE *file;
+    char path[512];
+    char preset_slug[128];
+    uint64_t frames;
+    float sample_rate;
+} Recorder;
+
+bool recorder_start(Recorder *r, const char *preset_name, float sample_rate);
+void recorder_push(Recorder *r, const float *interleaved, size_t samples);
+void recorder_finalize(Recorder *r);
+
+/* ---------- presets ---------- */
+
+#define MAX_PRESETS 512
+#define MAX_FOLDERS 32
+#define MINE_BANK "USER"
+#define STOCK_BANK "BYPO"
+#define DEFAULT_PRESET "init"
+
+typedef struct {
+    char bank[64]; /* "" = loose (USER view) */
+    char name[128];
+} PresetRef;
+
+typedef enum { FILTER_ALL, FILTER_MINE, FILTER_BANK } PresetFilterKind;
+typedef struct {
+    PresetFilterKind kind;
+    char bank[64];
+} PresetFilter;
+
+/* json_session.c */
+/* a preset or state document larger than this is refused unread */
+#define SESSION_JSON_MAX (1u << 20)
+bool session_from_json(const char *json, Session *out); /* sanitized */
+/* serde_json-compatible pretty output; caller frees */
+char *session_to_json(const Session *s);
+
+/* presets.c */
+const char *preset_dir(void);
+const char *recording_dir(void);
+const char *user_data_root(void);
+const char *asset_dir(void); /* first existing of the asset search path */
+void prepare_preset_dir(void);
+void sanitise_segment(const char *raw, char *out, size_t out_len); /* "" = refused */
+bool preset_path(const PresetRef *r, char *out, size_t out_len);
+const char *preset_bank_label(const PresetRef *r);
+void preset_qualified(const PresetRef *r, char *out, size_t out_len);
+/* reads and parses one session document; a file over SESSION_JSON_MAX is
+   refused without being read */
+bool session_load_file(const char *path, Session *out);
+
+/* ---------- the app ---------- */
+
+typedef enum { DREAD_NORMAL, DREAD_LOW, DREAD_CRITICAL } Dread;
+
+typedef enum {
+    CC_NONE = 0, CC_INDEX, CC_RIP, CC_FB, CC_FIELD, CC_CURVE, CC_RELEASE,
+    CC_GLIDE, CC_DRONEHZ, CC_MIX, CC_GHOST, CC_DECAY, CC_DAMP, CC_HAUNT,
+    CC_WARMTH
+} CcTarget;
+const char *cc_target_name(CcTarget t);
+CcTarget cc_target_from_name(const char *s);
+
+typedef struct {
+    float tree, ops, controls; /* <0 = house default */
+    float top;                 /* <0 = house default */
+} Splits;
+
+#define LOG_LINES 64
+#define LOG_LINE_LEN 256
+
+typedef struct App {
+    /* engine shadow state */
+    Patch shadow;
+    VerbParams shadow_verb;
+    MelodyParams shadow_melody;
+    ChandasParams shadow_chandas;
+    float shadow_warmth;
+    float shadow_release_s;
+    float tempo_bpm;
+    float drone_hz;
+    Chain chain;
+    bool engaged;
+    bool restored;
+    bool hosted; /* running as a plugin editor: host notes always may drive */
+
+    /* audio rig */
+    AudioOut audio;
+    MidiIn midi;
+    bool midi_open;
+    char midi_port[128];
+    EventRing ctrl, midi_ev;
+    VizRing viz;
+    RecRing rec;
+    MidiNoteAtom midi_note;
+    PitchAtom pitch;
+    CcState cc;
+    AudioMeter meter;
+    _Atomic bool rec_on;
+    float sample_rate;
+    int channels;
+
+    /* timing / animation */
+    double start_time;
+    double last_frame_time;
+    uint64_t frame_count;
+    float fps;
+    bool splash_over;
+    float ripple_phase, suture_phase, rock_phase[3], spin, shell_scale;
+    float index_smooth, dread_level, agitation;
+    Dread dread;
+
+    /* viz buffers */
+    float env[NUM_OPS];
+    float lissa_x[512], lissa_y[512];
+    int lissa_len, lissa_head;
+
+    /* cc mapping */
+    CcTarget cc_bind[128];
+    bool cc_heard[128];
+    uint32_t cc_seen[128];
+
+    /* layout */
+    Splits splits;
+    Rct header_rect, preset_bar_rect;
+    bool have_preset_bar_rect;
+
+    /* preset bank */
+    UiText preset_name;
+    PresetRef preset_names[MAX_PRESETS];
+    int preset_count;
+    char preset_folders[MAX_FOLDERS][64];
+    int folder_count;
+    PresetFilter preset_filter;
+    PresetRef preset_loaded, preset_selected;
+    bool have_loaded, have_selected;
+    int preset_armed; /* console Command id or 0 */
+    bool preset_searching, preset_focus, presets_open, presets_were_open;
+    double preset_click_at;
+    bool have_click_at;
+    UiScroll preset_scroll;
+
+    /* console / log */
+    char log[LOG_LINES][LOG_LINE_LEN];
+    int log_len, log_head; /* newest at head-1 */
+    bool console_open, console_focus, console_focused;
+    UiText console_input;
+    char console_typing[LOG_LINE_LEN];
+    int console_revealed;
+    float console_credit;
+    uint32_t tips_told; /* bitmask by TipWhen */
+    UiScroll log_scroll;
+
+    /* panes */
+    bool info_open, show_fps;
+    int ops_tab;
+    UiScroll left_scroll, right_scroll;
+
+    /* recording */
+    Recorder recorder;
+    bool recording;
+    bool rec_stop_pending;
+    uint32_t rec_quiet_frames;
+    double rec_stop_at;
+    bool have_rec_stop_at;
+
+    P2 pointer;
+    bool quit;
+} App;
+
+/* push onto the UI->audio ring, logging on overflow */
+void app_send(App *a, Event ev);
+void push_log(App *a, const char *fmt, ...);
+
+/* gui_engine.c */
+int gui_audio_start(App *a);
+void gui_audio_stop(App *a);
+void gui_drain_viz(App *a);
+void gui_drain_recording(App *a);
+void gui_apply_cc(App *a, Ui *ui);
+void gui_sync_chain(App *a);
+bool midi_driving(const App *a);
+int midi_port_names(char names[][128], int max);
+bool gui_set_midi_port(App *a, const char *name); /* NULL = close */
+void gui_run_record(App *a, const char *args);    /* console verb */
+void gui_stop_record(App *a);
+void gui_run_bind(App *a, int cc, CcTarget target);
+void gui_run_unbind(App *a, int cc); /* -1 = all */
+
+/* widgets.c */
+typedef enum { FADER_NONE, FADER_SET, FADER_RESET } FaderActKind;
+typedef struct { FaderActKind kind; float t; } FaderAct;
+float log_position(float p, float lo, float hi);
+float position_of_log(float v, float lo, float hi);
+FaderAct fader_track(Ui *ui, UiId id, Rct r, const char *label,
+                     const char *value, float t);
+bool fader(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
+           float hi);
+bool fader_log(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
+               float hi, const char *suffix);
+bool fader_int(Ui *ui, UiId id, Rct r, const char *label, int *v, int lo,
+               int hi);
+void hard_rect(Canvas *c, Rct r, float width);
+void bubble_chain(Canvas *c, Ui *ui, P2 a, P2 b, bool active, float index,
+                  double time);
+void inverted_strip(Canvas *c, Rct r, const char *text);
+Rct window_chrome_tagged(Canvas *c, Rct r, const char *title, const char *tag);
+bool pane_button(Ui *ui, UiId id, Rct r, const char *text, bool armed);
+bool chip_button(Ui *ui, UiId id, Rct r, const char *text, bool selected);
+bool bookmark(Ui *ui, UiId id, Rct r, const char *label, bool selected);
+int wave_tabs(Ui *ui, UiId id, Rct r, const char *const *labels, int n,
+              int active);
+void draw_margin_bar(Canvas *c, Rct bar, bool inner_edge_on_left);
+void draw_graticule(Canvas *c, Rct r, int cols, int rows);
+void beam_segment(Canvas *c, P2 a, P2 b, int k, bool decayed);
+void dotted_rect(Canvas *c, Rct r, uint8_t ink);
+extern const char *const ICON_SAVE[9], *const ICON_DELETE[9],
+    *const ICON_FOLDER[9], *const ICON_RECORD[9];
+void draw_icon(Canvas *c, const char *const rows[9], P2 at, uint8_t ink, float k);
+bool icon_button(Ui *ui, UiId id, Rct r, const char *const rows[9],
+                 const char *label, bool armed, float k);
+float tab_width(float available, float gap, int n);
+void draw_block_caret(Canvas *c, Ui *ui, FontId f, P2 text_pos,
+                      const char *text, uint8_t bg);
+
+/* presets.c (App-level flows; all log via push_log) */
+void preset_rescan(App *a);
+void preset_load(App *a, const PresetRef *r);
+void preset_save_in(App *a, const char *bank, const char *name);
+void preset_run_save(App *a, const char *name);
+void preset_run_overwrite(App *a, const char *args);
+void preset_run_delete(App *a, const char *args);
+void preset_run_rename(App *a, const char *args);
+void preset_run_move(App *a, const char *args);
+void preset_run_add(App *a, const char *args);
+void preset_run_remove(App *a, const char *args);
+void preset_cycle(App *a, bool forward);
+Session app_session(const App *a);
+void app_apply_session(App *a, Session s);
+void app_save_state(App *a);   /* state.json on exit */
+bool app_restore_state(App *a);
+
+/* console.c */
+void tell_new_tips(App *a);
+void console_run_line(App *a, const char *line);
+void console_tab_complete(App *a);
+void draw_footer(App *a, Ui *ui, Rct r);
+void draw_console_drawer(App *a, Ui *ui, Rct footer);
+
+/* frame.c: one full UI frame onto ui->canvas; shared by the SDL shell and
+   the plugin editor */
+void app_frame(App *a, Ui *ui);
+void app_init_defaults(App *a);
+
+/* shared app helpers (centre.c) */
+extern const char *const ROMAN[8];
+const char *mode_name_of(RatioMode m);
+int algorithm_index_of(const Patch *p);
+Patch app_rebuild(const Patch *old, int algorithm_index, RatioMode mode);
+void app_set_algorithm(App *a, int idx);
+void app_set_engaged(App *a, bool on);
+
+/* panes.c */
+void draw_title_bar(App *a, Ui *ui, Rct r);
+void draw_preset_bar(App *a, Ui *ui, Rct r);
+void draw_presets_pane(App *a, Ui *ui);
+void draw_info_pane(App *a, Ui *ui);
+void draw_fps_counter(App *a, Ui *ui, float footer_h);
+
+/* rails.c */
+void draw_left_rail(App *a, Ui *ui, Rct r);
+void draw_right_rail(App *a, Ui *ui, Rct r);
+
+/* centre.c */
+void draw_controls_house(App *a, Ui *ui, Rct r);
+void draw_stage(App *a, Ui *ui, Rct r);    /* starfield + monolith */
+void draw_keyboard_cell(App *a, Ui *ui, Rct r);
+void centre_prelayout(App *a, Ui *ui);     /* phase integrators, dread */
+
+/* visuals.c: logalith + splash */
+typedef struct {
+    P2 pole;
+    float tilt, max_r, bore_r, pitch, yaw, focal;
+} Pose;
+typedef struct {
+    float suture_ph, ripple_ph, cycles, along, level, grown, index;
+    uint32_t ghosts;
+    float ghost_spread, stipple;
+} Look;
+void logalith_fit(Rct rect, P2 *pole, float *base_r);
+void logalith_draw(Canvas *c, const Pose *pose, const Look *look, uint8_t ink);
+float logalith_unit_r(float theta, float ph, float cycles);
+bool splash_draw(App *a, Canvas *c, Rct rect, float elapsed);
+
+#endif

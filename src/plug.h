@@ -1,0 +1,68 @@
+#ifndef BYPO_PLUG_H
+#define BYPO_PLUG_H
+
+#include <clap/clap.h>
+#include <stdatomic.h>
+
+#include "gui/app.h"
+
+enum {
+    P_DRONE, P_DRONE_HZ, P_ALGORITHM, P_RATIO_MODE, P_INDEX, P_RIP, P_FB,
+    P_GLIDE, P_FIELD, P_CURVE, P_RELEASE, P_LEVEL,
+    P_OP1, P_OP2, P_OP3, P_OP4, P_OP5,
+    P_MIX, P_GHOST, P_DECAY, P_DAMP, P_HAUNT,
+    P_CH_ON, P_CH_MIX, P_CH_SYNC, P_CH_DIV, P_CH_RATE, P_CH_SPREAD, P_CH_SIZE,
+    P_CH_WARP, P_CH_DIM, P_CH_TAIL,
+    P_SH_ON, P_SH_SRC, P_SH_TUNING, P_SH_SCALE, P_SH_ROOT, P_SH_RANGE,
+    P_SH_RATE,
+    P_WARMTH,
+    P_COUNT
+};
+
+typedef enum { K_FLOAT, K_STEP, K_ONOFF } ParamKind;
+
+typedef struct {
+    const char *name;
+    const char *module;
+    double min, max, def;
+    ParamKind kind;
+} ParamSpec;
+
+extern const ParamSpec PLUG_SPEC[P_COUNT];
+
+typedef struct Plug {
+    clap_plugin_t plugin;
+    const clap_host_t *host;
+    double sr;
+    bool active;
+    _Atomic double vals[P_COUNT];
+    _Atomic bool dirty;
+    /* audio-thread engine */
+    VoicePair voice;
+    StereoVerb verb;
+    Melody melody;
+    Chandas chandas;
+    Tape tape;
+    EngageGate gate;
+    bool engine_alive;
+    bool engaged;
+    float applied_drone_hz;
+    /* editor bridge */
+    _Atomic(App *) gui_app;
+    bool rec_on;
+    uint32_t viz_decim;
+    float peak_acc[2];
+    _Atomic bool host_touched; /* host moved params; editor shadows stale */
+    void *gui_state;           /* owned by plug_gui.c */
+} Plug;
+
+double plug_getv(const Plug *p, int id);
+void plug_setv(Plug *p, int id, double v);
+Session plug_session_of_vals(const Plug *p);
+
+/* plug_gui.c */
+extern const clap_plugin_gui_t PLUG_EXT_GUI;
+extern const clap_plugin_timer_support_t PLUG_EXT_TIMER;
+extern const clap_plugin_posix_fd_support_t PLUG_EXT_FD;
+
+#endif

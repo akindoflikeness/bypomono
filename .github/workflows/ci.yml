@@ -1,0 +1,49 @@
+# Linux build and engine tests. Manual trigger only.
+name: ci
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libfreetype-dev libasound2-dev libx11-dev
+          git clone --depth 1 https://github.com/free-audio/clap /tmp/clap
+
+      - name: engine tests
+        run: |
+          make -j4 bypo-tests
+          ./bypo-tests
+
+      - name: build
+        run: |
+          make -j4 blow-your-phase-off blow-your-phase-off-gui
+          make -j4 bypo.clap EXTRA_CPPFLAGS=-I/tmp/clap/include
+          make dist
+
+      - name: glibc ceiling
+        run: |
+          for b in bypo.clap blow-your-phase-off-gui blow-your-phase-off; do
+            echo "$b: $(objdump -T $b | grep -oE 'GLIBC_2\.[0-9.]+' | sort -Vu | tail -1)"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bypomono-linux-x86_64
+          path: |
+            bypomono-linux-x86_64.tar.gz
+            bypomono-linux-x86_64-SHA256SUMS.txt
+            bypo.clap

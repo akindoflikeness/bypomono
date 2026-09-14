@@ -1,0 +1,9 @@
+*.o
+*.pic.o
+*.exe
+blow-your-phase-off
+blow-your-phase-off-gui
+bypo-tests
+bypo.clap
+bypomono-*
+.claude/

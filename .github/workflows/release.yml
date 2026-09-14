@@ -57,7 +57,7 @@ jobs:
       - name: deps (macos)
         if: runner.os == 'macOS'
         run: |
-          brew install sdl2 freetype pkg-config dylibbundler make
+          brew install sdl2 sdl3 freetype pkg-config dylibbundler make
           echo "$(brew --prefix)/opt/make/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: deps (windows)

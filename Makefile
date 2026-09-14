@@ -172,6 +172,12 @@ ifeq ($(OS),linux)
 else
   DIST_ARCHIVE = $(DIST).zip
 endif
+# Finder will not launch a loose Mach-O and offers right-click-Open for
+# bundles only, so the macOS GUI ships inside a minimal .app.
+MACAPP = BYPO.app
+MACAPP_DIR = $(DIST)/$(MACAPP)
+MACAPP_BIN = $(MACAPP_DIR)/Contents/MacOS/$(GUI)
+MACAPP_FW = $(MACAPP_DIR)/Contents/Frameworks
 
 stage: $(GUI)
 	rm -rf $(DIST)
@@ -187,16 +193,57 @@ ifeq ($(OS),windows)
 	ldd $(GUI) $$([ -e bypo.clap ] && echo bypo.clap) | awk '/mingw64|ucrt64|clang64/ {print $$3}' | sort -u | xargs -r -I{} cp {} $(DIST)/
 endif
 ifeq ($(OS),macos)
+	@# assets/ and presets/ stay beside the bundle; the app finds them by
+	@# walking out of Contents/MacOS.
+	mkdir -p $(MACAPP_DIR)/Contents/MacOS
+	mv $(DIST)/$(GUI) $(MACAPP_BIN)
+	printf 'APPL????' > $(MACAPP_DIR)/Contents/PkgInfo
+	printf '%s\n' \
+	  '<?xml version="1.0" encoding="UTF-8"?>' \
+	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+	  '<plist version="1.0">' \
+	  '<dict>' \
+	  '	<key>CFBundleIdentifier</key><string>com.akol.bypo.standalone</string>' \
+	  '	<key>CFBundleName</key><string>BYPO</string>' \
+	  '	<key>CFBundleExecutable</key><string>$(GUI)</string>' \
+	  '	<key>CFBundlePackageType</key><string>APPL</string>' \
+	  '	<key>CFBundleSignature</key><string>????</string>' \
+	  '	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>' \
+	  '	<key>CFBundleShortVersionString</key><string>$(VERSION)</string>' \
+	  '	<key>CFBundleVersion</key><string>$(VERSION)</string>' \
+	  '	<key>LSMinimumSystemVersion</key><string>10.13</string>' \
+	  '	<key>NSHighResolutionCapable</key><true/>' \
+	  '</dict>' \
+	  '</plist>' > $(MACAPP_DIR)/Contents/Info.plist
 	@# Homebrew's SDL2 and FreeType are linked by absolute path; pull them
-	@# (and their dependencies) into libs/ and repoint the binary, then
-	@# re-sign ad hoc, because editing a Mach-O breaks its signature and
-	@# Apple silicon refuses to run an unsigned one.
+	@# (and their dependencies) into Contents/Frameworks and repoint the binary.
 	@if command -v dylibbundler >/dev/null; then \
-	  dylibbundler -od -b -x $(DIST)/$(GUI) -d $(DIST)/libs -p @executable_path/libs && \
-	  codesign --force --sign - $(DIST)/libs/*.dylib $(DIST)/$(GUI); \
+	  dylibbundler -od -b -x $(MACAPP_BIN) -d $(MACAPP_FW) -p @executable_path/../Frameworks; \
 	else \
 	  echo "warning: dylibbundler not found; $(GUI) still links Homebrew dylibs by absolute path" >&2; \
 	fi
+	@# Homebrew ships sdl2-compat under the sdl2 name: a shim that reaches
+	@# SDL3 by dlopen, so no load command names it and dylibbundler cannot
+	@# see it. The shim tries @loader_path first, so a copy beside it is all
+	@# it needs; without this the app aborts with "Failed loading SDL3".
+	@if grep -qa libSDL3.dylib $(MACAPP_FW)/*.dylib 2>/dev/null; then \
+	  d="$$(pkg-config --variable=libdir sdl3 2>/dev/null)"; \
+	  [ -n "$$d" ] || d="$$(brew --prefix sdl3 2>/dev/null)/lib"; \
+	  if [ -f "$$d/libSDL3.dylib" ]; then \
+	    cp -L "$$d/libSDL3.dylib" $(MACAPP_FW)/libSDL3.dylib && \
+	    chmod u+w $(MACAPP_FW)/libSDL3.dylib && \
+	    install_name_tool -id @executable_path/../Frameworks/libSDL3.dylib \
+	                      $(MACAPP_FW)/libSDL3.dylib; \
+	  else \
+	    echo "error: bundled SDL2 is sdl2-compat but no libSDL3.dylib was found beside it" >&2; \
+	    exit 1; \
+	  fi; \
+	fi
+	@# editing a Mach-O breaks its signature, so re-sign ad hoc inside out:
+	@# Apple silicon refuses to run an unsigned binary, and a sealed bundle
+	@# is what lets Finder offer right-click-Open.
+	@if [ -d $(MACAPP_FW) ]; then codesign --force --sign - $(MACAPP_FW)/*.dylib; fi
+	codesign --force --sign - $(MACAPP_DIR)
 endif
 
 dist: stage
@@ -208,7 +255,7 @@ ifeq ($(OS),windows)
 else ifeq ($(OS),macos)
 	ditto -c -k --keepParent $(DIST) $(DIST_ARCHIVE)
 	shasum -a 256 $(DIST_ARCHIVE) > $(DIST)-SHA256SUMS.txt
-	printf '# inside %s:\n# %s\n' $(DIST_ARCHIVE) "$$(shasum -a 256 $(DIST)/$(GUI))" >> $(DIST)-SHA256SUMS.txt
+	printf '# inside %s:\n# %s\n' $(DIST_ARCHIVE) "$$(shasum -a 256 $(MACAPP_BIN))" >> $(DIST)-SHA256SUMS.txt
 else
 	tar czf $(DIST_ARCHIVE) $(DIST)
 	sha256sum $(DIST_ARCHIVE) > $(DIST)-SHA256SUMS.txt

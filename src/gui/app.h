@@ -55,7 +55,7 @@
 #define CONTROLS_SHARE (CONTROLS_HOUSE_W / REFERENCE_CENTRE_W)
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
-#define APP_VERSION "1.1.0"
+#define APP_VERSION "1.1.1"
 
 /* scale.c */
 /* largest quarter step whose magnified grid fits avail_w x avail_h less

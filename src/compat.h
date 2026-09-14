@@ -20,6 +20,8 @@ __asm__(".symver __isoc23_strtol,strtol@GLIBC_2.2.5");
 /* realpath -> _fullpath; both take/return a caller buffer of PATH_MAX-ish
    size (every caller in this tree passes a 1024-byte buffer) */
 #define realpath(path, resolved) _fullpath((resolved), (path), 1024)
+/* setenv -> _putenv_s; the overwrite flag is always honoured */
+#define setenv(name, value, overwrite) _putenv_s((name), (value))
 #endif
 
 #endif

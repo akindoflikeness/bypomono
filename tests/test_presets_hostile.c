@@ -484,7 +484,10 @@ static bool tmp_home_open(void) {
     snprintf(g_tmp, sizeof g_tmp, "%s/bypo-hostile-%ld", base, (long)getpid());
     rm_rf(g_tmp);
     if (mkdir(g_tmp, 0700) != 0) return false;
+    /* each platform reads a different variable for the data home */
     setenv("XDG_DATA_HOME", g_tmp, 1);
+    setenv("HOME", g_tmp, 1);
+    setenv("APPDATA", g_tmp, 1);
     return true;
 }
 

@@ -232,12 +232,12 @@ static void non_finite_numbers_are_not_json(void) {
 }
 
 static void huge_but_legal_numbers_land_inside_their_clamp(void) {
-    static const char *const HUGE[] = {"1e300", "-1e300", "1e-300", "-1e-300",
+    static const char *const HUGE_NUMS[] = {"1e300", "-1e300", "1e-300", "-1e-300",
                                        "0", "-0", "340282350000000000000000000000000000000.0"};
     char doc[256];
     for (size_t f = 0; f < NUM_FIELD_COUNT; f++) {
-        for (size_t h = 0; h < sizeof HUGE / sizeof HUGE[0]; h++) {
-            one_number_doc(doc, sizeof doc, &NUM_FIELDS[f], HUGE[h]);
+        for (size_t h = 0; h < sizeof HUGE_NUMS / sizeof HUGE_NUMS[0]; h++) {
+            one_number_doc(doc, sizeof doc, &NUM_FIELDS[f], HUGE_NUMS[h]);
             Session s;
             accepts(doc, &s, doc);
             check_clamped(&s, doc);

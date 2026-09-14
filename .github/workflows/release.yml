@@ -76,11 +76,7 @@ jobs:
 
       - name: engine tests
         run: |
-          make -j4 bypo-tests
-          ./bypo-tests
-
-      - name: build
-        run: make -j4 blow-your-phase-off blow-your-phase-off-gui
+          make -j4 check
 
       - name: clap (linux)
         if: runner.os == 'Linux'

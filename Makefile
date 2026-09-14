@@ -37,9 +37,10 @@ TEST_OBJ = $(TEST_SRC:.c=.o)
 
 GUI_SRC = $(wildcard src/gui/*.c)
 GUI_OBJ = $(GUI_SRC:.c=.o)
-FT_CFLAGS := $(shell pkg-config --cflags freetype2 sdl2)
+# MSYS2's sdl2.pc adds -Dmain=SDL_main; gui_main.c handles main itself
+FT_CFLAGS := $(filter-out -Dmain=SDL_main,$(shell pkg-config --cflags freetype2 sdl2))
 FT_LIBS := $(shell pkg-config --libs freetype2 sdl2)
-SDL_CFLAGS := $(shell pkg-config --cflags sdl2)
+SDL_CFLAGS := $(filter-out -Dmain=SDL_main,$(shell pkg-config --cflags sdl2))
 SDL_LIBS := $(shell pkg-config --libs sdl2)
 # <SDL2/SDL.h> is spelt using its directory; Homebrew's include root is not
 # on the default search path, so add it (a no-op on Linux and MSYS2).

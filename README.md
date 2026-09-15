@@ -402,7 +402,7 @@ drama               mathsmatic          shuffling a deck
 
 ## On AI
 
-Without AI this wouldn't exist. Primarily it has been programmed by AI agents. Every change is read, committed and tested by hand and the design and audio architecture are mine (akindoflikeness/AKOL). I've tried my best to model what I think responsible AI usage looks like - because AI is not exclusively a force for good. In my view AI is a tool and this is written to be open so that you can make an informed decision about whether to engage with it or not. If your worldview precludes you from engaging with something a lone musician designed with care, then perhaps your worldview is the thing that needs adjusting.
+Without AI this wouldn't exist. Primarily it has been programmed by AI agents. Every change is read, committed and tested by hand and the design and audio architecture are mine (akindoflikeness/AKOL). AI is not exclusively a force for good, and has been especially damaging in music and the arts generally. This is written to be open so that you can make an informed decision about whether to engage with it or not. 
 
 <br>
 

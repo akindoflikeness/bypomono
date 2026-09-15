@@ -92,7 +92,7 @@ WINDOWS
 &nbsp;
 Download      →  <a href="https://github.com/wraithsys/bypomono/releases/download/v1.1.0/bypomono-windows-x64.zip">bypomono-windows-x64.zip</a>
 Extract
-Run           →  blow-your-phase-off.exe
+Run           →  blow-your-phase-off-gui.exe
 Copy .clap    →  to the directory you DAW indexes  [%COMMONPROGRAMFILES%\CLAP\]
 &nbsp;
 Windows version hasn't been fully tested by myself yet.

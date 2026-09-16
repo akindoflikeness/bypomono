@@ -114,6 +114,9 @@ jobs:
       # A host finds DLLs on its own search path, not in the plugin's folder,
       # so the .clap must import nothing that MSYS2 ships; the exe keeps SDL2
       # and FreeType beside it but carries the MinGW runtime itself.
+      - name: dist
+        run: make dist
+
       - name: static imports (windows)
         if: runner.os == 'Windows'
         run: |
@@ -131,9 +134,6 @@ jobs:
             echo "the exe imports the MinGW runtime: $bad" >&2
             exit 1
           fi
-
-      - name: dist
-        run: make dist
 
       - name: what shipped
         run: |

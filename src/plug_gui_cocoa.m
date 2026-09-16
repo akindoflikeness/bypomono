@@ -20,7 +20,15 @@ enum {
     KC_DELETE = 51,
     KC_ESCAPE = 53,
     KC_KP_ENTER = 76,
-    KC_F2 = 120
+    KC_HOME = 115,
+    KC_PAGEUP = 116,
+    KC_END = 119,
+    KC_F2 = 120,
+    KC_PAGEDOWN = 121,
+    KC_LEFT = 123,
+    KC_RIGHT = 124,
+    KC_DOWN = 125,
+    KC_UP = 126
 };
 
 @interface BypoView : NSView {
@@ -134,6 +142,14 @@ static CGFloat backing_of(BypoView *v) {
     case KC_TAB: return KEY_TAB;
     case KC_DELETE: return KEY_BACKSPACE;
     case KC_F2: return KEY_F2;
+    case KC_HOME: return KEY_HOME;
+    case KC_END: return KEY_END;
+    case KC_PAGEUP: return KEY_PAGEUP;
+    case KC_PAGEDOWN: return KEY_PAGEDOWN;
+    case KC_LEFT: return KEY_LEFT;
+    case KC_RIGHT: return KEY_RIGHT;
+    case KC_UP: return KEY_UP;
+    case KC_DOWN: return KEY_DOWN;
     default: return -1;
     }
 }

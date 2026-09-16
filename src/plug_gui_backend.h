@@ -22,15 +22,23 @@ typedef struct Gui Gui;
 #define BACKEND_WINDOW_API CLAP_WINDOW_API_X11
 #endif
 
-/* SDL scancode values for the five keys the editor reads; UiInput is indexed
-   by them and frame.c/panes.c spell them SDL_SCANCODE_*. Spelt out here so no
+/* SDL scancode values for the keys the editor reads; UiInput is indexed by
+   them and frame.c/panes.c spell them SDL_SCANCODE_*. Spelt out here so no
    backend has to include an SDL header. */
 enum {
     KEY_RETURN = 40,
     KEY_ESCAPE = 41,
     KEY_BACKSPACE = 42,
     KEY_TAB = 43,
-    KEY_F2 = 59
+    KEY_F2 = 59,
+    KEY_HOME = 74,
+    KEY_PAGEUP = 75,
+    KEY_END = 77,
+    KEY_PAGEDOWN = 78,
+    KEY_RIGHT = 79,
+    KEY_LEFT = 80,
+    KEY_DOWN = 81,
+    KEY_UP = 82
 };
 
 /* the part of the editor state a backend reads and writes */

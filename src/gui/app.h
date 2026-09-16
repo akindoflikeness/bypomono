@@ -55,7 +55,7 @@
 #define CONTROLS_SHARE (CONTROLS_HOUSE_W / REFERENCE_CENTRE_W)
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
-#define APP_VERSION "1.1.1"
+#define APP_VERSION "1.1.2"
 
 /* scale.c */
 /* largest quarter step whose magnified grid fits avail_w x avail_h less
@@ -137,6 +137,7 @@ void recorder_finalize(Recorder *r);
 #define MINE_BANK "USER"
 #define STOCK_BANK "BYPO"
 #define DEFAULT_PRESET "init"
+#define TRASH_DIR "trash" /* deleted presets go here; the browser never lists it */
 
 typedef struct {
     char bank[64]; /* "" = loose (USER view) */
@@ -148,6 +149,12 @@ typedef struct {
     PresetFilterKind kind;
     char bank[64];
 } PresetFilter;
+
+/* preset_armed values the bar icons show as armed */
+#define ARMED_SAVE 2
+#define ARMED_DELETE 4
+/* keyboard walk over the preset bar buttons, left to right */
+#define PRESET_BUTTONS 5
 
 /* json_session.c */
 /* a preset or state document larger than this is refused unread */
@@ -256,10 +263,15 @@ typedef struct App {
     PresetRef preset_loaded, preset_selected;
     bool have_loaded, have_selected;
     int preset_armed; /* console Command id or 0 */
+    PresetRef preset_delete_armed; /* the row the DELETE button armed on */
+    bool have_delete_armed;
     bool preset_searching, preset_focus, presets_open, presets_were_open;
+    int preset_button_at; /* bar button the keyboard walk is on */
     double preset_click_at;
     bool have_click_at;
     UiScroll preset_scroll;
+    Rct presets_pane_rect; /* where the pane was drawn last frame */
+    bool have_presets_pane_rect;
 
     /* console / log */
     char log[LOG_LINES][LOG_LINE_LEN];
@@ -351,6 +363,9 @@ void preset_save_in(App *a, const char *bank, const char *name);
 void preset_run_save(App *a, const char *name);
 void preset_run_overwrite(App *a, const char *args);
 void preset_run_delete(App *a, const char *args);
+/* first call arms on the highlighted row, the next call on the same row
+   deletes it */
+void preset_delete_highlighted(App *a);
 void preset_run_rename(App *a, const char *args);
 void preset_run_move(App *a, const char *args);
 void preset_run_add(App *a, const char *args);
@@ -382,6 +397,8 @@ void app_set_algorithm(App *a, int idx);
 void app_set_engaged(App *a, bool on);
 
 /* panes.c */
+/* Tab walks search -> list -> buttons, Left/Right pick a bar button */
+void presets_walk_keys(App *a, Ui *ui);
 void draw_title_bar(App *a, Ui *ui, Rct r);
 void draw_preset_bar(App *a, Ui *ui, Rct r);
 void draw_presets_pane(App *a, Ui *ui);

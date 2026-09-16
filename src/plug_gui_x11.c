@@ -172,6 +172,14 @@ static void x_key(Gui *g, XKeyEvent *ev, bool down) {
     case XK_Tab: sc = KEY_TAB; break;
     case XK_BackSpace: sc = KEY_BACKSPACE; break;
     case XK_F2: sc = KEY_F2; break;
+    case XK_Home: case XK_KP_Home: sc = KEY_HOME; break;
+    case XK_End: case XK_KP_End: sc = KEY_END; break;
+    case XK_Page_Up: case XK_KP_Page_Up: sc = KEY_PAGEUP; break;
+    case XK_Page_Down: case XK_KP_Page_Down: sc = KEY_PAGEDOWN; break;
+    case XK_Left: case XK_KP_Left: sc = KEY_LEFT; break;
+    case XK_Right: case XK_KP_Right: sc = KEY_RIGHT; break;
+    case XK_Up: case XK_KP_Up: sc = KEY_UP; break;
+    case XK_Down: case XK_KP_Down: sc = KEY_DOWN; break;
     default: break;
     }
     if (sc >= 0) gui_in_key(g, sc, down);

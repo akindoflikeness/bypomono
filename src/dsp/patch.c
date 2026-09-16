@@ -31,14 +31,52 @@ float ratio_mode_ratio(RatioMode mode, int op) {
     }
 }
 
+/* Which table entry each op plays: every carrier takes the fundamental (the
+   first entry that is 1.0), and the modulators take the remaining entries in
+   table order, ranked by depth and then by op index, so a note sounds at its
+   own pitch in every algorithm. */
+static void ratio_slots(const Compiled *compiled, RatioMode mode, int slot[NUM_OPS]) {
+    int fundamental = 0;
+    for (int k = 0; k < NUM_OPS; k++) {
+        if (ratio_mode_ratio(mode, k) == 1.0f) {
+            fundamental = k;
+            break;
+        }
+    }
+    int order[NUM_OPS];
+    int n = 0;
+    for (int op = 0; op < NUM_OPS; op++) {
+        if ((compiled->carriers >> op & 1) == 1) {
+            slot[op] = fundamental;
+            continue;
+        }
+        int j = n;
+        while (j > 0 &&
+               (compiled->depth[order[j - 1]] > compiled->depth[op] ||
+                (compiled->depth[order[j - 1]] == compiled->depth[op] && order[j - 1] > op))) {
+            order[j] = order[j - 1];
+            j--;
+        }
+        order[j] = op;
+        n++;
+    }
+    int next = 0;
+    for (int i = 0; i < n; i++) {
+        if (next == fundamental) next++;
+        slot[order[i]] = next++;
+    }
+}
+
 Patch patch_init(AlgorithmId algorithm, RatioMode ratio_mode) {
     Compiled compiled = compile(algorithm);
+    int slot[NUM_OPS];
+    ratio_slots(&compiled, ratio_mode, slot);
     Patch p;
     p.algorithm = algorithm;
     p.ratio_mode = ratio_mode;
     for (int i = 0; i < NUM_OPS; i++) {
         p.ops[i].enabled = true;
-        p.ops[i].ratio = ratio_mode_ratio(ratio_mode, i);
+        p.ops[i].ratio = ratio_mode_ratio(ratio_mode, slot[i]);
         p.ops[i].detune_cents = 0.0f;
         p.ops[i].level = 1.0f;
         if (compiled.depth[i] > 1) {

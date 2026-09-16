@@ -563,6 +563,7 @@ static int scan_presets_dir(const char *dir, PresetRef *out, int max) {
                 continue;
             char full[JOINBUF];
             snprintf(full, sizeof full, "%s/%s", dir, e->d_name);
+            if (strcmp(e->d_name, TRASH_DIR) == 0) continue;
             if (is_dir_path(full)) {
                 DIR *inner = opendir(full);
                 if (!inner) continue;
@@ -602,6 +603,7 @@ static int scan_folders_dir(const char *dir, char out[][64], int max) {
                 continue;
             char full[JOINBUF];
             snprintf(full, sizeof full, "%s/%s", dir, e->d_name);
+            if (strcmp(e->d_name, TRASH_DIR) == 0) continue;
             if (is_dir_path(full))
                 snprintf(out[count++], 64, "%.63s", e->d_name);
         }
@@ -1199,6 +1201,30 @@ void preset_run_delete(App *a, const char *args) {
         push_log(a, "no preset highlighted to delete.");
         return;
     }
+    delete_preset(a, &preset);
+}
+
+void preset_delete_highlighted(App *a) {
+    if (!a->have_selected) {
+        push_log(a, "no preset highlighted to delete.");
+        a->preset_armed = 0;
+        a->have_delete_armed = false;
+        return;
+    }
+    char q[256];
+    preset_qualified(&a->preset_selected, q, sizeof q);
+    bool armed_here = a->preset_armed == ARMED_DELETE && a->have_delete_armed
+                      && refs_equal(&a->preset_delete_armed, &a->preset_selected);
+    if (!armed_here) {
+        a->preset_delete_armed = a->preset_selected;
+        a->have_delete_armed = true;
+        a->preset_armed = ARMED_DELETE;
+        push_log(a, "delete '%s' — again to confirm.", q);
+        return;
+    }
+    a->preset_armed = 0;
+    a->have_delete_armed = false;
+    PresetRef preset = a->preset_selected;
     delete_preset(a, &preset);
 }
 

@@ -28,12 +28,17 @@ else ifeq ($(UNAME_S),Darwin)
 else ifneq (,$(findstring MINGW,$(UNAME_S))$(findstring MSYS,$(UNAME_S)))
   OS := windows
   ARCH := $(if $(findstring x86_64,$(UNAME_M)),x64,$(UNAME_M))
-  SYS_LIBS = -lm -lpthread -lwinmm
+  SYS_LIBS = -lm -lwinmm
   EXE := .exe
   GUI_LDFLAGS = -mwindows
+  # The MinGW runtime (libgcc, winpthread) is linked into every binary, so
+  # nothing has to sit beside it for the runtime. -Bstatic stays in force to
+  # the end of the line so gcc's own trailing -lpthread resolves static too.
+  RUNTIME_LIBS = -static-libgcc -Wl,-Bstatic -lwinpthread
 else
   $(error unsupported platform '$(UNAME_S)')
 endif
+RUNTIME_LIBS ?=
 
 DSP_SRC = $(wildcard src/dsp/*.c)
 DSP_OBJ = $(DSP_SRC:.c=.o)
@@ -79,10 +84,10 @@ TESTS = bypo-tests$(EXE)
 all: $(CLI) $(GUI) $(TESTS)
 
 $(CLI): $(DSP_OBJ) src/audio.o src/midi.o src/app.o
-	$(CC) $(CFLAGS) -o $@ $^ $(SYS_LIBS) $(AUDIO_LIBS)
+	$(CC) $(CFLAGS) -o $@ $^ $(SYS_LIBS) $(AUDIO_LIBS) $(RUNTIME_LIBS)
 
 $(GUI): $(DSP_OBJ) $(GUI_OBJ) src/audio.o src/midi.o
-	$(CC) $(CFLAGS) $(GUI_LDFLAGS) -o $@ $^ $(SYS_LIBS) $(FT_LIBS)
+	$(CC) $(CFLAGS) $(GUI_LDFLAGS) -o $@ $^ $(SYS_LIBS) $(FT_LIBS) $(RUNTIME_LIBS)
 
 src/gui/%.o: src/gui/%.c src/gui/app.h src/gui/canvas.h src/gui/text.h src/gui/ui.h src/dsp/dsp.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -c $< -o $@
@@ -92,6 +97,7 @@ src/audio.o: src/audio.c src/audio.h
 
 # the preset tests link the parser and saver
 TEST_GUI_OBJ = src/gui/json_session.o src/gui/presets.o
+TEST_GUI_OBJ += src/gui/command.o src/gui/focus.o
 
 $(TESTS): $(DSP_OBJ) $(TEST_OBJ) $(TEST_GUI_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -118,7 +124,13 @@ else ifeq ($(OS),macos)
               $(FT_ONLY_LIBS)
   GUI_BACKEND_SRC = src/plug_gui_cocoa.m
 else
-  CLAP_LIBS = -lm -lpthread -lwinmm -lgdi32 -luser32 $(FT_ONLY_LIBS)
+  # A host loads the .clap from its own search path, not the plugin's folder,
+  # so the plugin carries FreeType, its private deps and the MinGW runtime
+  # inside it: -static picks every lib*.a over lib*.dll.a, and -lstdc++ covers
+  # the HarfBuzz that MSYS2's FreeType is built against.
+  FT_STATIC_LIBS := $(shell pkg-config --static --libs freetype2)
+  CLAP_LIBS = -static -static-libgcc -Wl,-Bstatic -lwinpthread \
+              $(FT_STATIC_LIBS) -lstdc++ -lm -lwinmm -lgdi32 -luser32
   GUI_BACKEND_SRC = src/plug_gui_win32.c
 endif
 GUI_BACKEND_OBJ = $(basename $(GUI_BACKEND_SRC)).pic.o
@@ -185,14 +197,20 @@ endif
 # One drop-anywhere folder on every platform: the GUI binary with README,
 # LICENSE, THIRD-PARTY-LICENSES, assets/ and presets/ beside it. Linux ships
 # a tar.gz so the executable bit survives; macOS and Windows ship a zip.
-# On Windows the MinGW runtime DLLs the exe needs are copied in beside it
-# (ldd tells us which), so the folder runs on a machine without MSYS2.
+# On Windows the SDL2 and FreeType DLLs the exe needs are copied in beside it
+# (ldd tells us which), so the folder runs on a machine without MSYS2; the
+# exe ships under the plain name, without the -gui the build uses.
 # Every archive gets a SHA256SUMS file in the coreutils `hash  name` format.
 DIST = bypomono-$(OS)-$(ARCH)
 ifeq ($(OS),linux)
   DIST_ARCHIVE = $(DIST).tar.gz
 else
   DIST_ARCHIVE = $(DIST).zip
+endif
+ifeq ($(OS),windows)
+  SHIP_GUI = blow-your-phase-off$(EXE)
+else
+  SHIP_GUI = $(GUI)
 endif
 # Finder will not launch a loose Mach-O and offers right-click-Open for
 # bundles only, so the macOS GUI ships inside a minimal .app.
@@ -203,7 +221,8 @@ MACAPP_BIN = $(MACAPP_DIR)/Contents/MacOS/$(GUI)
 stage: $(GUI)
 	rm -rf $(DIST)
 	mkdir $(DIST)
-	cp $(GUI) README.md LICENSE THIRD-PARTY-LICENSES.txt $(DIST)/
+	cp $(GUI) $(DIST)/$(SHIP_GUI)
+	cp README.md LICENSE THIRD-PARTY-LICENSES.txt $(DIST)/
 	cp -r assets $(DIST)/
 	mkdir -p $(DIST)/presets && cp -r presets/BYPO $(DIST)/presets/
 	@# bypo.clap has its own target because it needs the CLAP headers; ship it
@@ -211,7 +230,7 @@ stage: $(GUI)
 	@if [ -e bypo.clap ]; then cp -R bypo.clap $(DIST)/; \
 	else echo "warning: bypo.clap not built; this archive ships the app only" >&2; fi
 ifeq ($(OS),windows)
-	ldd $(GUI) $$([ -e bypo.clap ] && echo bypo.clap) | awk '/mingw64|ucrt64|clang64/ {print $$3}' | sort -u | xargs -r -I{} cp {} $(DIST)/
+	ldd $(GUI) | awk '/mingw64|ucrt64|clang64/ {print $$3}' | sort -u | xargs -r -I{} cp {} $(DIST)/
 endif
 ifeq ($(OS),macos)
 	@# assets/ and presets/ stay beside the bundle; the app finds them by
@@ -247,7 +266,7 @@ dist: stage
 ifeq ($(OS),windows)
 	zip -qr $(DIST_ARCHIVE) $(DIST)
 	sha256sum $(DIST_ARCHIVE) > $(DIST)-SHA256SUMS.txt
-	printf '# inside %s:\n# %s\n' $(DIST_ARCHIVE) "$$(sha256sum $(DIST)/$(GUI))" >> $(DIST)-SHA256SUMS.txt
+	printf '# inside %s:\n# %s\n' $(DIST_ARCHIVE) "$$(sha256sum $(DIST)/$(SHIP_GUI))" >> $(DIST)-SHA256SUMS.txt
 else ifeq ($(OS),macos)
 	ditto -c -k --keepParent $(DIST) $(DIST_ARCHIVE)
 	shasum -a 256 $(DIST_ARCHIVE) > $(DIST)-SHA256SUMS.txt

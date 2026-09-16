@@ -67,6 +67,14 @@ static int vk_scancode(WPARAM vk) {
     case VK_TAB: return KEY_TAB;
     case VK_BACK: return KEY_BACKSPACE;
     case VK_F2: return KEY_F2;
+    case VK_HOME: return KEY_HOME;
+    case VK_END: return KEY_END;
+    case VK_PRIOR: return KEY_PAGEUP;
+    case VK_NEXT: return KEY_PAGEDOWN;
+    case VK_LEFT: return KEY_LEFT;
+    case VK_RIGHT: return KEY_RIGHT;
+    case VK_UP: return KEY_UP;
+    case VK_DOWN: return KEY_DOWN;
     default: return -1;
     }
 }

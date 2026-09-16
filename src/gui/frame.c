@@ -49,6 +49,8 @@ static void handle_keys(App *a, Ui *ui) {
     if (!a->splash_over && (any_key || ui->in.pressed)) a->splash_over = true;
 
     UiId bar_id = ui_id("preset bar");
+    UiId list_id = ui_id("preset list");
+    UiId buttons_id = ui_id("preset buttons");
     UiId console_id = ui_id("console input");
 
     /* "/" opens the console when no field is focused */
@@ -62,12 +64,18 @@ static void handle_keys(App *a, Ui *ui) {
     if (ui->in.key_pressed[SDL_SCANCODE_TAB] && a->console_open
         && ui->focus == console_id)
         console_tab_complete(a);
+    presets_walk_keys(a, ui);
 
     if (ui->in.key_pressed[SDL_SCANCODE_ESCAPE]) {
-        if (ui->focus == bar_id && a->preset_name.len > 0) {
+        if (ui->focus == bar_id || ui->focus == list_id
+            || ui->focus == buttons_id) {
+            /* out of the preset controls: the query and the highlight go */
+            ui->focus = 0;
             a->preset_name.len = 0;
             a->preset_name.text[0] = '\0';
             a->preset_searching = false;
+            a->have_selected = false;
+            a->preset_armed = 0;
         } else if (a->console_open) {
             a->console_open = false;
             a->console_input.len = 0;

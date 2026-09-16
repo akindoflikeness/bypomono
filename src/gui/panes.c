@@ -6,11 +6,9 @@
 
 #include "app.h"
 
-#define CMD_SAVE 2
-#define CMD_DELETE 4
-
 #define PRESET_DOUBLE_CLICK_S 1.0
 #define ICON_SCALE 2.0f
+#define PRESET_ROW_GAP GROUP
 
 static UiScroll s_bank_scroll, s_midi_scroll;
 
@@ -41,8 +39,8 @@ static void trimmed(const char *raw, char *out, size_t cap) {
 
 static bool is_command_text(const char *raw) {
     static const char *const NAMES[] = {
-        "rec", "record", "save", "overwrite", "delete", "rename",
-        "move", "add",    "bind", "unbind",    "remove",
+        "rec",  "record", "save",   "overwrite", "delete", "rename", "move",
+        "add",  "bind",   "unbind", "remove",    "undo",   "help",
     };
     char t[256];
     trimmed(raw, t, sizeof t);
@@ -58,6 +56,10 @@ static bool is_command_text(const char *raw) {
     for (size_t k = 0; k < sizeof NAMES / sizeof NAMES[0]; k++)
         if (strcmp(head, NAMES[k]) == 0) return true;
     return false;
+}
+
+static bool refs_same(const PresetRef *a, const PresetRef *b) {
+    return strcmp(a->bank, b->bank) == 0 && strcmp(a->name, b->name) == 0;
 }
 
 static bool filter_matches(const PresetFilter *f, const PresetRef *p) {
@@ -110,6 +112,54 @@ static void std_button_draw(Canvas *c, Rct r, const char *text, FontId f,
               lit ? INK_BLACK : PAPER, 0.0f);
 }
 
+/* ---------- keyboard walk ---------- */
+
+/* bar buttons in walk order, left to right on screen */
+enum { PB_FOLDER, PB_SAVE, PB_DELETE, PB_PREV, PB_NEXT };
+
+static void focus_ring(Canvas *c, Rct r) {
+    draw_rect_stroke(c, rct_expand(r, 2.0f), 1.0f, PAPER);
+}
+
+/* true when the walk sits on button k and Return was pressed this frame */
+static bool key_hit(const App *a, const Ui *ui, int k) {
+    return ui->focus == ui_id("preset buttons") && a->preset_button_at == k
+           && ui->in.key_pressed[SDL_SCANCODE_RETURN];
+}
+
+static void focus_search(App *a, Ui *ui) {
+    a->preset_searching = true;
+    a->preset_focus = true;
+    ui->focus = ui_id("preset bar");
+}
+
+void presets_walk_keys(App *a, Ui *ui) {
+    UiId bar_id = ui_id("preset bar");
+    UiId list_id = ui_id("preset list");
+    UiId buttons_id = ui_id("preset buttons");
+    bool walking = ui->focus == bar_id || ui->focus == list_id
+                   || ui->focus == buttons_id;
+    if (ui->in.key_pressed[SDL_SCANCODE_TAB]
+        && (walking || (a->presets_open && ui->focus == 0))) {
+        if (ui->focus == bar_id) {
+            ui->focus = list_id;
+            a->presets_open = true;
+        } else if (ui->focus == list_id) {
+            ui->focus = buttons_id;
+        } else {
+            focus_search(a, ui);
+        }
+    }
+    if (ui->focus == buttons_id) {
+        if (ui->in.key_pressed[SDL_SCANCODE_LEFT] && a->preset_button_at > 0)
+            a->preset_button_at--;
+        if (ui->in.key_pressed[SDL_SCANCODE_RIGHT]
+            && a->preset_button_at < PRESET_BUTTONS - 1)
+            a->preset_button_at++;
+    }
+    if (ui->focus == list_id && !a->presets_open) ui->focus = 0;
+}
+
 /* ---------- title bar + preset bar ---------- */
 
 void draw_preset_bar(App *a, Ui *ui, Rct r) {
@@ -119,13 +169,17 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
     float cy = 0.5f * (r.y0 + r.y1);
     float x = r.x1;
     UiId bar_id = ui_id("preset bar");
+    UiId buttons_id = ui_id("preset buttons");
+    bool on_buttons = ui->focus == buttons_id;
 
     {
         float w = roundf(text_width(f12, "▷", 0.0f) + 14.0f);
         float h = roundf(row12 + 8.0f);
         Rct br = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        if (pane_button(ui, ui_id("preset next"), br, "▷", false))
+        if (pane_button(ui, ui_id("preset next"), br, "▷", false)
+            || key_hit(a, ui, PB_NEXT))
             preset_cycle(a, true);
+        if (on_buttons && a->preset_button_at == PB_NEXT) focus_ring(c, br);
         x = br.x0 - GROUP;
     }
 
@@ -142,9 +196,20 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
         Resp fr = ui_interact(ui, bar_id, bar, 0.0f);
         if (fr.hovered) ui->cursor = CURSOR_TEXT;
         if (fr.clicked) ui->focus = bar_id;
-        if (ui->in.pressed && !rct_contains(bar, ui->in.mouse)) {
+        /* a press in the pane keeps the query, so the row clicked is the row
+           that was showing */
+        bool in_pane = a->presets_open && a->have_presets_pane_rect
+                       && rct_contains(a->presets_pane_rect, ui->in.mouse);
+        if (ui->in.pressed && !rct_contains(bar, ui->in.mouse) && !in_pane) {
             if (ui->focus == bar_id) ui->focus = 0;
             a->preset_searching = false;
+        }
+        if (ui->focus == bar_id) {
+            /* "/" is the console's key and never part of a query */
+            char *w = ui->in.text;
+            for (const char *p = ui->in.text; *p; p++)
+                if (*p != '/') *w++ = *p;
+            *w = '\0';
         }
         if (ui_text_edit(ui, bar_id, &a->preset_name)) a->preset_armed = 0;
 
@@ -165,10 +230,18 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
         canvas_set_clip(c, saved);
 
         if (ui->focus == bar_id && ui->in.key_pressed[SDL_SCANCODE_RETURN]) {
-            if (query_matches_any(a))
+            if (is_command_text(a->preset_name.text)) {
+                /* a verb typed here runs as if it were in the console */
+                char line[256];
+                trimmed(a->preset_name.text, line, sizeof line);
+                a->preset_name.len = 0;
+                a->preset_name.text[0] = '\0';
+                console_run_line(a, line);
+            } else if (query_matches_any(a)) {
                 a->preset_armed = 0;
-            else
+            } else {
                 save_from_bar(a, ui);
+            }
         }
         if (!a->preset_searching && ui->focus == bar_id) ui->focus = 0;
     } else {
@@ -211,8 +284,10 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
         float w = roundf(text_width(f12, "◁", 0.0f) + 14.0f);
         float h = roundf(row12 + 8.0f);
         Rct br = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        if (pane_button(ui, ui_id("preset prev"), br, "◁", false))
+        if (pane_button(ui, ui_id("preset prev"), br, "◁", false)
+            || key_hit(a, ui, PB_PREV))
             preset_cycle(a, false);
+        if (on_buttons && a->preset_button_at == PB_PREV) focus_ring(c, br);
         x = br.x0 - GROUP;
     }
 
@@ -223,29 +298,29 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
         Rct ir = rct(roundf(x - iw), roundf(cy - ih * 0.5f), roundf(x),
                      roundf(cy - ih * 0.5f) + ih);
         if (icon_button(ui, ui_id("preset delete"), ir, ICON_DELETE, NULL,
-                        a->preset_armed == CMD_DELETE, ICON_SCALE)) {
-            if (!a->have_selected) {
-                push_log(a, "no preset highlighted to delete.");
-                a->preset_armed = 0;
-            } else {
-                console_run_line(a, "delete");
-            }
-        }
+                        a->preset_armed == ARMED_DELETE, ICON_SCALE)
+            || key_hit(a, ui, PB_DELETE))
+            preset_delete_highlighted(a);
+        if (on_buttons && a->preset_button_at == PB_DELETE) focus_ring(c, ir);
         x = ir.x0 - GROUP;
     }
     {
         Rct ir = rct(roundf(x - iw), roundf(cy - ih * 0.5f), roundf(x),
                      roundf(cy - ih * 0.5f) + ih);
         if (icon_button(ui, ui_id("preset save"), ir, ICON_SAVE, NULL,
-                        a->preset_armed == CMD_SAVE, ICON_SCALE))
+                        a->preset_armed == ARMED_SAVE, ICON_SCALE)
+            || key_hit(a, ui, PB_SAVE))
             save_from_bar(a, ui);
+        if (on_buttons && a->preset_button_at == PB_SAVE) focus_ring(c, ir);
         x = ir.x0 - GROUP;
     }
     {
         Rct ir = rct(roundf(x - iw), roundf(cy - ih * 0.5f), roundf(x),
                      roundf(cy - ih * 0.5f) + ih);
+        if (on_buttons && a->preset_button_at == PB_FOLDER) focus_ring(c, ir);
         if (icon_button(ui, ui_id("preset folder"), ir, ICON_FOLDER, NULL,
-                        false, ICON_SCALE)) {
+                        false, ICON_SCALE)
+            || key_hit(a, ui, PB_FOLDER)) {
             snprintf(a->console_input.text, sizeof a->console_input.text,
                      "add ");
             a->console_input.len = (int)strlen(a->console_input.text);
@@ -319,7 +394,6 @@ void draw_title_bar(App *a, Ui *ui, Rct r) {
 /* ---------- presets pane ---------- */
 
 void draw_presets_pane(App *a, Ui *ui) {
-    const float LIST_H = 230.0f;
     const float PANE_W = 340.0f;
     Canvas *c = ui->canvas;
     FontId f12 = ui_font(12.0f);
@@ -338,6 +412,8 @@ void draw_presets_pane(App *a, Ui *ui) {
     draw_rect_filled(c, pane, INK_BLACK);
     draw_rect_stroke(c, pane, 2.0f, PAPER);
     Rct inner = rct_shrink(pane, GAP);
+    a->presets_pane_rect = pane;
+    a->have_presets_pane_rect = true;
 
     char query[256];
     if (is_command_text(a->preset_name.text)) {
@@ -361,8 +437,7 @@ void draw_presets_pane(App *a, Ui *ui) {
     Rct saved = canvas_clip(c);
 
     {
-        Rct bcol = rct(inner.x0, inner.y0, inner.x0 + 108.0f,
-                       inner.y0 + LIST_H);
+        Rct bcol = rct(inner.x0, inner.y0, inner.x0 + 108.0f, inner.y1);
         float bh = fmaxf(row11 + 2.0f * GAP, 21.0f);
         int nb = 2 + a->folder_count;
         float content_h = (float)nb * bh + (float)(nb - 1) * GROUP;
@@ -396,25 +471,66 @@ void draw_presets_pane(App *a, Ui *ui) {
     }
 
     {
+        UiId list_id = ui_id("preset list");
         float lx0 = inner.x0 + 108.0f + SECTION;
         float lw = fmaxf(rct_w(inner) - 108.0f - SECTION, 120.0f);
-        Rct lcol = rct(lx0, inner.y0, lx0 + lw, inner.y0 + LIST_H);
+        Rct lcol = rct(lx0, inner.y0, lx0 + lw, inner.y1);
         float rh = row12 + 8.0f;
-        float content_h = (float)n * rh + (float)(n > 0 ? n - 1 : 0) * GROUP;
+        float pitch = rh + PRESET_ROW_GAP;
+        float content_h = n > 0 ? (float)n * pitch - PRESET_ROW_GAP : 0.0f;
+        float view_h = rct_h(lcol);
+
+        int at = -1;
+        for (int k = 0; k < n && at < 0; k++)
+            if (a->have_selected
+                && refs_same(&a->preset_selected, &a->preset_names[shown[k]]))
+                at = k;
+
+        /* keyboard: Up/Down walk the highlight, Return loads it, Page and
+           Home/End move the view; the highlight is kept in sight */
+        bool focused = ui->focus == list_id;
+        int want = at;
+        if (focused && n > 0) {
+            const bool *k = ui->in.key_pressed;
+            if (k[SDL_SCANCODE_DOWN]) want = at < 0 ? 0 : (at + 1 < n ? at + 1 : at);
+            if (k[SDL_SCANCODE_UP]) want = at < 0 ? n - 1 : (at > 0 ? at - 1 : at);
+            if (k[SDL_SCANCODE_HOME]) want = 0;
+            if (k[SDL_SCANCODE_END]) want = n - 1;
+            if (k[SDL_SCANCODE_PAGEDOWN]) a->preset_scroll.offset += view_h;
+            if (k[SDL_SCANCODE_PAGEUP]) a->preset_scroll.offset -= view_h;
+            if (want != at) {
+                a->preset_selected = a->preset_names[shown[want]];
+                a->have_selected = true;
+                a->preset_armed = 0;
+                at = want;
+                float top = (float)at * pitch, bottom = top + rh;
+                if (top < a->preset_scroll.offset)
+                    a->preset_scroll.offset = top;
+                else if (bottom > a->preset_scroll.offset + view_h)
+                    a->preset_scroll.offset = bottom - view_h;
+            } else if (k[SDL_SCANCODE_RETURN] && at >= 0) {
+                PresetRef pick = a->preset_selected;
+                preset_load(a, &pick);
+            }
+        }
         float off = ui_scroll(ui, &a->preset_scroll, lcol, content_h);
         canvas_set_clip(c, rct_intersect(saved, lcol));
         float y = lcol.y0 - off;
         float cxm = 0.5f * (lcol.x0 + lcol.x1);
         for (int k = 0; k < n; k++) {
             const PresetRef *p = &a->preset_names[shown[k]];
-            bool sel = a->have_selected
-                       && strcmp(a->preset_selected.bank, p->bank) == 0
-                       && strcmp(a->preset_selected.name, p->name) == 0;
+            /* rows outside the view are neither drawn nor clickable */
+            if (y + rh < lcol.y0 || y > lcol.y1) {
+                y += pitch;
+                continue;
+            }
+            bool sel = k == at;
             float w = roundf(text_width(f12, p->name, 0.0f) + 14.0f);
             Rct rr = rct(roundf(cxm - w * 0.5f), roundf(y),
                          roundf(cxm - w * 0.5f) + w, roundf(y) + rh);
             if (pane_button(ui, ui_id_n("preset row", shown[k]), rr, p->name,
                             sel)) {
+                ui->focus = list_id;
                 if (sel) {
                     PresetRef pick = *p;
                     preset_load(a, &pick);
@@ -424,8 +540,9 @@ void draw_presets_pane(App *a, Ui *ui) {
                     a->preset_armed = 0;
                 }
             }
-            y += rh + GROUP;
+            y += pitch;
         }
+        if (focused) focus_ring(c, rct_shrink(lcol, 1.0f));
         canvas_set_clip(c, saved);
     }
 }

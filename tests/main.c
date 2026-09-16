@@ -18,6 +18,8 @@ void test_reverb(void);
 void test_tape(void);
 void test_chandas(void);
 void test_presets_hostile(void);
+void test_pitch(void);
+void test_console(void);
 
 int main(void) {
     struct { const char *name; void (*fn)(void); } suites[] = {
@@ -29,6 +31,8 @@ int main(void) {
         {"melody", test_melody},       {"reverb", test_reverb},
         {"tape", test_tape},           {"chandas", test_chandas},
         {"presets hostile", test_presets_hostile},
+        {"pitch", test_pitch},
+        {"console", test_console},
     };
     for (size_t i = 0; i < sizeof suites / sizeof suites[0]; i++) {
         int before = test_failures;

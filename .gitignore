@@ -10,3 +10,7 @@ bypomono-*
 
 smoke/
 .clap-validator/
+
+# working notes, not for the repo until their contents exist
+docs/
+docs/CLI_GUIDE.md

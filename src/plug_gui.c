@@ -380,6 +380,8 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
     g->fit = pick_display_scale(avail_w, avail_h);
     g->scale = compose_scale(g);
 
+    /* the splash plays once per plugin instance: app_init_defaults leaves it
+       pending on the first open, and a reopened editor skips it */
     if (!g->app) {
         g->app = calloc(1, sizeof *g->app);
         if (!g->app) return false;
@@ -387,11 +389,12 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
         g->app->restored = true;
         g->app->hosted = true;
         preset_rescan(g->app);
+    } else {
+        g->app->splash_over = true;
     }
     g->app->sample_rate = (float)p->sr;
     g->app->channels = 2;
     refresh_shadows(g->app, p);
-    g->app->splash_over = false;
 
     canvas_init(&g->canvas, (int)DESIGN_W, (int)DESIGN_H);
     memset(&g->ui, 0, sizeof g->ui);

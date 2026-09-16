@@ -36,6 +36,15 @@ State voice_pair_state(const VoicePair *p) {
 
 static void pair_cross_to(VoicePair *p, State next) {
     int incoming = p->blend < 0.5f ? 1 : 0;
+    /* the incoming voice starts its smoothed controls where the audible one
+       is, so a patch change glides the level instead of stepping it */
+    const Voice *live = &p->voices[1 - incoming];
+    Voice *in = &p->voices[incoming];
+    in->master = live->master;
+    in->master_pos = live->master_pos;
+    in->index = live->index;
+    in->field_smooth = live->field_smooth;
+    in->curve_smooth = live->curve_smooth;
     voice_set_patch(&p->voices[incoming], next.patch);
     voice_set_chain(&p->voices[incoming], next.chain);
     p->target = incoming;

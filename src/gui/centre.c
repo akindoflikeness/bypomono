@@ -1108,7 +1108,7 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
             for (int i = 0; i < NUM_OPS; i++)
                 at += (size_t)snprintf(ratios + at, sizeof ratios - at,
                                        i ? " %.3f" : "%.3f",
-                                       ratio_mode_ratio(mode, i));
+                                       (double)a->shadow.ops[i].ratio);
             push_log(a, "ratio mode %s. op ratios: %s.", mode_name_of(mode),
                      ratios);
         }

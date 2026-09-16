@@ -111,6 +111,27 @@ jobs:
       - name: clap
         run: make -j4 bypo.clap EXTRA_CPPFLAGS=-I/tmp/clap/include
 
+      # A host finds DLLs on its own search path, not in the plugin's folder,
+      # so the .clap must import nothing that MSYS2 ships; the exe keeps SDL2
+      # and FreeType beside it but carries the MinGW runtime itself.
+      - name: static imports (windows)
+        if: runner.os == 'Windows'
+        run: |
+          imports() { objdump -p "$1" | awk '/DLL Name/ {print $3}'; }
+          for f in bypo.clap blow-your-phase-off-gui.exe; do
+            echo "== $f imports:"; imports "$f"
+          done
+          bad="$(imports bypo.clap | grep -Ei '^(lib|zlib|SDL2)' || true)"
+          if [ -n "$bad" ]; then
+            echo "bypo.clap imports DLLs a host will not find: $bad" >&2
+            exit 1
+          fi
+          bad="$(imports blow-your-phase-off-gui.exe | grep -Ei '^lib(gcc|stdc|winpthread)' || true)"
+          if [ -n "$bad" ]; then
+            echo "the exe imports the MinGW runtime: $bad" >&2
+            exit 1
+          fi
+
       - name: dist
         run: make dist
 
@@ -201,7 +222,7 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass \
             -File "$(cygpath -w "$PWD/.github/smoke-windows.ps1")" \
-            -Exe "$(cygpath -w "$PWD/$DIST/blow-your-phase-off-gui.exe")" \
+            -Exe "$(cygpath -w "$PWD/$DIST/blow-your-phase-off.exe")" \
             -Shot "$(cygpath -w "$PWD/smoke/${{ matrix.runner }}.png")"
 
       - name: screenshots

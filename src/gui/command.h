@@ -9,6 +9,27 @@
 
 typedef enum { CMD_NOP, CMD_HELP, CMD_RUN } CommandKind;
 
+#define MOD_CMD_ROUTES 8
+
+/* lfo <n> [shape] [rate] [phase] [mode] [bi|uni] [to <target> <depth|off>]... */
+typedef struct {
+    int slot; /* 0-based; -1 = every lfo */
+    bool rm;
+    bool set_shape, set_rate, set_phase, set_mode, set_pol;
+    uint8_t shape, mode;
+    bool unipolar;
+    int8_t division; /* -1 = rate_hz */
+    float rate_hz, phase;
+    int nroutes;
+    struct {
+        uint8_t target;
+        float depth;
+        bool off;
+    } route[MOD_CMD_ROUTES];
+} ModCmd;
+
+#define CMD_WORDS 32
+
 typedef struct Command {
     CommandKind kind;
     const struct Verb *verb; /* CMD_RUN only */
@@ -19,6 +40,10 @@ typedef struct Command {
     int cc;
     bool cc_all;
     CcTarget target;
+    bool view;                  /* -v: pin the line's view above the log */
+    char words[CMD_WORDS][64];  /* raw verbs: the words after the verb */
+    int nwords;
+    ModCmd mod;
     char text[1024]; /* CMD_HELP: lines joined with '\n' */
 } Command;
 
@@ -28,10 +53,18 @@ typedef struct {
     const char *about;
 } Flag;
 
-typedef enum { G_PRESETS, G_MIDI, G_RECORDING, G_CONSOLE, G_COUNT } VerbGroup;
+typedef enum {
+    G_PRESETS, G_MODULATION, G_MIDI, G_RECORDING, G_CONSOLE, G_COUNT
+} VerbGroup;
 
 /* false leaves a one-line reason in err; the caller adds the usage line */
 typedef bool (*VerbRun)(App *a, const Command *c, char *err, size_t err_len);
+/* raw verbs: reads c->words into the command at parse time, so a bad line
+   is caught before Enter */
+typedef bool (*VerbParse)(Command *c, char *err, size_t err_len);
+/* what the line shows: logged once when it runs, redrawn live when pinned.
+   false when there is nothing to show */
+typedef bool (*VerbView)(App *a, const Command *c, View *out);
 
 typedef struct Verb {
     const char *name;
@@ -44,7 +77,24 @@ typedef struct Verb {
     int nflags;
     const char *about;
     VerbRun run;
+    VerbParse parse; /* non-NULL makes it a raw verb */
+    VerbView view;
+    const char *form;  /* raw verbs: the usage after the name */
+    const char *extra; /* more help lines, '\n' separated */
 } Verb;
+
+/* cmd_mod.c */
+bool mod_parse_lfo(Command *c, char *err, size_t err_len);
+bool mod_run_lfo(App *a, const Command *c, char *err, size_t err_len);
+bool mod_view_lfo(App *a, const Command *c, View *out);
+bool mod_parse_mods(Command *c, char *err, size_t err_len);
+bool mod_run_mods(App *a, const Command *c, char *err, size_t err_len);
+bool mod_view_mods(App *a, const Command *c, View *out);
+
+/* the live view of a pinned line; false when it no longer parses */
+bool command_view(App *a, const char *line, View *out);
+/* -v toggles a pin: true when the line is now pinned */
+bool console_toggle_pin(App *a, const char *pin, char *err, size_t err_len);
 
 int verb_count(void);
 const Verb *verb_at(int i);

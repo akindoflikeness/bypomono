@@ -456,27 +456,135 @@ static void draw_hint(App *a, Ui *ui, FontId small, Rct row) {
               0.0f);
 }
 
+/* ---------- strips ---------- */
+
+#define STRIP_H 25.0f
+#define STRIP_PITCH 2.0f
+#define ZERO_INK 80
+#define MARK_INK 140
+
+/* one column every STRIP_PITCH pixels, lit from its low to its high; the
+   playhead is a dim full-height column with the value picked out on it */
+static void draw_strip(Canvas *c, const Graph *g, float x0, float y0, float h) {
+    float mid = roundf(y0 + 0.5f * h);
+    float half = 0.5f * h - 1.0f;
+    float w = (float)g->cols * STRIP_PITCH;
+    for (float x = 0.0f; x < w; x += 2.0f * STRIP_PITCH)
+        draw_rect_filled(c, rct_xywh(x0 + x, mid, 1.0f, 1.0f), ZERO_INK);
+    for (int i = 0; i < g->cols; i++) {
+        float x = x0 + (float)i * STRIP_PITCH;
+        float yh = roundf(mid - (float)g->hi[i] / 127.0f * half);
+        float yl = roundf(mid - (float)g->lo[i] / 127.0f * half);
+        draw_rect_filled(c, rct(x, yh, x + 1.0f, yl + 1.0f), PAPER);
+    }
+    if (g->mark >= 0 && g->mark < g->cols) {
+        float x = x0 + (float)g->mark * STRIP_PITCH;
+        draw_rect_filled(c, rct(x, y0, x + 1.0f, y0 + h), MARK_INK);
+        float yv = roundf(mid - 0.5f * (float)(g->hi[g->mark] + g->lo[g->mark])
+                                    / 127.0f * half);
+        draw_rect_filled(c, rct_xywh(x - 1.0f, yv - 1.0f, 3.0f, 3.0f), PAPER);
+    }
+}
+
+static float line_height(GraphPlace place, float row) {
+    return place == GRAPH_BELOW ? row + TIGHT + STRIP_H : row;
+}
+
+/* a text line with its strip; returns the height it took */
+static float draw_view_line(Canvas *c, FontId f, float x, float y,
+                            const char *text, GraphPlace place,
+                            const Graph *g) {
+    float row = text_row_height(f);
+    text_draw(c, f, (P2){x, roundf(y)}, ALIGN_LEFT_TOP, text, PAPER, 0.0f);
+    if (place == GRAPH_BELOW)
+        draw_strip(c, g, x, roundf(y + row + TIGHT), STRIP_H);
+    else if (place == GRAPH_RIGHT)
+        draw_strip(c, g, roundf(x + text_width(f, text, 0.0f) + GROUP),
+                   roundf(y), row);
+    return line_height(place, row);
+}
+
+/* ---------- pins ---------- */
+
+static View pin_views[PIN_MAX];
+static bool pin_live[PIN_MAX];
+
+static float pins_height(App *a, float row) {
+    float h = 0.0f;
+    for (int i = 0; i < a->pin_count; i++) {
+        pin_live[i] = command_view(a, a->pins[i], &pin_views[i]);
+        if (!pin_live[i]) {
+            h += row + GROUP;
+            continue;
+        }
+        for (int k = 0; k < pin_views[i].n; k++)
+            h += line_height(pin_views[i].line[k].place, row) + GROUP;
+    }
+    return h;
+}
+
+static void draw_pins(App *a, Canvas *c, FontId f, Rct zone) {
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, rct_intersect(saved, zone));
+    float y = zone.y0;
+    float x = zone.x0 + GROUP;
+    for (int i = 0; i < a->pin_count; i++) {
+        float top = y;
+        if (!pin_live[i]) {
+            char gone[LOG_LINE_LEN + 16];
+            snprintf(gone, sizeof gone, "%s  (gone)", a->pins[i]);
+            y += draw_view_line(c, f, x, y, gone, GRAPH_NONE, NULL) + GROUP;
+        } else {
+            for (int k = 0; k < pin_views[i].n; k++) {
+                const ViewLine *l = &pin_views[i].line[k];
+                y += draw_view_line(c, f, x, y, l->text, l->place, &l->graph)
+                     + GROUP;
+            }
+        }
+        /* a rule down the left marks what is pinned */
+        draw_rect_filled(c, rct(zone.x0, top, zone.x0 + 2.0f, y - GROUP), PAPER);
+    }
+    canvas_set_clip(c, saved);
+}
+
 void draw_console_drawer(App *a, Ui *ui, Rct footer) {
     Canvas *c = ui->canvas;
-    float h = fminf(FOOTER_OPEN_H, floorf((float)c->h * 0.5f));
+    FontId small = ui_font(11.0f);
+    float row = text_row_height(small);
+    float pinned_h = a->pin_count ? pins_height(a, row) : 0.0f;
+    float h = fminf(FOOTER_OPEN_H + pinned_h + (pinned_h > 0.0f ? GAP : 0.0f),
+                    floorf((float)c->h * (pinned_h > 0.0f ? 0.7f : 0.5f)));
     Rct rect = rct(footer.x0, footer.y0 - h, footer.x1, footer.y0);
     draw_rect_filled(c, rect, INK_BLACK);
     draw_rect_filled(c, rct(rect.x0, rect.y0, rect.x1, rect.y0 + 1.0f), PAPER);
     draw_rect_filled(c, rct(rect.x0, rect.y0, rect.x0 + 1.0f, rect.y1), PAPER);
     draw_rect_filled(c, rct(rect.x1 - 1.0f, rect.y0, rect.x1, rect.y1), PAPER);
 
-    FontId small = ui_font(11.0f);
     char visible[LOG_LINE_LEN];
     console_visible(a, visible, sizeof visible);
     Rct inner = rct_shrink(rect, GAP);
     float body_h = fmaxf(rct_h(rect) - 2.0f * GAP - HINT_ROW_H - GAP, 0.0f);
+    if (pinned_h > 0.0f) {
+        float zone_h = fminf(pinned_h, fmaxf(body_h - 3.0f * row, row));
+        Rct zone = rct(inner.x0, inner.y0, inner.x1, inner.y0 + zone_h);
+        draw_pins(a, c, small, zone);
+        for (float x = inner.x0; x < inner.x1; x += 3.0f)
+            draw_rect_filled(c, rct_xywh(x, zone.y1 + 1.0f, 1.0f, 1.0f),
+                             MARK_INK);
+        inner.y0 = zone.y1 + GAP;
+        body_h = fmaxf(body_h - zone_h - GAP, 0.0f);
+        ui->repaint_soon = true;
+    }
     Rct view = rct(inner.x0, inner.y0, inner.x1, inner.y0 + body_h);
 
-    float row = text_row_height(small);
     int full = a->log_len > 0 ? a->log_len - 1 : 0;
     int items = full + (visible[0] ? 1 : 0);
-    float content_h =
-        items > 0 ? (float)items * row + (float)(items - 1) * GROUP : 0.0f;
+    float content_h = 0.0f;
+    for (int j = 0; j < items; j++) {
+        int idx = (a->log_head - (a->log_len - 1) + j + 2 * LOG_LINES)
+                  % LOG_LINES;
+        content_h += line_height(a->log_place[idx], row) + (j ? GROUP : 0.0f);
+    }
 
     /* stick_to_bottom: re-pin whenever the view was at the end last frame */
     static float prev_max = -1.0f;
@@ -492,13 +600,13 @@ void draw_console_drawer(App *a, Ui *ui, Rct footer) {
     for (int j = 0; j < full; j++) {
         int idx = (a->log_head - (a->log_len - 1) + j + 2 * LOG_LINES)
                   % LOG_LINES;
-        text_draw(c, small, (P2){view.x0, roundf(y)}, ALIGN_LEFT_TOP,
-                  a->log[idx], PAPER, 0.0f);
-        y += row + GROUP;
+        y += draw_view_line(c, small, view.x0, y, a->log[idx],
+                            a->log_place[idx], &a->log_graph[idx])
+             + GROUP;
     }
     if (visible[0])
-        text_draw(c, small, (P2){view.x0, roundf(y)}, ALIGN_LEFT_TOP, visible,
-                  PAPER, 0.0f);
+        draw_view_line(c, small, view.x0, y, visible, a->log_place[a->log_head],
+                       &a->log_graph[a->log_head]);
     canvas_set_clip(c, saved);
 
     float hy = inner.y0 + body_h + GAP;

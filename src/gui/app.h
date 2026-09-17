@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "../audio.h"
+#include "../cli/view.h"
 #include "../dsp/dsp.h"
 #include "../midi.h"
 #include "../ring.h"
@@ -69,7 +70,8 @@ float snap_scale(float s);
 typedef enum {
     EV_SET_PATCH, EV_SET_VERB, EV_SET_MELODY, EV_SET_CHANDAS, EV_SET_WARMTH,
     EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
-    EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING
+    EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING,
+    EV_SET_LFO, EV_SET_ROUTE
 } EventKind;
 
 typedef struct {
@@ -83,8 +85,19 @@ typedef struct {
         float f;
         bool flag;
         struct { float hz, velocity; } note;
+        struct { int slot; LfoParams p; } lfo;
+        struct { int slot; ModRoute r; } route;
     } u;
 } Event;
+
+/* what the audio thread's lfos are doing, for drawing */
+typedef struct {
+    _Atomic uint32_t phase_q16[MOD_LFOS];
+    _Atomic uint32_t value_bits[MOD_LFOS]; /* float bits */
+} LfoMeter;
+void lfo_meter_store(LfoMeter *m, const Mod *mod);
+float lfo_meter_phase(const LfoMeter *m, int slot);
+float lfo_meter_value(const LfoMeter *m, int slot);
 
 typedef struct {
     float ops[NUM_OPS];
@@ -196,6 +209,7 @@ typedef struct {
 
 #define LOG_LINES 64
 #define LOG_LINE_LEN 256
+#define PIN_MAX 6
 
 typedef struct App {
     /* engine shadow state */
@@ -207,6 +221,7 @@ typedef struct App {
     float shadow_release_s;
     float tempo_bpm;
     float drone_hz;
+    ModBank mods;
     Chain chain;
     bool engaged;
     bool restored;
@@ -224,6 +239,7 @@ typedef struct App {
     PitchAtom pitch;
     CcState cc;
     AudioMeter meter;
+    LfoMeter lfo_meter;
     _Atomic bool rec_on;
     float sample_rate;
     int channels;
@@ -275,7 +291,12 @@ typedef struct App {
 
     /* console / log */
     char log[LOG_LINES][LOG_LINE_LEN];
+    GraphPlace log_place[LOG_LINES]; /* a snapshot strip beside the line */
+    Graph log_graph[LOG_LINES];
     int log_len, log_head; /* newest at head-1 */
+    /* lines run with -v: they stay above the log and redraw every frame */
+    char pins[PIN_MAX][LOG_LINE_LEN];
+    int pin_count;
     bool console_open, console_focus, console_focused;
     UiText console_input;
     char console_typing[LOG_LINE_LEN];
@@ -305,7 +326,11 @@ typedef struct App {
 
 /* push onto the UI->audio ring, logging on overflow */
 void app_send(App *a, Event ev);
+/* every lfo and route slot, after a preset or state replaced a->mods */
+void app_send_mods(App *a);
 void push_log(App *a, const char *fmt, ...);
+/* every line of a view, strips kept as snapshots */
+void push_log_view(App *a, const View *v);
 
 /* gui_engine.c */
 int gui_audio_start(App *a);

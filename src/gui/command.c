@@ -94,34 +94,56 @@ static const Flag REC_FLAGS[] = {
 
 static const Verb VERBS[] = {
     {"save", {NULL}, G_PRESETS, {"name", NULL}, 1, 1, false, NULL, 0,
-     "write the current sound under a name", run_save},
+     "write the current sound under a name", run_save, NULL, NULL, NULL, NULL},
     {"overwrite", {NULL}, G_PRESETS, {"preset", NULL}, 1, 1, false, NULL, 0,
-     "replace a preset with the current sound", run_overwrite},
+     "replace a preset with the current sound", run_overwrite, NULL, NULL, NULL, NULL},
     {"delete", {NULL}, G_PRESETS, {"preset", NULL}, 1, 0, false, NULL, 0,
-     "move a preset to the trash, or the highlighted one", run_delete},
+     "move a preset to the trash, or the highlighted one", run_delete, NULL, NULL, NULL, NULL},
     {"rename", {NULL}, G_PRESETS, {"preset", "new name"}, 2, 2, false, NULL, 0,
-     "give a preset a different name, where it sits", run_rename},
+     "give a preset a different name, where it sits", run_rename, NULL, NULL, NULL, NULL},
     {"move", {NULL}, G_PRESETS, {"preset", "folder"}, 2, 2, false, NULL, 0,
-     "put a preset in a folder that already exists", run_move},
+     "put a preset in a folder that already exists", run_move, NULL, NULL, NULL, NULL},
     {"add", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, false, NULL, 0,
-     "make an empty folder", run_add},
+     "make an empty folder", run_add, NULL, NULL, NULL, NULL},
     {"remove", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, false, NULL, 0,
-     "move a folder and everything in it to the trash", run_remove},
+     "move a folder and everything in it to the trash", run_remove, NULL, NULL, NULL, NULL},
     {"undo", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
-     "put back the last trashed, renamed, moved or overwritten item", run_undo},
+     "put back the last trashed, renamed, moved or overwritten item", run_undo, NULL, NULL, NULL, NULL},
     {"bind", {NULL}, G_MIDI, {"cc", "control"}, 2, 2, true, NULL, 0,
-     "point a controller at a control", run_bind},
+     "point a controller at a control", run_bind, NULL, NULL, NULL, NULL},
     {"unbind", {NULL}, G_MIDI, {"cc", NULL}, 1, 1, true, NULL, 0,
-     "let a controller go, or 'all' of them", run_unbind},
+     "let a controller go, or 'all' of them", run_unbind, NULL, NULL, NULL, NULL},
     {"rec", {"record", NULL}, G_RECORDING, {"name", NULL}, 1, 0, false,
-     REC_FLAGS, 1, "start a take, or finish the one running", run_rec},
+     REC_FLAGS, 1, "start a take, or finish the one running", run_rec, NULL, NULL, NULL, NULL},
     {"help", {NULL}, G_CONSOLE, {"verb or group", NULL}, 1, 0, false, NULL, 0,
-     "list the verbs, or explain one", run_help},
+     "list the verbs, or explain one", run_help, NULL, NULL, NULL, NULL},
+    {.name = "lfo",
+     .group = G_MODULATION,
+     .about = "make, shape and point an lfo; lfo alone lists them",
+     .run = mod_run_lfo,
+     .parse = mod_parse_lfo,
+     .view = mod_view_lfo,
+     .form = "[1-16] [shape] [rate <hz|1/4>] [phase <deg>] [free|retrig|once] "
+             "[bi|uni] [to <target> <depth|off>]... [rm] [-v]",
+     .extra = "shapes  sine tri saw ramp square exp sh drift\n"
+              "targets index rip fb field curve level pitch mix ghost decay "
+              "damp haunt warmth mel rate\n"
+              "        chandas mix|rate|spread|size|warp|dim|tail\n"
+              "depth   -1 to 1 of the target's range; pitch is +-12 semitones\n"
+              "-v      pin it above the log, live; -v again lets it go"},
+    {.name = "mods",
+     .group = G_MODULATION,
+     .about = "the routing table: every lfo and where it points",
+     .run = mod_run_mods,
+     .parse = mod_parse_mods,
+     .view = mod_view_mods,
+     .form = "[-v]",
+     .extra = "-v      pin the table above the log, live; -v again lets it go"},
 };
 #define NVERBS ((int)(sizeof VERBS / sizeof VERBS[0]))
 
-static const char *const GROUP_TITLES[G_COUNT] = {"presets", "midi",
-                                                  "recording", "console"};
+static const char *const GROUP_TITLES[G_COUNT] = {
+    "presets", "modulation", "midi", "recording", "console"};
 
 int verb_count(void) { return NVERBS; }
 const Verb *verb_at(int i) { return i >= 0 && i < NVERBS ? &VERBS[i] : NULL; }
@@ -199,6 +221,10 @@ int verb_complete(const char *prefix, const Verb **out, int max) {
 
 static void verb_form(const Verb *v, char *out, size_t cap) {
     snprintf(out, cap, "%s", v->name);
+    if (v->form) {
+        scat(out, cap, " %s", v->form);
+        return;
+    }
     for (int i = 0; i < v->nargs; i++) {
         const char *sep = i == 0 ? " " : ARG_SEP;
         if (i < v->required)
@@ -231,6 +257,16 @@ void verb_help(const Verb *v, char *out, size_t cap) {
         else
             snprintf(head, sizeof head, "--%s", v->flags[i].name);
         scat(out, cap, "\n  %-20s %s", head, v->flags[i].about);
+    }
+    if (v->extra) {
+        const char *p = v->extra;
+        while (*p) {
+            const char *nl = strchr(p, '\n');
+            size_t n = nl ? (size_t)(nl - p) : strlen(p);
+            scat(out, cap, "\n  %.*s", (int)n, p);
+            if (!nl) break;
+            p = nl + 1;
+        }
     }
     if (v->aliases[0]) {
         scat(out, cap, "\n  also:");
@@ -366,6 +402,24 @@ static bool parse_words(char *const words[], int n, Command *out, char *err,
             return true;
         }
     if (v->run == run_help) return parse_help(words, n, out, err, err_len);
+
+    if (v->parse) {
+        for (int i = 1; i < n; i++) {
+            const char *w = words[i];
+            if (strcmp(w, "-v") == 0 || strcmp(w, "--view") == 0) {
+                out->view = true;
+                continue;
+            }
+            if (is_flag(w))
+                return reason(err, err_len, "%s has no flag %s", v->name, w);
+            if (out->nwords >= CMD_WORDS)
+                return reason(err, err_len, "%s: too many words", v->name);
+            snprintf(out->words[out->nwords++], sizeof out->words[0], "%s", w);
+        }
+        if (!v->parse(out, err, err_len)) return false;
+        out->kind = CMD_RUN;
+        return true;
+    }
 
     char *pos[64];
     int npos = 0;
@@ -503,6 +557,11 @@ void command_echo(const Command *c, char *out, size_t cap) {
     if (c->kind != CMD_RUN || !c->verb) return;
     const Verb *v = c->verb;
     snprintf(out, cap, "%s", v->name);
+    if (v->parse) {
+        for (int i = 0; i < c->nwords; i++) scat(out, cap, " %s", c->words[i]);
+        if (c->view) scat(out, cap, " -v");
+        return;
+    }
     if (v->run == run_bind) {
         scat(out, cap, " cc%d%s%s", c->cc, ARG_SEP, cc_target_name(c->target));
         return;
@@ -522,9 +581,53 @@ void command_echo(const Command *c, char *out, size_t cap) {
 bool command_run(App *a, const Command *c, char *err, size_t err_len) {
     if (err_len) err[0] = '\0';
     if (c->kind != CMD_RUN || !c->verb) return true;
-    if (c->verb->run(a, c, err, err_len)) return true;
-    add_usage(c->verb, err, err_len);
-    return false;
+    if (!c->verb->run(a, c, err, err_len)) {
+        add_usage(c->verb, err, err_len);
+        return false;
+    }
+    if (c->view && c->verb->view) {
+        /* a pin keeps the verb and the number it names, so "lfo 3 rate 2 -v"
+           pins "lfo 3" and later edits to lfo 3 show in it */
+        char pin[LOG_LINE_LEN];
+        snprintf(pin, sizeof pin, "%s", c->verb->name);
+        if (c->nwords > 0 && isdigit((unsigned char)c->words[0][0]))
+            scat(pin, sizeof pin, " %s", c->words[0]);
+        if (console_toggle_pin(a, pin, err, err_len))
+            push_log(a, "pinned. -v again lets it go");
+        else if (err[0])
+            return false;
+        else
+            push_log(a, "let go");
+    }
+    return true;
+}
+
+bool console_toggle_pin(App *a, const char *pin, char *err, size_t err_len) {
+    if (err_len) err[0] = '\0';
+    for (int i = 0; i < a->pin_count; i++) {
+        if (strcmp(a->pins[i], pin) != 0) continue;
+        memmove(a->pins[i], a->pins[i + 1],
+                (size_t)(a->pin_count - i - 1) * sizeof a->pins[0]);
+        a->pin_count--;
+        return false;
+    }
+    if (a->pin_count >= PIN_MAX) {
+        reason(err, err_len,
+               "%d views are pinned already; run one again with -v to let it go",
+               PIN_MAX);
+        return false;
+    }
+    snprintf(a->pins[a->pin_count++], sizeof a->pins[0], "%s", pin);
+    return true;
+}
+
+bool command_view(App *a, const char *line, View *out) {
+    Command c;
+    char err[512];
+    view_clear(out);
+    if (!parse_line(line, &c, err, sizeof err)) return false;
+    if (c.kind != CMD_RUN || !c.verb || !c.verb->view) return false;
+    return c.verb->view(a, &c, out);
 }
 
 /* ---------- presets on disk ---------- */

@@ -45,7 +45,8 @@ DSP_OBJ = $(DSP_SRC:.c=.o)
 TEST_SRC = $(wildcard tests/*.c)
 TEST_OBJ = $(TEST_SRC:.c=.o)
 
-GUI_SRC = $(wildcard src/gui/*.c)
+# src/cli is the console core: no SDL, no App, shared by every face
+GUI_SRC = $(wildcard src/gui/*.c) $(wildcard src/cli/*.c)
 GUI_OBJ = $(GUI_SRC:.c=.o)
 # macOS links SDL2, FreeType, libpng and zlib as static archives built from
 # source, so ask pkg-config for the private deps too (the system frameworks
@@ -97,7 +98,8 @@ src/audio.o: src/audio.c src/audio.h
 
 # the preset tests link the parser and saver
 TEST_GUI_OBJ = src/gui/json_session.o src/gui/presets.o
-TEST_GUI_OBJ += src/gui/command.o src/gui/focus.o
+TEST_GUI_OBJ += src/gui/command.o src/gui/cmd_mod.o src/gui/focus.o \
+                src/cli/view.o
 
 $(TESTS): $(DSP_OBJ) $(TEST_OBJ) $(TEST_GUI_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ -lm

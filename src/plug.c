@@ -138,6 +138,11 @@ static void apply_vals(Plug *p) {
     if (was_enabled && !mp.enabled) voice_pair_note_off(&p->voice);
     melody_set_params(&p->melody, mp);
     tape_set(&p->tape, (float)getv(p, P_WARMTH));
+    p->base.patch = *voice_pair_patch(&p->voice);
+    p->base.verb = vp;
+    p->base.chandas = cp;
+    p->base.melody = mp;
+    p->base.warmth = (float)getv(p, P_WARMTH);
 
     /* polite in the DAW: silent until notes unless DRONE is thrown */
     p->engaged = getv(p, P_DRONE) > 0.5;
@@ -257,12 +262,18 @@ static void mirror_patch_vals(Plug *p, const Patch *patch) {
 static void apply_gui_event(Plug *p, Event ev) {
     switch (ev.kind) {
     case EV_SET_PATCH:
+        p->base.patch = ev.u.patch;
         voice_pair_set_patch(&p->voice, ev.u.patch);
         verb_configure(&p->verb, voice_pair_patch(&p->voice),
                        voice_pair_compiled(&p->voice));
         mirror_patch_vals(p, &ev.u.patch);
         break;
+    case EV_SET_LFO: mod_set_lfo(&p->mod, ev.u.lfo.slot, ev.u.lfo.p); break;
+    case EV_SET_ROUTE:
+        mod_set_route(&p->mod, ev.u.route.slot, ev.u.route.r);
+        break;
     case EV_SET_VERB:
+        p->base.verb = ev.u.verb;
         verb_set_params(&p->verb, ev.u.verb);
         setv(p, P_MIX, ev.u.verb.mix);
         setv(p, P_GHOST, ev.u.verb.ghost);
@@ -271,6 +282,7 @@ static void apply_gui_event(Plug *p, Event ev) {
         setv(p, P_HAUNT, ev.u.verb.haunt);
         break;
     case EV_SET_MELODY:
+        p->base.melody = ev.u.melody;
         if (p->melody.params.enabled && !ev.u.melody.enabled)
             voice_pair_note_off(&p->voice);
         melody_set_params(&p->melody, ev.u.melody);
@@ -283,6 +295,7 @@ static void apply_gui_event(Plug *p, Event ev) {
         setv(p, P_SH_RATE, ev.u.melody.rate_hz);
         break;
     case EV_SET_CHANDAS:
+        p->base.chandas = ev.u.chandas;
         chandas_set_params(&p->chandas, ev.u.chandas);
         setv(p, P_CH_ON, ev.u.chandas.enabled ? 1 : 0);
         setv(p, P_CH_MIX, ev.u.chandas.mix);
@@ -296,6 +309,7 @@ static void apply_gui_event(Plug *p, Event ev) {
         setv(p, P_CH_TAIL, ev.u.chandas.tail);
         break;
     case EV_SET_WARMTH:
+        p->base.warmth = ev.u.f;
         tape_set(&p->tape, ev.u.f);
         setv(p, P_WARMTH, ev.u.f);
         break;
@@ -309,10 +323,14 @@ static void apply_gui_event(Plug *p, Event ev) {
         setv(p, P_DRONE_HZ, ev.u.f);
         break;
     case EV_NOTE_OFF: voice_pair_note_off(&p->voice); break;
-    case EV_BEND: voice_pair_set_bend_semitones(&p->voice, ev.u.f); break;
+    case EV_BEND:
+        p->base.bend = ev.u.f;
+        voice_pair_set_bend_semitones(&p->voice, ev.u.f);
+        break;
     case EV_NOTE_ON:
         voice_pair_note_on(&p->voice, ev.u.note.hz, ev.u.note.velocity);
         chandas_note_pulse(&p->chandas);
+        mod_note_on(&p->mod);
         break;
     case EV_SET_CHAIN: {
         State next = voice_pair_state(&p->voice);
@@ -379,6 +397,19 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     }
 }
 
+/* writes base plus modulation into the engine for the groups that need it */
+static void mod_tick(Plug *p, size_t samples) {
+    mod_advance(&p->mod, samples, chandas_tempo(&p->chandas));
+    ModBase out;
+    int g = mod_apply(&p->mod, &p->base, &out);
+    if (g & MOD_G_PATCH) voice_pair_set_patch(&p->voice, out.patch);
+    if (g & MOD_G_VERB) verb_set_params(&p->verb, out.verb);
+    if (g & MOD_G_CHANDAS) chandas_set_params(&p->chandas, out.chandas);
+    if (g & MOD_G_MELODY) melody_set_params(&p->melody, out.melody);
+    if (g & MOD_G_WARMTH) tape_set(&p->tape, out.warmth);
+    if (g & MOD_G_BEND) voice_pair_set_bend_semitones(&p->voice, out.bend);
+}
+
 static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
                         uint32_t count) {
     uint32_t done = 0;
@@ -391,11 +422,15 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
                 velocity_for_level(voice_pair_patch(&p->voice)->master_level);
             voice_pair_note_on(&p->voice, hz, vel);
             chandas_note_pulse(&p->chandas);
+            mod_note_on(&p->mod);
         }
         uint32_t run = count - done;
         if (melody_samples_until_fire(&p->melody, &until) && until < run)
             run = (uint32_t)until;
+        bool modulating = mod_any_lfo(&p->mod) || p->mod.groups_prev;
+        if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
+        if (modulating) mod_tick(p, run);
         Emit e = {p, gapp, l, r, base + done};
         voice_pair_render_frames(&p->voice, run, emit_frame, &e);
         melody_advance(&p->melody, run);
@@ -411,6 +446,7 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
         voice_pair_note_on(&p->voice, midi_to_hz((uint8_t)ev->key),
                            (float)ev->velocity);
         chandas_note_pulse(&p->chandas);
+        mod_note_on(&p->mod);
         break;
     }
     case CLAP_EVENT_NOTE_OFF:
@@ -433,12 +469,13 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
             voice_pair_note_on(&p->voice, midi_to_hz(ev->data[1]),
                                (float)ev->data[2] / 127.0f);
             chandas_note_pulse(&p->chandas);
+            mod_note_on(&p->mod);
         } else if (status == 0x80 || status == 0x90) {
             voice_pair_note_off(&p->voice);
         } else if (status == 0xE0) {
             int raw = ((ev->data[2] & 0x7f) << 7) | (ev->data[1] & 0x7f);
-            voice_pair_set_bend_semitones(
-                &p->voice, (float)(raw - 8192) / 8192.0f * BEND_SEMITONES);
+            p->base.bend = (float)(raw - 8192) / 8192.0f * BEND_SEMITONES;
+            voice_pair_set_bend_semitones(&p->voice, p->base.bend);
         }
         break;
     }
@@ -461,10 +498,10 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
         chandas_set_tempo(&p->chandas, (float)pr->transport->tempo);
 
     App *gapp = atomic_load_explicit(&p->gui_app, memory_order_acquire);
-    if (gapp) {
-        Event ev;
+    Event ev;
+    while (EventRing_pop(&p->mod_ev, &ev)) apply_gui_event(p, ev);
+    if (gapp)
         while (EventRing_pop(&gapp->ctrl, &ev)) apply_gui_event(p, ev);
-    }
 
     if (atomic_load_explicit(&p->dirty, memory_order_relaxed)) apply_vals(p);
 
@@ -489,7 +526,10 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
         }
     }
     while (idx < n_ev) handle_event(p, in->get(in, idx++));
-    if (gapp) pitch_store(&gapp->pitch, voice_pair_target_hz(&p->voice));
+    if (gapp) {
+        pitch_store(&gapp->pitch, voice_pair_target_hz(&p->voice));
+        lfo_meter_store(&gapp->lfo_meter, &p->mod);
+    }
     return CLAP_PROCESS_CONTINUE;
 }
 
@@ -626,7 +666,10 @@ static const clap_plugin_params_t EXT_PARAMS = {
 
 static bool state_save(const clap_plugin_t *pl, const clap_ostream_t *stream) {
     Plug *p = pl->plugin_data;
-    Session s = session_sanitize(plug_session_of_vals(p));
+    Session s = plug_session_of_vals(p);
+    App *g = atomic_load_explicit(&p->gui_app, memory_order_acquire);
+    s.mods = g ? g->mods : p->mods_main;
+    s = session_sanitize(s);
     char *json = session_to_json(&s);
     if (!json) return false;
     size_t len = strlen(json), at = 0;
@@ -675,6 +718,15 @@ static bool state_load(const clap_plugin_t *pl, const clap_istream_t *stream) {
     free(buf);
     if (!ok) return false;
     vals_of_session(p, &s);
+    p->mods_main = s.mods;
+    for (int i = 0; i < MOD_LFOS; i++)
+        EventRing_push(&p->mod_ev,
+                       (Event){.kind = EV_SET_LFO, .u.lfo = {i, s.mods.lfo[i]}});
+    for (int i = 0; i < MOD_ROUTES; i++)
+        EventRing_push(&p->mod_ev, (Event){.kind = EV_SET_ROUTE,
+                                           .u.route = {i, s.mods.route[i]}});
+    App *g = atomic_load_explicit(&p->gui_app, memory_order_acquire);
+    if (g) g->mods = s.mods;
     const clap_host_params_t *hp =
         p->host ? p->host->get_extension(p->host, CLAP_EXT_PARAMS) : NULL;
     if (hp) hp->rescan(p->host, CLAP_PARAM_RESCAN_VALUES);
@@ -711,6 +763,9 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     chandas_init(&p->chandas, (float)sr);
     tape_init(&p->tape, (float)sr);
     engage_gate_init(&p->gate, (float)sr, false);
+    mod_init(&p->mod, (float)sr);
+    p->mod.bank = mod_bank_sanitize(p->mods_main);
+    p->base.bend = 0.0f;
     p->engine_alive = true;
     apply_vals(p);
     p->active = true;

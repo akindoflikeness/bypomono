@@ -362,7 +362,12 @@ static const char *const CHANDAS_KEYS[] = {
 /* harmony is the old name for chandas */
 static const char *const SESSION_KEYS[] = {
     "patch",   "verb",    "melody",    "drone_hz",  "chandas",
-    "tempo_bpm", "warmth", "harmony",  "release_s", "drone"};
+    "tempo_bpm", "warmth", "harmony",  "release_s", "drone", "mods"};
+static const char *const MODS_KEYS[] = {"lfos", "routes"};
+static const char *const LFO_KEYS[] = {"slot",     "shape",    "mode",
+                                       "unipolar", "rate_hz",  "division",
+                                       "phase"};
+static const char *const ROUTE_KEYS[] = {"lfo", "target", "depth"};
 
 static void parse_ops(Js *j, OpParams ops[NUM_OPS]) {
     if (!js_ch(j, '[')) {
@@ -560,6 +565,144 @@ static void parse_chandas(Js *j, ChandasParams *c) {
     }
 }
 
+/* calls each(j, ud) on every element of an array; each reads one value */
+static void js_each(Js *j, void (*each)(Js *, void *), void *ud) {
+    if (!js_ch(j, '[')) {
+        j->err = true;
+        return;
+    }
+    if (js_ch(j, ']')) return;
+    for (int n = 0;; n++) {
+        if (n >= JS_MAX_ELEMS) {
+            j->err = true;
+            return;
+        }
+        each(j, ud);
+        if (j->err) return;
+        if (js_ch(j, ',')) continue;
+        if (js_ch(j, ']')) return;
+        j->err = true;
+        return;
+    }
+}
+
+static void parse_lfo(Js *j, void *ud) {
+    ModBank *b = ud;
+    if (!js_ch(j, '{')) {
+        j->err = true;
+        return;
+    }
+    LfoParams p = lfo_params_default();
+    int slot = -1;
+    bool first = true;
+    uint32_t seen = 0;
+    char key[64];
+    int r;
+    while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
+        int k = js_key(key, LFO_KEYS, 7);
+        if (k >= 0 && js_dup(j, &seen, k)) return;
+        double d;
+        switch (k) {
+        case 0:
+            if (js_uint(j, (double)MOD_LFOS, &d) && d >= 1.0)
+                slot = (int)d - 1;
+            else
+                j->err = true;
+            break;
+        case 1: {
+            const char *names[LFO_SHAPE_COUNT];
+            for (int i = 0; i < LFO_SHAPE_COUNT; i++)
+                names[i] = lfo_shape_name((LfoShape)i);
+            p.shape = (uint8_t)js_enum(j, names, LFO_SHAPE_COUNT, LFO_SINE);
+            break;
+        }
+        case 2: {
+            const char *names[LFO_MODE_COUNT];
+            for (int i = 0; i < LFO_MODE_COUNT; i++)
+                names[i] = lfo_mode_name((LfoMode)i);
+            p.mode = (uint8_t)js_enum(j, names, LFO_MODE_COUNT, LFO_FREE);
+            break;
+        }
+        case 3: p.unipolar = js_bool(j, p.unipolar); break;
+        case 4: p.rate_hz = js_f32(j, p.rate_hz); break;
+        case 5: {
+            const char *names[CHANDAS_DIVISIONS_LEN];
+            for (int i = 0; i < CHANDAS_DIVISIONS_LEN; i++)
+                names[i] = CHANDAS_DIVISIONS[i].name;
+            p.division = (int8_t)js_enum(j, names, CHANDAS_DIVISIONS_LEN, -1);
+            break;
+        }
+        case 6: p.phase = js_f32(j, p.phase); break;
+        default: js_skip(j); break;
+        }
+        if (j->err) return;
+    }
+    if (r < 0) return;
+    if (slot >= 0 && slot < MOD_LFOS) b->lfo[slot] = p;
+}
+
+static void parse_route(Js *j, void *ud) {
+    ModBank *b = ud;
+    if (!js_ch(j, '{')) {
+        j->err = true;
+        return;
+    }
+    ModRoute rt = {0, MT_NONE, 0.0f};
+    bool first = true;
+    uint32_t seen = 0;
+    char key[64];
+    int r;
+    while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
+        int k = js_key(key, ROUTE_KEYS, 3);
+        if (k >= 0 && js_dup(j, &seen, k)) return;
+        double d;
+        switch (k) {
+        case 0:
+            if (js_uint(j, (double)MOD_LFOS, &d) && d >= 1.0)
+                rt.lfo = (uint8_t)(d - 1.0);
+            else
+                j->err = true;
+            break;
+        case 1: {
+            const char *names[MT_COUNT];
+            for (int i = 0; i < MT_COUNT; i++) names[i] = MOD_TARGETS[i].name;
+            rt.target = (uint8_t)js_enum(j, names, MT_COUNT, MT_NONE);
+            break;
+        }
+        case 2: rt.depth = js_f32(j, rt.depth); break;
+        default: js_skip(j); break;
+        }
+        if (j->err) return;
+    }
+    if (r < 0 || rt.target == MT_NONE) return;
+    for (int i = 0; i < MOD_ROUTES; i++)
+        if (b->route[i].target == MT_NONE) {
+            b->route[i] = rt;
+            return;
+        }
+}
+
+static void parse_mods(Js *j, ModBank *b) {
+    if (!js_ch(j, '{')) {
+        j->err = true;
+        return;
+    }
+    bool first = true;
+    uint32_t seen = 0;
+    char key[64];
+    int r;
+    while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
+        int k = js_key(key, MODS_KEYS, 2);
+        if (k >= 0 && js_dup(j, &seen, k)) return;
+        switch (k) {
+        case 0: js_each(j, parse_lfo, b); break;
+        case 1: js_each(j, parse_route, b); break;
+        default: js_skip(j); break;
+        }
+        if (j->err) return;
+    }
+}
+
 bool session_from_json(const char *json, Session *out) {
     if (!json || !out) return false;
     Js j = {json, json + strlen(json), false, 0};
@@ -573,7 +716,7 @@ bool session_from_json(const char *json, Session *out) {
     char key[64];
     int r;
     while ((r = js_obj_next(&j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SESSION_KEYS, 10);
+        int k = js_key(key, SESSION_KEYS, 11);
         if (k == 7) k = 4;
         if (k >= 0 && js_dup(&j, &seen, k)) return false;
         switch (k) {
@@ -586,6 +729,7 @@ bool session_from_json(const char *json, Session *out) {
         case 6: s.warmth = js_f32(&j, s.warmth); break;
         case 8: s.release_s = js_f32(&j, s.release_s); break;
         case 9: s.drone = js_bool(&j, s.drone); break;
+        case 10: parse_mods(&j, &s.mods); break;
         default: js_skip(&j); break;
         }
         if (j.err) return false;
@@ -702,6 +846,49 @@ static const char *name_at(const char *const *names, int n, int i) {
     return (unsigned)i < (unsigned)n ? names[i] : names[0];
 }
 
+static void write_mods(Sb *b, const ModBank *m) {
+    char line[256];
+    sb_put(b, "  \"mods\": {\n");
+    sb_put(b, "    \"lfos\": [");
+    bool first = true;
+    for (int i = 0; i < MOD_LFOS; i++) {
+        const LfoParams *p = &m->lfo[i];
+        if (!p->used) continue;
+        char rate[48], phase[48];
+        fmt_f32(rate, sizeof rate, p->rate_hz);
+        fmt_f32(phase, sizeof phase, p->phase);
+        char div[48] = "";
+        if (p->division >= 0 && p->division < CHANDAS_DIVISIONS_LEN)
+            snprintf(div, sizeof div, ", \"division\": \"%s\"",
+                     CHANDAS_DIVISIONS[p->division].name);
+        snprintf(line, sizeof line,
+                 "%s\n      {\"slot\": %d, \"shape\": \"%s\", \"mode\": \"%s\", "
+                 "\"unipolar\": %s, \"rate_hz\": %s%s, \"phase\": %s}",
+                 first ? "" : ",", i + 1, lfo_shape_name((LfoShape)p->shape),
+                 lfo_mode_name((LfoMode)p->mode),
+                 p->unipolar ? "true" : "false", rate, div, phase);
+        sb_put(b, line);
+        first = false;
+    }
+    sb_put(b, first ? "],\n" : "\n    ],\n");
+    sb_put(b, "    \"routes\": [");
+    first = true;
+    for (int i = 0; i < MOD_ROUTES; i++) {
+        const ModRoute *r = &m->route[i];
+        if (r->target == MT_NONE || r->target >= MT_COUNT) continue;
+        char depth[48];
+        fmt_f32(depth, sizeof depth, r->depth);
+        snprintf(line, sizeof line,
+                 "%s\n      {\"lfo\": %d, \"target\": \"%s\", \"depth\": %s}",
+                 first ? "" : ",", r->lfo + 1, MOD_TARGETS[r->target].name,
+                 depth);
+        sb_put(b, line);
+        first = false;
+    }
+    sb_put(b, first ? "]\n" : "\n    ]\n");
+    sb_put(b, "  },\n");
+}
+
 char *session_to_json(const Session *s) {
     Sb b = {NULL, 0, 0, false};
     char glyphs[NUM_NODES + 1];
@@ -768,6 +955,10 @@ char *session_to_json(const Session *s) {
     sb_key_f(&b, "    ", "dimension", s->chandas.dimension, true);
     sb_key_f(&b, "    ", "tail", s->chandas.tail, false);
     sb_put(&b, "  },\n");
+
+    bool any_lfo = false;
+    for (int i = 0; i < MOD_LFOS; i++) any_lfo = any_lfo || s->mods.lfo[i].used;
+    if (any_lfo) write_mods(&b, &s->mods);
 
     sb_key_f(&b, "  ", "tempo_bpm", s->tempo_bpm, true);
     sb_key_f(&b, "  ", "warmth", s->warmth, true);

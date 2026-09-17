@@ -44,9 +44,15 @@ typedef struct Plug {
     Chandas chandas;
     Tape tape;
     EngageGate gate;
+    Mod mod;
+    ModBase base; /* what the params say, before modulation */
     bool engine_alive;
     bool engaged;
     float applied_drone_hz;
+    /* main thread: the lfos and routes host state saves; state_load hands
+       them to the audio thread through mod_ev */
+    ModBank mods_main;
+    EventRing mod_ev;
     /* editor bridge */
     _Atomic(App *) gui_app;
     bool rec_on;

@@ -640,6 +640,111 @@ void chandas_reset(Chandas *h);
 float chandas_base_seconds(const Chandas *h);
 Stereo chandas_process(Chandas *h, Stereo dry);
 
+/* ---------- modulation ---------- */
+
+#define MOD_LFOS 16
+#define MOD_ROUTES 32
+#define MOD_BLOCK 32 /* samples between control-rate updates */
+#define LFO_RATE_MIN_HZ 0.01f
+#define LFO_RATE_MAX_HZ 40.0f
+#define MOD_PITCH_SEMITONES 12.0f /* depth 1 on pitch */
+
+typedef enum {
+    LFO_SINE = 0, LFO_TRIANGLE, LFO_SAW, LFO_RAMP, LFO_SQUARE, LFO_EXP,
+    LFO_SH, LFO_DRIFT, LFO_SHAPE_COUNT
+} LfoShape;
+
+typedef enum { LFO_FREE = 0, LFO_RETRIG, LFO_ONCE, LFO_MODE_COUNT } LfoMode;
+
+typedef struct {
+    bool used;
+    uint8_t shape;    /* LfoShape */
+    uint8_t mode;     /* LfoMode */
+    bool unipolar;
+    int8_t division;  /* index into CHANDAS_DIVISIONS, or -1 for rate_hz */
+    float rate_hz;
+    float phase;      /* start phase, 0..1 */
+} LfoParams;
+
+typedef enum {
+    MT_NONE = 0,
+    MT_INDEX, MT_RIP, MT_FB, MT_FIELD, MT_CURVE, MT_LEVEL, MT_PITCH,
+    MT_MIX, MT_GHOST, MT_DECAY, MT_DAMP, MT_HAUNT,
+    MT_CH_MIX, MT_CH_RATE, MT_CH_SPREAD, MT_CH_SIZE, MT_CH_WARP, MT_CH_DIM,
+    MT_CH_TAIL, MT_MEL_RATE, MT_WARMTH,
+    MT_COUNT
+} ModTarget;
+
+typedef struct {
+    const char *name;
+    float min, max; /* depth 1 spans the whole range; pitch is in semitones */
+} ModTargetSpec;
+extern const ModTargetSpec MOD_TARGETS[MT_COUNT];
+const char *lfo_shape_name(LfoShape s);
+const char *lfo_mode_name(LfoMode m);
+
+typedef struct {
+    uint8_t lfo;    /* 0-based slot */
+    uint8_t target; /* ModTarget; MT_NONE = empty */
+    float depth;    /* -1..1 */
+} ModRoute;
+
+typedef struct {
+    LfoParams lfo[MOD_LFOS];
+    ModRoute route[MOD_ROUTES];
+} ModBank;
+
+ModBank mod_bank_default(void); /* empty */
+LfoParams lfo_params_default(void);
+ModBank mod_bank_sanitize(ModBank b);
+/* the route index for lfo -> target, or -1 */
+int mod_bank_find_route(const ModBank *b, int lfo, ModTarget t);
+/* rate in hz after tempo sync */
+float lfo_effective_hz(const LfoParams *p, float bpm);
+/* the waveform at a phase, -1..1 bipolar or 0..1 unipolar; random shapes
+   use seed so a drawing of them is stable */
+float lfo_shape_at(const LfoParams *p, float phase, uint32_t seed);
+
+typedef struct {
+    float phase;
+    float value;
+    float from, to; /* random shapes: the held value and the next one */
+    uint32_t rng;
+    bool done;      /* LFO_ONCE finished its cycle */
+} LfoState;
+
+/* the values a modulated engine reads, before and after modulation */
+typedef struct {
+    Patch patch;
+    VerbParams verb;
+    ChandasParams chandas;
+    MelodyParams melody;
+    float warmth;
+    float bend; /* semitones */
+} ModBase;
+
+enum { MOD_G_PATCH = 1, MOD_G_VERB = 2, MOD_G_CHANDAS = 4, MOD_G_MELODY = 8,
+       MOD_G_WARMTH = 16, MOD_G_BEND = 32 };
+
+typedef struct {
+    ModBank bank;
+    LfoState st[MOD_LFOS];
+    float sample_rate;
+    int groups;      /* MOD_G_* touched by live routes */
+    int groups_prev; /* touched on the previous tick */
+} Mod;
+
+void mod_init(Mod *m, float sample_rate);
+void mod_set_lfo(Mod *m, int slot, LfoParams p);
+void mod_set_route(Mod *m, int slot, ModRoute r);
+void mod_note_on(Mod *m);
+bool mod_any_lfo(const Mod *m);
+/* advances every lfo by samples */
+void mod_advance(Mod *m, size_t samples, float bpm);
+/* base plus every route; returns the groups that need writing to the engine,
+   including groups a route just left so they go back to base */
+int mod_apply(Mod *m, const ModBase *base, ModBase *out);
+
 /* ---------- session ---------- */
 
 #define START_HZ 110.0f
@@ -654,6 +759,7 @@ typedef struct {
     float warmth;
     float release_s; /* Chain.amp.env.release_s, which lives outside Patch */
     bool drone;
+    ModBank mods;
 } Session;
 
 Session session_default(void);

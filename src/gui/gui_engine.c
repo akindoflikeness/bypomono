@@ -93,6 +93,8 @@ typedef struct {
     Chandas chandas;
     Tape tape;
     EngageGate gate;
+    Mod mod;
+    ModBase base; /* what the controls say, before modulation */
     uint32_t decim;
     float peak_acc[2];
     bool engaged;
@@ -110,22 +112,51 @@ static float pole_k(float step_seconds, float tau_seconds) {
 #define LOAD_AVG_SECONDS 0.4f
 #define LOAD_PEAK_SECONDS 2.0f
 
+/* writes base plus modulation into the engine for the groups that need it */
+static void mod_tick(AudioState *s, size_t samples) {
+    if (!mod_any_lfo(&s->mod) && s->mod.groups_prev == 0) return;
+    mod_advance(&s->mod, samples, chandas_tempo(&s->chandas));
+    ModBase out;
+    int g = mod_apply(&s->mod, &s->base, &out);
+    if (g & MOD_G_PATCH) voice_pair_set_patch(&s->voice, out.patch);
+    if (g & MOD_G_VERB) verb_set_params(&s->verb, out.verb);
+    if (g & MOD_G_CHANDAS) chandas_set_params(&s->chandas, out.chandas);
+    if (g & MOD_G_MELODY) melody_set_params(&s->melody, out.melody);
+    if (g & MOD_G_WARMTH) tape_set(&s->tape, out.warmth);
+    if (g & MOD_G_BEND) voice_pair_set_bend_semitones(&s->voice, out.bend);
+}
+
 static void engine_apply(AudioState *s, Event ev) {
     switch (ev.kind) {
     case EV_SET_PATCH:
+        s->base.patch = ev.u.patch;
         voice_pair_set_patch(&s->voice, ev.u.patch);
         verb_configure(&s->verb, voice_pair_patch(&s->voice),
                        voice_pair_compiled(&s->voice));
         break;
-    case EV_SET_VERB: verb_set_params(&s->verb, ev.u.verb); break;
+    case EV_SET_VERB:
+        s->base.verb = ev.u.verb;
+        verb_set_params(&s->verb, ev.u.verb);
+        break;
     case EV_SET_MELODY:
+        s->base.melody = ev.u.melody;
         if (s->melody.params.enabled && !ev.u.melody.enabled)
             voice_pair_note_off(&s->voice);
         melody_set_params(&s->melody, ev.u.melody);
         break;
-    case EV_SET_CHANDAS: chandas_set_params(&s->chandas, ev.u.chandas); break;
+    case EV_SET_CHANDAS:
+        s->base.chandas = ev.u.chandas;
+        chandas_set_params(&s->chandas, ev.u.chandas);
+        break;
     case EV_RESET_CHANDAS: chandas_reset(&s->chandas); break;
-    case EV_SET_WARMTH: tape_set(&s->tape, ev.u.f); break;
+    case EV_SET_WARMTH:
+        s->base.warmth = ev.u.f;
+        tape_set(&s->tape, ev.u.f);
+        break;
+    case EV_SET_LFO: mod_set_lfo(&s->mod, ev.u.lfo.slot, ev.u.lfo.p); break;
+    case EV_SET_ROUTE:
+        mod_set_route(&s->mod, ev.u.route.slot, ev.u.route.r);
+        break;
     case EV_SET_TEMPO: chandas_set_tempo(&s->chandas, ev.u.f); break;
     case EV_GLIDE_TO:
         voice_pair_glide_to_hz(&s->voice, ev.u.f);
@@ -133,10 +164,14 @@ static void engine_apply(AudioState *s, Event ev) {
         verb_set_drone_hz(&s->verb, ev.u.f);
         break;
     case EV_NOTE_OFF: voice_pair_note_off(&s->voice); break;
-    case EV_BEND: voice_pair_set_bend_semitones(&s->voice, ev.u.f); break;
+    case EV_BEND:
+        s->base.bend = ev.u.f;
+        voice_pair_set_bend_semitones(&s->voice, ev.u.f);
+        break;
     case EV_NOTE_ON:
         voice_pair_note_on(&s->voice, ev.u.note.hz, ev.u.note.velocity);
         chandas_note_pulse(&s->chandas);
+        mod_note_on(&s->mod);
         break;
     case EV_SET_CHAIN: {
         State next = voice_pair_state(&s->voice);
@@ -230,18 +265,23 @@ static void render(void *ud, float *data, size_t frames, int channels) {
                     velocity_for_level(voice_pair_patch(&s->voice)->master_level);
                 voice_pair_note_on(&s->voice, hz, vel);
                 chandas_note_pulse(&s->chandas);
+                mod_note_on(&s->mod);
             }
         }
         size_t run = frames - done;
         if (melody_samples_until_fire(&s->melody, &until) && until < run)
             run = until;
+        bool modulating = mod_any_lfo(&s->mod) || s->mod.groups_prev;
+        if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
+        if (modulating) mod_tick(s, run);
         RenderCtx ctx = {s, data, done, channels, rec_armed,
                          voice_pair_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
         voice_pair_render_frames(&s->voice, run, emit_frame, &ctx);
         melody_advance(&s->melody, run);
         done += run;
     }
+    lfo_meter_store(&a->lfo_meter, &s->mod);
 
     float budget = (float)frames / a->sample_rate;
     if (budget > 0.0f) {
@@ -281,6 +321,13 @@ int gui_audio_start(App *a) {
     melody_init(&s->melody, a->sample_rate, melody_params_default());
     chandas_init(&s->chandas, a->sample_rate);
     tape_init(&s->tape, a->sample_rate);
+    mod_init(&s->mod, a->sample_rate);
+    s->base.patch = a->shadow;
+    s->base.verb = a->shadow_verb;
+    s->base.chandas = chandas_params(&s->chandas);
+    s->base.melody = melody_params_default();
+    s->base.warmth = tape_warmth(&s->tape);
+    s->base.bend = 0.0f;
     s->engaged = true;
     engage_gate_init(&s->gate, a->sample_rate, s->engaged);
     midi_note_clear(&a->midi_note);
@@ -371,6 +418,15 @@ bool gui_set_midi_port(App *a, const char *name) {
 void app_send(App *a, Event ev) {
     if (!EventRing_push(&a->ctrl, ev))
         push_log(a, "control ring full — a change was dropped.");
+}
+
+void app_send_mods(App *a) {
+    for (int i = 0; i < MOD_LFOS; i++)
+        app_send(a, (Event){.kind = EV_SET_LFO,
+                            .u.lfo = {i, a->mods.lfo[i]}});
+    for (int i = 0; i < MOD_ROUTES; i++)
+        app_send(a, (Event){.kind = EV_SET_ROUTE,
+                            .u.route = {i, a->mods.route[i]}});
 }
 
 void gui_drain_viz(App *a) {
@@ -549,11 +605,24 @@ void push_log(App *a, const char *fmt, ...) {
     va_end(ap);
     a->log_head = (a->log_head + 1) % LOG_LINES;
     snprintf(a->log[a->log_head], LOG_LINE_LEN, "%s", line);
+    a->log_place[a->log_head] = GRAPH_NONE;
     if (a->log_len < LOG_LINES) a->log_len++;
     /* restart the typewriter on the newest line */
     snprintf(a->console_typing, sizeof a->console_typing, "%s", line);
     a->console_revealed = 0;
     a->console_credit = 0.0f;
+}
+
+void push_log_view(App *a, const View *v) {
+    for (int i = 0; i < v->n; i++) {
+        /* the timestamp goes on the first line; the rest indent under it */
+        if (i == 0)
+            push_log(a, "%s", v->line[i].text);
+        else
+            push_log(a, "           %s", v->line[i].text);
+        a->log_place[a->log_head] = v->line[i].place;
+        a->log_graph[a->log_head] = v->line[i].graph;
+    }
 }
 
 /* ---------- recording ---------- */

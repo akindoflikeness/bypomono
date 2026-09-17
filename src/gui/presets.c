@@ -905,6 +905,9 @@ Session app_session(const App *a) {
     s.chandas = a->shadow_chandas;
     s.tempo_bpm = a->tempo_bpm;
     s.warmth = a->shadow_warmth;
+    s.attack_s = a->shadow_attack_s;
+    s.decay_s = a->shadow_decay_s;
+    s.sustain = a->shadow_sustain;
     s.release_s = a->shadow_release_s;
     s.drone = a->engaged;
     return s;
@@ -918,6 +921,9 @@ void app_apply_session(App *a, Session s) {
     a->tempo_bpm = s.tempo_bpm;
     a->shadow_warmth = s.warmth;
     a->drone_hz = s.drone_hz;
+    a->shadow_attack_s = s.attack_s;
+    a->shadow_decay_s = s.decay_s;
+    a->shadow_sustain = s.sustain;
     a->shadow_release_s = s.release_s;
     /* s.drone is carried for the plugin's host state; loading a preset here
        must not start or stop the standalone's drone under the player */

@@ -9,7 +9,11 @@ Session session_default(void) {
     s.chandas = chandas_params_default();
     s.tempo_bpm = CHANDAS_DEFAULT_BPM;
     s.warmth = 0.5f;
-    s.release_s = env_params_default().release_s;
+    EnvParams env = env_params_default();
+    s.attack_s = env.attack_s;
+    s.decay_s = env.decay_s;
+    s.sustain = env.sustain;
+    s.release_s = env.release_s;
     s.drone = false;
     return s;
 }
@@ -71,6 +75,9 @@ Session session_sanitize(Session s) {
     s.chandas.tail = clampf(s.chandas.tail, 0.0f, 1.0f);
     s.tempo_bpm = clampf(s.tempo_bpm, CHANDAS_MIN_BPM, CHANDAS_MAX_BPM);
     s.warmth = clampf(s.warmth, MIN_WARMTH, MAX_WARMTH);
-    s.release_s = clampf(s.release_s, 0.05f, 8.0f);
+    s.attack_s = clampf(s.attack_s, 0.0f, ENV_TIME_MAX);
+    s.decay_s = clampf(s.decay_s, 0.0f, ENV_TIME_MAX);
+    s.sustain = clampf(s.sustain, 0.0f, 1.0f);
+    s.release_s = clampf(s.release_s, ENV_RELEASE_MIN, ENV_TIME_MAX);
     return s;
 }

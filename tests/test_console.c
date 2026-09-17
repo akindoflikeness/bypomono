@@ -33,11 +33,14 @@ const char *cc_target_name(CcTarget t) {
     case CC_DAMP: return "damp";
     case CC_HAUNT: return "haunt";
     case CC_WARMTH: return "warmth";
+    case CC_ATTACK: return "attack";
+    case CC_ENVDECAY: return "envdecay";
+    case CC_SUSTAIN: return "sustain";
     default: return "?";
     }
 }
 CcTarget cc_target_from_name(const char *s) {
-    for (int t = CC_INDEX; t <= CC_WARMTH; t++)
+    for (int t = CC_INDEX; t <= CC_LAST; t++)
         if (strcmp(cc_target_name((CcTarget)t), s) == 0) return (CcTarget)t;
     return CC_NONE;
 }

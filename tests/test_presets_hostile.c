@@ -133,6 +133,14 @@ static void check_clamped(const Session *s, const char *what) {
           "%s: tempo %g", what, (double)s->tempo_bpm);
     CHECK(in_range(s->warmth, MIN_WARMTH, MAX_WARMTH), "%s: warmth %g", what,
           (double)s->warmth);
+    CHECK(in_range(s->attack_s, 0.0f, ENV_TIME_MAX), "%s: attack %g", what,
+          (double)s->attack_s);
+    CHECK(in_range(s->decay_s, 0.0f, ENV_TIME_MAX), "%s: env decay %g", what,
+          (double)s->decay_s);
+    CHECK(in_range(s->sustain, 0.0f, 1.0f), "%s: sustain %g", what,
+          (double)s->sustain);
+    CHECK(in_range(s->release_s, ENV_RELEASE_MIN, ENV_TIME_MAX), "%s: release %g",
+          what, (double)s->release_s);
 }
 
 /* every numeric field, as the enclosing object and the key inside it */
@@ -144,6 +152,10 @@ static const NumField NUM_FIELDS[] = {
     {"", "", "drone_hz"},
     {"", "", "tempo_bpm"},
     {"", "", "warmth"},
+    {"", "", "attack_s"},
+    {"", "", "decay_s"},
+    {"", "", "sustain"},
+    {"", "", "release_s"},
     {"\"patch\": {", "}", "algorithm"},
     {"\"patch\": {", "}", "feedback"},
     {"\"patch\": {", "}", "index"},

@@ -130,8 +130,12 @@ Patch patch_init(AlgorithmId algorithm, RatioMode ratio_mode);
 
 typedef struct {
     float attack_s, decay_s, release_s, curve;
+    float sustain; /* fraction of the velocity-derived sustain level */
 } EnvParams;
-EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5 */
+EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5, 1.0 */
+
+#define ENV_TIME_MAX 8.0f
+#define ENV_RELEASE_MIN 0.05f
 
 #define ENV_FLOOR 1e-4f
 #define VELOCITY_CEILING 0.8f
@@ -352,6 +356,7 @@ void voice_bank_note_off_all(VoiceBank *b);
 bool voice_bank_note_sounding(const VoiceBank *b);
 void voice_bank_set_bend_semitones(VoiceBank *b, float semitones);
 float voice_bank_target_hz(const VoiceBank *b); /* the newest note */
+const Envelope *voice_bank_newest_env(const VoiceBank *b);
 /* target hz of each held note (the drone counts as held); returns count */
 int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]);
 void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *userdata);
@@ -716,7 +721,9 @@ typedef struct {
     ChandasParams chandas;
     float tempo_bpm;
     float warmth;
-    float release_s; /* Chain.amp.env.release_s, which lives outside Patch */
+    /* the note envelope (Chain.amp.env), which lives outside Patch; its
+       curve is Patch.curve */
+    float attack_s, decay_s, sustain, release_s;
     bool drone;
 } Session;
 

@@ -363,7 +363,8 @@ static const char *const CHANDAS_KEYS[] = {
 /* harmony is the old name for chandas */
 static const char *const SESSION_KEYS[] = {
     "patch",   "verb",    "melody",    "drone_hz",  "chandas",
-    "tempo_bpm", "warmth", "harmony",  "release_s", "drone"};
+    "tempo_bpm", "warmth", "harmony",  "release_s", "drone",
+    "attack_s",  "decay_s", "sustain"};
 
 static uint8_t js_u8(Js *j, uint8_t dflt) {
     double d;
@@ -577,7 +578,7 @@ bool session_from_json(const char *json, Session *out) {
     char key[64];
     int r;
     while ((r = js_obj_next(&j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SESSION_KEYS, 10);
+        int k = js_key(key, SESSION_KEYS, 13);
         if (k == 7) k = 4;
         if (k >= 0 && js_dup(&j, &seen, k)) return false;
         switch (k) {
@@ -590,6 +591,9 @@ bool session_from_json(const char *json, Session *out) {
         case 6: s.warmth = js_f32(&j, s.warmth); break;
         case 8: s.release_s = js_f32(&j, s.release_s); break;
         case 9: s.drone = js_bool(&j, s.drone); break;
+        case 10: s.attack_s = js_f32(&j, s.attack_s); break;
+        case 11: s.decay_s = js_f32(&j, s.decay_s); break;
+        case 12: s.sustain = js_f32(&j, s.sustain); break;
         default: js_skip(&j); break;
         }
         if (j.err) return false;
@@ -778,6 +782,9 @@ char *session_to_json(const Session *s) {
 
     sb_key_f(&b, "  ", "tempo_bpm", s->tempo_bpm, true);
     sb_key_f(&b, "  ", "warmth", s->warmth, true);
+    sb_key_f(&b, "  ", "attack_s", s->attack_s, true);
+    sb_key_f(&b, "  ", "decay_s", s->decay_s, true);
+    sb_key_f(&b, "  ", "sustain", s->sustain, true);
     sb_key_f(&b, "  ", "release_s", s->release_s, true);
     sb_key_b(&b, "  ", "drone", s->drone, false);
     sb_put(&b, "}");

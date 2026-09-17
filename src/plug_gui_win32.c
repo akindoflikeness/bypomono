@@ -75,6 +75,7 @@ static int vk_scancode(WPARAM vk) {
     case VK_RIGHT: return KEY_RIGHT;
     case VK_UP: return KEY_UP;
     case VK_DOWN: return KEY_DOWN;
+    case VK_SHIFT: return KEY_LSHIFT;
     default: return -1;
     }
 }

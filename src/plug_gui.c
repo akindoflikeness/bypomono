@@ -117,7 +117,10 @@ static void refresh_shadows(App *a, Plug *p) {
     a->shadow_chandas = s.chandas;
     a->shadow_warmth = s.warmth;
     a->drone_hz = s.drone_hz;
-    a->shadow_release_s = (float)plug_getv(p, P_RELEASE);
+    a->shadow_attack_s = s.attack_s;
+    a->shadow_decay_s = s.decay_s;
+    a->shadow_sustain = s.sustain;
+    a->shadow_release_s = s.release_s;
     a->engaged = plug_getv(p, P_DRONE) > 0.5;
 }
 

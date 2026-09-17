@@ -50,6 +50,9 @@ const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_UNISON] = {"unison", "voices", 0, 1, 0, K_ONOFF},
     [P_DETUNE] = {"detune ct", "voices", 0, UNISON_DETUNE_MAX,
                   UNISON_DETUNE_DEFAULT, K_FLOAT},
+    [P_ATTACK] = {"attack s", "envelope", 0, ENV_TIME_MAX, 0.008, K_FLOAT},
+    [P_ENV_DECAY] = {"decay s", "envelope", 0, ENV_TIME_MAX, 2, K_FLOAT},
+    [P_SUSTAIN] = {"sustain", "envelope", 0, 1, 1, K_FLOAT},
 };
 
 double plug_getv(const Plug *p, int id) {
@@ -105,6 +108,9 @@ static Chain chain_of_vals(const Plug *p) {
     } else {
         want.amp.kind = AMP_ENVELOPE;
         want.amp.env = env_params_default();
+        want.amp.env.attack_s = (float)getv(p, P_ATTACK);
+        want.amp.env.decay_s = (float)getv(p, P_ENV_DECAY);
+        want.amp.env.sustain = (float)getv(p, P_SUSTAIN);
         want.amp.env.curve = (float)getv(p, P_CURVE);
         want.amp.env.release_s = (float)getv(p, P_RELEASE);
     }
@@ -193,6 +199,9 @@ Session plug_session_of_vals(const Plug *p) {
     s.chandas.dimension = (float)getv(p, P_CH_DIM);
     s.chandas.tail = (float)getv(p, P_CH_TAIL);
     s.warmth = (float)getv(p, P_WARMTH);
+    s.attack_s = (float)getv(p, P_ATTACK);
+    s.decay_s = (float)getv(p, P_ENV_DECAY);
+    s.sustain = (float)getv(p, P_SUSTAIN);
     s.release_s = (float)getv(p, P_RELEASE);
     s.drone = getv(p, P_DRONE) > 0.5;
     return s;
@@ -240,6 +249,9 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_SH_RANGE, (double)s->melody.range_degrees);
     setv(p, P_SH_RATE, s->melody.rate_hz);
     setv(p, P_WARMTH, s->warmth);
+    setv(p, P_ATTACK, s->attack_s);
+    setv(p, P_ENV_DECAY, s->decay_s);
+    setv(p, P_SUSTAIN, s->sustain);
     setv(p, P_RELEASE, s->release_s);
     setv(p, P_DRONE, s->drone ? 1 : 0);
     atomic_store_explicit(&p->dirty, true, memory_order_relaxed);
@@ -333,6 +345,9 @@ static void apply_gui_event(Plug *p, Event ev) {
         next.chain = ev.u.chain;
         voice_bank_set_state(&p->voice, next);
         if (ev.u.chain.amp.kind == AMP_ENVELOPE) {
+            setv(p, P_ATTACK, ev.u.chain.amp.env.attack_s);
+            setv(p, P_ENV_DECAY, ev.u.chain.amp.env.decay_s);
+            setv(p, P_SUSTAIN, ev.u.chain.amp.env.sustain);
             setv(p, P_CURVE, ev.u.chain.amp.env.curve);
             setv(p, P_RELEASE, ev.u.chain.amp.env.release_s);
         }

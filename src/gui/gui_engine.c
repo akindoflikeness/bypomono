@@ -45,6 +45,13 @@ void voices_store(App *a, const VoiceBank *b) {
         mask |= 1u << (((note % 12) + 12) % 12);
     }
     atomic_store_explicit(&a->held_pcs, mask, memory_order_relaxed);
+    const Envelope *e = voice_bank_newest_env(b);
+    uint32_t ms = (uint32_t)clampf(e->t * 1000.0f, 0.0f, (float)((1u << 30) - 1));
+    atomic_store_explicit(&a->env_clock, (uint32_t)e->stage << 30 | ms,
+                          memory_order_relaxed);
+    atomic_store_explicit(&a->env_level_q16,
+                          (uint32_t)(clampf(e->level, 0.0f, 1.0f) * 65536.0f),
+                          memory_order_relaxed);
 }
 
 float pitch_load(const PitchAtom *p) {
@@ -86,12 +93,15 @@ const char *cc_target_name(CcTarget t) {
     case CC_DAMP: return "damp";
     case CC_HAUNT: return "haunt";
     case CC_WARMTH: return "warmth";
+    case CC_ATTACK: return "attack";
+    case CC_ENVDECAY: return "envdecay";
+    case CC_SUSTAIN: return "sustain";
     default: return "?";
     }
 }
 
 CcTarget cc_target_from_name(const char *s) {
-    for (int t = CC_INDEX; t <= CC_WARMTH; t++)
+    for (int t = CC_INDEX; t <= CC_LAST; t++)
         if (strcmp(cc_target_name((CcTarget)t), s) == 0) return (CcTarget)t;
     return CC_NONE;
 }
@@ -410,6 +420,9 @@ void gui_sync_chain(App *a) {
     if (notes_drive && !a->engaged) {
         want.amp.kind = AMP_ENVELOPE;
         want.amp.env = env_params_default();
+        want.amp.env.attack_s = a->shadow_attack_s;
+        want.amp.env.decay_s = a->shadow_decay_s;
+        want.amp.env.sustain = a->shadow_sustain;
         want.amp.env.curve = a->shadow.curve;
         want.amp.env.release_s = a->shadow_release_s;
     } else {
@@ -420,7 +433,8 @@ void gui_sync_chain(App *a) {
                     || (want.amp.env.attack_s == a->chain.amp.env.attack_s
                         && want.amp.env.decay_s == a->chain.amp.env.decay_s
                         && want.amp.env.release_s == a->chain.amp.env.release_s
-                        && want.amp.env.curve == a->chain.amp.env.curve));
+                        && want.amp.env.curve == a->chain.amp.env.curve
+                        && want.amp.env.sustain == a->chain.amp.env.sustain));
     if (same) return;
     bool becoming_notes = want.amp.kind == AMP_ENVELOPE;
     bool was_notes = a->chain.amp.kind == AMP_ENVELOPE;
@@ -430,7 +444,7 @@ void gui_sync_chain(App *a) {
     if (becoming_notes != was_notes)
         push_log(a, becoming_notes
                         ? "notes raise the sound now. velocity is the level; "
-                          "the release fader is how it lets go."
+                          "the envelope under the keys shapes the rest."
                         : "the drone holds the sound again.");
 }
 
@@ -464,8 +478,11 @@ void gui_apply_cc(App *a, Ui *ui) {
         case CC_FIELD: a->shadow.field = p; patch = true; break;
         case CC_CURVE: a->shadow.curve = p; patch = true; break;
         case CC_RELEASE:
-            a->shadow_release_s = log_position(p, 0.05f, 8.0f);
+            a->shadow_release_s = env_time_at(p, ENV_RELEASE_MIN);
             break;
+        case CC_ATTACK: a->shadow_attack_s = env_time_at(p, 0.0f); break;
+        case CC_ENVDECAY: a->shadow_decay_s = env_time_at(p, 0.0f); break;
+        case CC_SUSTAIN: a->shadow_sustain = p; break;
         case CC_GLIDE:
             a->shadow.glide_seconds = 2.0f * powf(p, PHI * PHI * PHI * PHI);
             patch = true;

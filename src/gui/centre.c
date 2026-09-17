@@ -143,6 +143,9 @@ void app_set_engaged(App *a, bool on) {
 #define KB_MIN_H 44.0f
 #define KB_MAX_H 180.0f
 #define KB_READOUT 22.0f
+#define ENV_PLOT_H 55.0f
+#define ENV_KNOB_H 62.0f
+#define ENV_KNOBS 5
 
 static const uint8_t KB_WHITE[7] = {0, 2, 4, 5, 7, 9, 11};
 static const uint8_t KB_BLACK_SEMI[5] = {1, 3, 6, 8, 10};
@@ -710,6 +713,153 @@ static void paint_waveform(const App *a, Canvas *c, Rct rect) {
     canvas_set_clip(c, saved);
 }
 
+/* ---------- envelope ---------- */
+
+static EnvParams shadow_env(const App *a) {
+    EnvParams p = env_params_default();
+    p.attack_s = a->shadow_attack_s;
+    p.decay_s = a->shadow_decay_s;
+    p.sustain = a->shadow_sustain;
+    p.release_s = a->shadow_release_s;
+    p.curve = a->shadow.curve;
+    return p;
+}
+
+/* the note held for a while then let go, at full velocity, with the newest
+   voice's envelope riding it as a dot */
+static void paint_envelope(const App *a, Canvas *c, Rct rect) {
+    draw_rect_stroke(c, rect, 1.0f, PAPER);
+    Rct inner = rct_shrink(rect, 3.0f);
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, rct_intersect(inner, saved));
+    EnvParams p = shadow_env(a);
+    float at = fmaxf(p.attack_s, 1e-4f);
+    float de = fmaxf(p.decay_s, 1e-4f);
+    float re = fmaxf(p.release_s, 1e-4f);
+    float hold = fmaxf(0.2f * (at + de + re), 0.05f);
+    float span = at + de + hold + re;
+    int steps = (int)rct_w(inner);
+    if (steps < 2) steps = 2;
+    float bottom = inner.y1 - 1.0f, height = rct_h(inner) - 2.0f;
+
+    float marks[3] = {at, at + de, at + de + hold};
+    for (int k = 0; k < 3; k++) {
+        float x = roundf(inner.x0 + marks[k] / span * rct_w(inner));
+        for (float yy = inner.y0; yy < inner.y1; yy += 3.0f)
+            draw_dot(c, (P2){x, roundf(yy)}, PAPER);
+    }
+
+    Envelope e;
+    envelope_init(&e, (float)steps / span);
+    envelope_note_on(&e, 1.0f);
+    P2 pts[1024];
+    int n = steps + 1 < 1024 ? steps + 1 : 1024;
+    bool released = false;
+    for (int i = 0; i < n; i++) {
+        float t = (float)i / (float)steps * span;
+        if (!released && t >= at + de + hold) {
+            envelope_note_off(&e);
+            released = true;
+        }
+        float level = envelope_tick(&e, &p);
+        pts[i] = (P2){inner.x0 + (float)i, bottom - level * height};
+    }
+    draw_polyline(c, pts, (size_t)n, 2.0f, PAPER);
+
+    if (a->chain.amp.kind == AMP_ENVELOPE) {
+        uint32_t clock = atomic_load_explicit(&((App *)a)->env_clock,
+                                              memory_order_relaxed);
+        EnvStage stage = (EnvStage)(clock >> 30);
+        float secs = (float)(clock & ((1u << 30) - 1)) / 1000.0f;
+        float level = (float)atomic_load_explicit(&((App *)a)->env_level_q16,
+                                                  memory_order_relaxed)
+                      / 65536.0f;
+        float t = -1.0f;
+        if (stage == ENV_HELD) t = fminf(secs, at + de + hold);
+        else if (stage == ENV_RELEASED) t = fminf(at + de + hold + secs, span);
+        if (t >= 0.0f) {
+            P2 dot = {roundf(inner.x0 + t / span * rct_w(inner)),
+                      roundf(bottom - level * height)};
+            draw_circle_filled(c, dot, 3.0f, PAPER);
+            draw_circle_stroke(c, dot, 5.0f, 1.0f, PAPER);
+        }
+    }
+    canvas_set_clip(c, saved);
+}
+
+static void time_text(char *out, size_t cap, float s) {
+    if (s < 0.1f) snprintf(out, cap, "%.0f ms", (double)(s * 1000.0f));
+    else snprintf(out, cap, "%.2f s", (double)s);
+}
+
+static void envelope_knobs(App *a, Ui *ui, Rct r) {
+    Canvas *c = ui->canvas;
+    EnvParams def = env_params_default();
+    Patch pd = patch_init(a->shadow.algorithm, a->shadow.ratio_mode);
+    bool reaches = a->chain.amp.kind == AMP_ENVELOPE || a->shadow_melody.enabled;
+    float kw = rct_w(r) / (float)ENV_KNOBS;
+    char val[32];
+    for (int k = 0; k < ENV_KNOBS; k++) {
+        Rct kr = rct(roundf(r.x0 + kw * (float)k), r.y0,
+                     roundf(r.x0 + kw * (float)(k + 1)), r.y1);
+        UiId id = ui_id_n("env knob", k);
+        FaderAct act;
+        switch (k) {
+        case 0:
+        case 1: {
+            float *v = k == 0 ? &a->shadow_attack_s : &a->shadow_decay_s;
+            time_text(val, sizeof val, *v);
+            act = knob_track(ui, id, kr, k == 0 ? "attack" : "decay", val,
+                             env_time_pos(*v, 0.0f));
+            if (reaches && act.kind == FADER_SET) *v = env_time_at(act.t, 0.0f);
+            if (reaches && act.kind == FADER_RESET)
+                *v = k == 0 ? def.attack_s : def.decay_s;
+            break;
+        }
+        case 2:
+            snprintf(val, sizeof val, "%.2f", (double)a->shadow_sustain);
+            act = knob_track(ui, id, kr, "sustain", val, a->shadow_sustain);
+            if (reaches && act.kind == FADER_SET) a->shadow_sustain = act.t;
+            if (reaches && act.kind == FADER_RESET) a->shadow_sustain = def.sustain;
+            break;
+        case 3:
+            time_text(val, sizeof val, a->shadow_release_s);
+            act = knob_track(ui, id, kr, "release", val,
+                             env_time_pos(a->shadow_release_s, ENV_RELEASE_MIN));
+            if (reaches && act.kind == FADER_SET)
+                a->shadow_release_s = env_time_at(act.t, ENV_RELEASE_MIN);
+            if (reaches && act.kind == FADER_RESET) a->shadow_release_s = def.release_s;
+            break;
+        default: {
+            /* curve also bends the field, so it answers under the drone too */
+            float bend = a->shadow.curve * 2.0f - 1.0f;
+            snprintf(val, sizeof val, "%+.2f", (double)bend);
+            act = knob_track(ui, id, kr, "curve", val, a->shadow.curve);
+            float next = a->shadow.curve;
+            if (act.kind == FADER_SET) next = act.t;
+            else if (act.kind == FADER_RESET) next = pd.curve;
+            if (next != a->shadow.curve) {
+                a->shadow.curve = next;
+                app_send(a, (Event){.kind = EV_SET_PATCH, .u.patch = a->shadow});
+            }
+            continue;
+        }
+        }
+        if (reaches) continue;
+        dither_rect_ink(c, kr, VEIL, 2.0f, INK_BLACK);
+        if (ui->in.pressed && ui->in.mouse_in_window && rct_contains(kr, ui->in.mouse)) {
+            if (midi_driving(a))
+                push_log(a, "midi is connected, but the drone is still on "
+                            "— turn it off to make notes the amplitude "
+                            "authority and the envelope reachable.");
+            else
+                push_log(a, "the envelope only reaches anything once notes "
+                            "raise the sound — connect midi or start the "
+                            "sequencer, and switch the drone off.");
+        }
+    }
+}
+
 /* ---------- keyboard cell ---------- */
 
 static int hz_to_midi(float hz) {
@@ -775,7 +925,14 @@ void draw_keyboard_cell(App *a, Ui *ui, Rct r) {
 
     float y = content.y0 + GROUP;
     float avail = rct_w(content);
-    float h = clampf(content.y1 - y - KB_READOUT, KB_MIN_H, KB_MAX_H);
+    /* the envelope takes the bottom of the cell; a short cell drops the
+       plot first, then the knobs */
+    float room = content.y1 - y - KB_READOUT - KB_MIN_H;
+    bool knobs = room >= GROUP + ENV_KNOB_H;
+    bool plot = room >= 2.0f * GROUP + ENV_KNOB_H + ENV_PLOT_H;
+    float env_h = (knobs ? GROUP + ENV_KNOB_H : 0.0f)
+                  + (plot ? GROUP + ENV_PLOT_H : 0.0f);
+    float h = clampf(content.y1 - y - KB_READOUT - env_h, KB_MIN_H, KB_MAX_H);
     Rct band = rct(content.x0, y, content.x1, y + h);
 
     uint32_t held = atomic_load_explicit(&a->held_pcs, memory_order_relaxed);
@@ -857,6 +1014,17 @@ void draw_keyboard_cell(App *a, Ui *ui, Rct r) {
     snprintf(label, sizeof label, "%s%s%s", pname, pvalue, source);
     text_draw(c, ui_font(12.0f), (P2){content.x0, y}, ALIGN_LEFT_TOP, label,
               PAPER, 0.0f);
+
+    float ey = content.y1 - env_h;
+    if (plot) {
+        ey += GROUP;
+        paint_envelope(a, c, rct(content.x0, ey, content.x1, ey + ENV_PLOT_H));
+        ey += ENV_PLOT_H;
+    }
+    if (knobs) {
+        ey += GROUP;
+        envelope_knobs(a, ui, rct(content.x0, ey, content.x1, ey + ENV_KNOB_H));
+    }
 
     canvas_set_clip(c, saved);
 }
@@ -1020,55 +1188,6 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
         if (next != a->shadow.field) {
             a->shadow.field = next;
             patch_changed = true;
-        }
-        y += FADER_H + GROUP;
-    }
-
-    {
-        Rct row = rct(x0, y, x1, y + FADER_H);
-        float p = a->shadow.curve;
-        const char *cname = p < 0.33f ? "log" : (p > 0.67f ? "exp" : "lin");
-        snprintf(val, sizeof val, "%s %.2f", cname, p);
-        FaderAct act = fader_track(ui, ui_id("house curve"), row, "curve", val,
-                                   clampf(p, 0.0f, 1.0f));
-        float next = a->shadow.curve;
-        if (act.kind == FADER_SET) next = act.t;
-        else if (act.kind == FADER_RESET) next = pd.curve;
-        if (next != a->shadow.curve) {
-            a->shadow.curve = next;
-            patch_changed = true;
-        }
-        y += FADER_H + GROUP;
-    }
-
-    /* release: veiled unless notes hold the amplitude authority */
-    {
-        Rct row = rct(x0, y, x1, y + FADER_H);
-        bool notes_live = a->chain.amp.kind == AMP_ENVELOPE;
-        bool release_reaches = notes_live || a->shadow_melody.enabled;
-        float rel = a->shadow_release_s;
-        float t = position_of_log(rel, 0.05f, 8.0f);
-        snprintf(val, sizeof val, "%.2f s", rel);
-        FaderAct act =
-            fader_track(ui, ui_id("house release"), row, "release", val, t);
-        if (release_reaches) {
-            float next = rel;
-            if (act.kind == FADER_SET) next = log_position(act.t, 0.05f, 8.0f);
-            else if (act.kind == FADER_RESET)
-                next = env_params_default().release_s;
-            a->shadow_release_s = next;
-        } else {
-            dither_rect_ink(c, row, VEIL, 2.0f, INK_BLACK);
-            if (press_on(ui, row)) {
-                if (midi_driving(a))
-                    push_log(a, "midi is connected, but the drone is still on "
-                                "— turn it off to make notes the amplitude "
-                                "authority and release reachable.");
-                else
-                    push_log(a, "release only reaches anything once notes "
-                                "raise the sound — connect midi or start the "
-                                "sequencer, and switch the drone off.");
-            }
         }
         y += FADER_H + GROUP;
     }

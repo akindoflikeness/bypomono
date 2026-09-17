@@ -250,6 +250,11 @@ float voice_bank_target_hz(const VoiceBank *b) {
     return voice_pair_target_hz(slot_pair_c(b, b->newest, 0));
 }
 
+const Envelope *voice_bank_newest_env(const VoiceBank *b) {
+    const VoicePair *p = slot_pair_c(b, b->newest, 0);
+    return &p->voices[p->target].env;
+}
+
 int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]) {
     if (voice_bank_chain(b)->amp.kind != AMP_ENVELOPE) {
         out[0] = voice_pair_target_hz(slot_pair_c(b, 0, 0));

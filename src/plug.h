@@ -17,6 +17,7 @@ enum {
     P_SH_RATE,
     P_WARMTH,
     P_POLY, P_UNISON, P_DETUNE,
+    P_ATTACK, P_ENV_DECAY, P_SUSTAIN,
     P_COUNT
 };
 

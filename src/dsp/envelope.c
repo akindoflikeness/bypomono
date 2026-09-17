@@ -1,7 +1,7 @@
 #include "dsp.h"
 
 EnvParams env_params_default(void) {
-    EnvParams p = {0.008f, 2.0f, 2.0f, 0.5f};
+    EnvParams p = {0.008f, 2.0f, 2.0f, 0.5f, 1.0f};
     return p;
 }
 
@@ -63,8 +63,8 @@ float envelope_tick(Envelope *e, const EnvParams *p) {
         } else {
             float d = fmaxf(p->decay_s, 1e-4f);
             float remaining = 1.0f - clampf((e->t - a) / d, 0.0f, 1.0f);
-            e->level =
-                e->sustain + (e->peak - e->sustain) * powf(remaining, curve_exponent(p->curve));
+            float sustain = e->sustain * clampf(p->sustain, 0.0f, 1.0f);
+            e->level = sustain + (e->peak - sustain) * powf(remaining, curve_exponent(p->curve));
         }
         e->t += dt;
         break;

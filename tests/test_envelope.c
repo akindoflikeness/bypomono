@@ -142,7 +142,25 @@ static void letting_go_early_falls_from_where_it_was(void) {
     CHECK(first <= at_release + 1e-3f, "the release stepped up to %g from %g", first, at_release);
 }
 
+static void sustain_scales_the_velocity_law(void) {
+    EnvParams p = env_params_default();
+    p.attack_s = 0.001f;
+    p.decay_s = 0.01f;
+    Envelope e = held(0.5f, 0.1f, &p);
+    CHECK(fabsf(envelope_level(&e) - 0.25f) < 1e-4f, "full sustain settled at %g",
+          envelope_level(&e));
+    p.sustain = 0.4f;
+    e = held(0.5f, 0.1f, &p);
+    CHECK(fabsf(envelope_level(&e) - 0.1f) < 1e-4f, "sustain 0.4 settled at %g",
+          envelope_level(&e));
+    p.sustain = 0.0f;
+    e = held(0.5f, 0.1f, &p);
+    CHECK(envelope_level(&e) < 1e-4f, "zero sustain settled at %g", envelope_level(&e));
+    CHECK(envelope_active(&e), "a held note at zero sustain is still held");
+}
+
 void test_envelope(void) {
+    sustain_scales_the_velocity_law();
     velocity_is_the_fader_and_the_knob_is_the_last_fifth();
     velocity_for_level_peaks_on_the_drone_floor();
     a_soft_note_settles_lower_than_a_hard_one();

@@ -7,6 +7,7 @@ Chain chain_default(void) {
     c.amp.env.decay_s = 0.0f;
     c.amp.env.release_s = 0.0f;
     c.amp.env.curve = 0.0f;
+    c.amp.env.sustain = 0.0f;
     return c;
 }
 

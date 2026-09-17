@@ -363,12 +363,19 @@ static const char *const CHANDAS_KEYS[] = {
 /* harmony is the old name for chandas */
 static const char *const SESSION_KEYS[] = {
     "patch",   "verb",    "melody",    "drone_hz",  "chandas",
-    "tempo_bpm", "warmth", "harmony",  "release_s", "drone", "mods"};
+    "tempo_bpm", "warmth", "harmony",  "release_s", "drone",
+    "attack_s",  "decay_s", "sustain", "mods"};
 static const char *const MODS_KEYS[] = {"lfos", "routes"};
 static const char *const LFO_KEYS[] = {"slot",     "shape",    "mode",
                                        "unipolar", "rate_hz",  "division",
                                        "phase"};
 static const char *const ROUTE_KEYS[] = {"lfo", "target", "depth"};
+
+static uint8_t js_u8(Js *j, uint8_t dflt) {
+    double d;
+    if (!js_uint(j, 255.0, &d)) return dflt;
+    return (uint8_t)d;
+}
 
 static void parse_ops(Js *j, OpParams ops[NUM_OPS]) {
     if (!js_ch(j, '[')) {
@@ -714,7 +721,7 @@ bool session_from_json(const char *json, Session *out) {
     char key[64];
     int r;
     while ((r = js_obj_next(&j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SESSION_KEYS, 11);
+        int k = js_key(key, SESSION_KEYS, 14);
         if (k == 7) k = 4;
         if (k >= 0 && js_dup(&j, &seen, k)) return false;
         switch (k) {
@@ -727,7 +734,10 @@ bool session_from_json(const char *json, Session *out) {
         case 6: s.warmth = js_f32(&j, s.warmth); break;
         case 8: s.release_s = js_f32(&j, s.release_s); break;
         case 9: s.drone = js_bool(&j, s.drone); break;
-        case 10: parse_mods(&j, &s.mods); break;
+        case 10: s.attack_s = js_f32(&j, s.attack_s); break;
+        case 11: s.decay_s = js_f32(&j, s.decay_s); break;
+        case 12: s.sustain = js_f32(&j, s.sustain); break;
+        case 13: parse_mods(&j, &s.mods); break;
         default: js_skip(&j); break;
         }
         if (j.err) return false;

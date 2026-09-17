@@ -84,7 +84,7 @@ typedef struct {
         Chain chain;
         float f;
         bool flag;
-        struct { float hz, velocity; } note;
+        struct { float hz, velocity; int key; } note; /* key -1 = none */
         struct { int slot; LfoParams p; } lfo;
         struct { int slot; ModRoute r; } route;
     } u;

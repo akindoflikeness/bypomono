@@ -16,6 +16,7 @@ enum {
     P_SH_ON, P_SH_SRC, P_SH_TUNING, P_SH_SCALE, P_SH_ROOT, P_SH_RANGE,
     P_SH_RATE,
     P_WARMTH,
+    P_POLY, P_UNISON, P_DETUNE,
     P_COUNT
 };
 
@@ -38,7 +39,7 @@ typedef struct Plug {
     _Atomic double vals[P_COUNT];
     _Atomic bool dirty;
     /* audio-thread engine */
-    VoicePair voice;
+    VoiceBank voice;
     StereoVerb verb;
     Melody melody;
     Chandas chandas;

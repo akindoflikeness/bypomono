@@ -778,14 +778,19 @@ void draw_keyboard_cell(App *a, Ui *ui, Rct r) {
     float h = clampf(content.y1 - y - KB_READOUT, KB_MIN_H, KB_MAX_H);
     Rct band = rct(content.x0, y, content.x1, y + h);
 
-    bool sounding_now = a->engaged || midi_held >= 0
+    uint32_t held = atomic_load_explicit(&a->held_pcs, memory_order_relaxed);
+    bool sounding_now = a->engaged || midi_held >= 0 || (driving && held != 0)
                         || (a->shadow_melody.enabled && !driving);
 
     if (is_board) {
-        int lit = -1;
+        uint32_t lit = 0;
         if (sounding_now) {
-            lit = sounding % 12;
-            if (lit < 0) lit += 12;
+            lit = held;
+            if (lit == 0) {
+                int pc = sounding % 12;
+                if (pc < 0) pc += 12;
+                lit = 1u << pc;
+            }
         }
         uint16_t scale = kb_scale_mask(&a->shadow_melody);
         int root = a->shadow_melody.enabled ? a->shadow_melody.root_midi % 12 : -1;
@@ -802,7 +807,7 @@ void draw_keyboard_cell(App *a, Ui *ui, Rct r) {
             Rct kr = rct_xywh(roundf(origin.x + (float)i * kw), origin.y,
                               fmaxf(floorf(kw), 1.0f), h);
             int pc = KB_WHITE[i];
-            if (lit == pc)
+            if (lit >> pc & 1u)
                 dither_rect(c, rct_shrink(kr, 2.0f), KB_LIT, 3.0f);
             else if (scale & (1u << pc))
                 dither_rect(c, rct_shrink(kr, 2.0f), KB_IN_SCALE, 3.0f);
@@ -828,7 +833,7 @@ void draw_keyboard_cell(App *a, Ui *ui, Rct r) {
             int pc = KB_BLACK_SEMI[i];
             draw_rect_filled(c, kr, INK_BLACK);
             hard_rect(c, kr, root == pc ? 2.0f : 1.0f);
-            if (lit == pc)
+            if (lit >> pc & 1u)
                 dither_rect(c, rct_shrink(kr, 3.0f), KB_LIT_BLACK, 3.0f);
             else if (scale & (1u << pc))
                 dither_rect(c, rct_shrink(kr, 3.0f), KB_IN_SCALE_BLACK, 3.0f);
@@ -1068,6 +1073,87 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
         y += FADER_H + GROUP;
     }
 
+    float strip_h = text_row_height(ui_font(12.0f)) + 2.0f * SNUG;
+
+    /* voices: mono or poly, unison on top of either */
+    y += GROUP;
+    inverted_strip(c, rct(x0, y, x1, y + strip_h), "VOICES");
+    y += strip_h + GROUP;
+    {
+        static const char *const NAMES[3] = {"mono", "poly 4", "unison"};
+        FontId f = ui_font(12.0f);
+        float cx = x0;
+        int hit = -1;
+        for (int i = 0; i < 3; i++) {
+            bool active = i == 0   ? a->shadow.voices <= 1
+                          : i == 1 ? a->shadow.voices > 1
+                                   : a->shadow.unison > 1;
+            float cw = text_width(f, NAMES[i], 0.0f) + 2.0f * GAP;
+            if (i == 2) cx += GROUP;
+            if (cx > x0 && cx + cw > x1) {
+                cx = x0;
+                y += 21.0f + GROUP;
+            }
+            if (chip_button(ui, ui_id_n("house voices", i),
+                            rct_xywh(cx, y, cw, 21.0f), NAMES[i], active)
+                && (i == 2 || !active))
+                hit = i;
+            cx += cw + GROUP;
+        }
+        y += 21.0f + GROUP;
+        bool drone_holds = a->chain.amp.kind != AMP_ENVELOPE;
+        if (hit == 0) {
+            a->shadow.voices = 1;
+            patch_changed = true;
+            push_log(a, "mono. one voice; a new note glides out of the last.");
+        } else if (hit == 1) {
+            a->shadow.voices = POLY_MAX;
+            patch_changed = true;
+            if (drone_holds)
+                push_log(a, "poly 4 is set, but the drone is one voice. switch "
+                            "it off and notes stack up to four.");
+            else
+                push_log(a, "poly 4. up to four notes at once; a fifth takes "
+                            "the oldest.");
+        } else if (hit == 2) {
+            a->shadow.unison = a->shadow.unison > 1 ? 1 : UNISON_MAX;
+            patch_changed = true;
+            if (a->shadow.unison > 1)
+                push_log(a, "unison. two voices a note, %.1f cents apart, "
+                            "spread left and right.",
+                         (double)a->shadow.unison_detune);
+            else
+                push_log(a, "unison off. one voice a note.");
+        }
+    }
+
+    /* detune: squared, so the narrow beating end gets most of the travel */
+    {
+        Rct row = rct(x0, y, x1, y + FADER_H);
+        float d = a->shadow.unison_detune;
+        float pos = sqrtf(clampf(d / UNISON_DETUNE_MAX, 0.0f, 1.0f));
+        snprintf(val, sizeof val, "%.1f ct", d);
+        FaderAct act =
+            fader_track(ui, ui_id("house detune"), row, "detune", val, pos);
+        if (a->shadow.unison > 1) {
+            float next = d;
+            if (act.kind == FADER_SET)
+                next = UNISON_DETUNE_MAX * act.t * act.t;
+            else if (act.kind == FADER_RESET)
+                next = pd.unison_detune;
+            if (next != d) {
+                a->shadow.unison_detune = next;
+                patch_changed = true;
+            }
+        } else {
+            dither_rect_ink(c, row, VEIL, 2.0f, INK_BLACK);
+            if (press_on(ui, row))
+                push_log(a, "detune spreads the unison pair. switch unison on "
+                            "to hear it.");
+        }
+        y += FADER_H + GROUP;
+    }
+
     if (patch_changed) {
         Event ev = {.kind = EV_SET_PATCH, .u.patch = a->shadow};
         app_send(a, ev);
@@ -1075,7 +1161,6 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
 
     /* ratio mode */
     y += GROUP;
-    float strip_h = text_row_height(ui_font(12.0f)) + 2.0f * SNUG;
     inverted_strip(c, rct(x0, y, x1, y + strip_h), "RATIO MODE");
     y += strip_h + GROUP;
     {

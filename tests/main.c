@@ -12,6 +12,7 @@ void test_session(void);
 void test_envelope(void);
 void test_breath(void);
 void test_pair(void);
+void test_bank(void);
 void test_chamber(void);
 void test_melody(void);
 void test_reverb(void);
@@ -27,7 +28,8 @@ int main(void) {
         {"algorithm", test_algorithm}, {"patch", test_patch},
         {"state", test_state},         {"session", test_session},
         {"envelope", test_envelope},   {"breath", test_breath},
-        {"pair", test_pair},           {"chamber", test_chamber},
+        {"pair", test_pair},           {"bank", test_bank},
+        {"chamber", test_chamber},
         {"melody", test_melody},       {"reverb", test_reverb},
         {"tape", test_tape},           {"chandas", test_chandas},
         {"presets hostile", test_presets_hostile},

@@ -99,6 +99,12 @@ static void check_clamped(const Session *s, const char *what) {
           (double)s->verb.damp);
     CHECK(in_range(s->verb.haunt, 0.0f, 1.0f), "%s: haunt %g", what,
           (double)s->verb.haunt);
+    CHECK(s->patch.voices >= 1 && s->patch.voices <= POLY_MAX, "%s: voices %u",
+          what, s->patch.voices);
+    CHECK(s->patch.unison >= 1 && s->patch.unison <= UNISON_MAX,
+          "%s: unison %u", what, s->patch.unison);
+    CHECK(in_range(s->patch.unison_detune, 0.0f, UNISON_DETUNE_MAX),
+          "%s: unison_detune %g", what, (double)s->patch.unison_detune);
     CHECK(in_range(s->melody.rate_hz, 0.1f, 8.0f), "%s: melody rate %g", what,
           (double)s->melody.rate_hz);
     CHECK(s->melody.root_midi >= 24 && s->melody.root_midi <= 57,
@@ -146,6 +152,9 @@ static const NumField NUM_FIELDS[] = {
     {"\"patch\": {", "}", "glide_seconds"},
     {"\"patch\": {", "}", "field"},
     {"\"patch\": {", "}", "curve"},
+    {"\"patch\": {", "}", "voices"},
+    {"\"patch\": {", "}", "unison"},
+    {"\"patch\": {", "}", "unison_detune"},
     {"\"patch\": {\"ops\": [{", "}]}", "ratio"},
     {"\"patch\": {\"ops\": [{", "}]}", "detune_cents"},
     {"\"patch\": {\"ops\": [{", "}]}", "level"},

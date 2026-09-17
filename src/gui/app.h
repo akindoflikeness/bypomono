@@ -82,7 +82,7 @@ typedef struct {
         Chain chain;
         float f;
         bool flag;
-        struct { float hz, velocity; } note;
+        struct { float hz, velocity; int key; } note; /* key -1 = none */
     } u;
 } Event;
 
@@ -222,6 +222,7 @@ typedef struct App {
     RecRing rec;
     MidiNoteAtom midi_note;
     PitchAtom pitch;
+    _Atomic uint32_t held_pcs; /* pitch classes of the held notes, bit per class */
     CcState cc;
     AudioMeter meter;
     _Atomic bool rec_on;
@@ -317,6 +318,8 @@ void gui_sync_chain(App *a);
 bool midi_driving(const App *a);
 int midi_port_names(char names[][128], int max);
 bool gui_set_midi_port(App *a, const char *name); /* NULL = close */
+/* audio thread: newest pitch and held pitch classes for the keyboard */
+void voices_store(App *a, const VoiceBank *b);
 void gui_run_record(App *a, const char *args);    /* console verb */
 void gui_stop_record(App *a);
 void gui_run_bind(App *a, int cc, CcTarget target);

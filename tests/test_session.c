@@ -80,6 +80,9 @@ static Session marked_session(void) {
     s.warmth = 0.66f;
     s.release_s = 4.4636f;
     s.drone = true;
+    s.patch.voices = POLY_MAX;
+    s.patch.unison = UNISON_MAX;
+    s.patch.unison_detune = 17.5f;
     return s;
 }
 
@@ -95,6 +98,10 @@ static void check_same_session(const Session *a, const Session *b) {
     CHECK(a->patch.curve == b->patch.curve, "curve %g", b->patch.curve);
     CHECK(a->patch.master_level == b->patch.master_level, "level %g",
           b->patch.master_level);
+    CHECK(a->patch.voices == b->patch.voices, "voices %u", b->patch.voices);
+    CHECK(a->patch.unison == b->patch.unison, "unison %u", b->patch.unison);
+    CHECK(a->patch.unison_detune == b->patch.unison_detune, "unison_detune %g",
+          b->patch.unison_detune);
     for (int i = 0; i < NUM_OPS; i++) {
         CHECK(a->patch.ops[i].enabled == b->patch.ops[i].enabled, "op %d enabled", i);
         CHECK(a->patch.ops[i].ratio == b->patch.ops[i].ratio, "op %d ratio", i);

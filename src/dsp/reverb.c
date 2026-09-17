@@ -284,6 +284,7 @@ Stereo verb_process(StereoVerb *v, const Frame *frame) {
     wet_l = svf_process_hp(&v->room_hp_l, wet_l, v->room_hp_g, VERB_ROOM_HP_K);
     wet_r = svf_process_hp(&v->room_hp_r, wet_r, v->room_hp_g, VERB_ROOM_HP_K);
     float dry = frame->mix * (1.0f - v->mix_s);
-    Stereo out = { dry + wet_l * v->mix_s * wet_duck, dry + wet_r * v->mix_s * wet_duck };
+    float side = frame->side * (1.0f - v->mix_s);
+    Stereo out = { dry + side + wet_l * v->mix_s * wet_duck, dry - side + wet_r * v->mix_s * wet_duck };
     return out;
 }

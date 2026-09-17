@@ -40,6 +40,9 @@ Session session_sanitize(Session s) {
     s.patch.glide_seconds = clampf(s.patch.glide_seconds, 0.0f, 30.0f);
     s.patch.field = clampf(s.patch.field, 0.0f, 1.0f);
     s.patch.curve = clampf(s.patch.curve, 0.0f, 1.0f);
+    s.patch.voices = s.patch.voices < 1 ? 1 : (s.patch.voices > POLY_MAX ? POLY_MAX : s.patch.voices);
+    s.patch.unison = s.patch.unison < 1 ? 1 : (s.patch.unison > UNISON_MAX ? UNISON_MAX : s.patch.unison);
+    s.patch.unison_detune = clampf(s.patch.unison_detune, 0.0f, UNISON_DETUNE_MAX);
     for (int i = 0; i < NUM_OPS; i++) {
         s.patch.ops[i].level = clampf(s.patch.ops[i].level, 0.0f, 1.0f);
         s.patch.ops[i].ratio = clampf(s.patch.ops[i].ratio, 0.01f, 64.0f);

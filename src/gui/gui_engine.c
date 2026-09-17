@@ -34,6 +34,19 @@ void pitch_store(PitchAtom *p, float hz) {
     atomic_store_explicit(&p->q16, (uint32_t)q, memory_order_relaxed);
 }
 
+void voices_store(App *a, const VoiceBank *b) {
+    pitch_store(&a->pitch, voice_bank_target_hz(b));
+    float hz[POLY_MAX];
+    int n = voice_bank_held_hz(b, hz);
+    uint32_t mask = 0;
+    for (int i = 0; i < n; i++) {
+        if (!(hz[i] > 0.0f)) continue;
+        int note = (int)roundf(69.0f + 12.0f * log2f(hz[i] / 440.0f));
+        mask |= 1u << (((note % 12) + 12) % 12);
+    }
+    atomic_store_explicit(&a->held_pcs, mask, memory_order_relaxed);
+}
+
 float pitch_load(const PitchAtom *p) {
     return (float)atomic_load_explicit(&((PitchAtom *)p)->q16,
                                        memory_order_relaxed)
@@ -87,7 +100,7 @@ CcTarget cc_target_from_name(const char *s) {
 
 typedef struct {
     App *app;
-    VoicePair voice;
+    VoiceBank voice;
     StereoVerb verb;
     Melody melody;
     Chandas chandas;
@@ -113,14 +126,14 @@ static float pole_k(float step_seconds, float tau_seconds) {
 static void engine_apply(AudioState *s, Event ev) {
     switch (ev.kind) {
     case EV_SET_PATCH:
-        voice_pair_set_patch(&s->voice, ev.u.patch);
-        verb_configure(&s->verb, voice_pair_patch(&s->voice),
-                       voice_pair_compiled(&s->voice));
+        voice_bank_set_patch(&s->voice, ev.u.patch);
+        verb_configure(&s->verb, voice_bank_patch(&s->voice),
+                       voice_bank_compiled(&s->voice));
         break;
     case EV_SET_VERB: verb_set_params(&s->verb, ev.u.verb); break;
     case EV_SET_MELODY:
         if (s->melody.params.enabled && !ev.u.melody.enabled)
-            voice_pair_note_off(&s->voice);
+            voice_bank_note_off_all(&s->voice);
         melody_set_params(&s->melody, ev.u.melody);
         break;
     case EV_SET_CHANDAS: chandas_set_params(&s->chandas, ev.u.chandas); break;
@@ -128,20 +141,21 @@ static void engine_apply(AudioState *s, Event ev) {
     case EV_SET_WARMTH: tape_set(&s->tape, ev.u.f); break;
     case EV_SET_TEMPO: chandas_set_tempo(&s->chandas, ev.u.f); break;
     case EV_GLIDE_TO:
-        voice_pair_glide_to_hz(&s->voice, ev.u.f);
-        voice_pair_set_drone_hz(&s->voice, ev.u.f);
+        voice_bank_glide_to_hz(&s->voice, ev.u.f);
+        voice_bank_set_drone_hz(&s->voice, ev.u.f);
         verb_set_drone_hz(&s->verb, ev.u.f);
         break;
-    case EV_NOTE_OFF: voice_pair_note_off(&s->voice); break;
-    case EV_BEND: voice_pair_set_bend_semitones(&s->voice, ev.u.f); break;
+    case EV_NOTE_OFF: voice_bank_note_off(&s->voice, ev.u.note.key); break;
+    case EV_BEND: voice_bank_set_bend_semitones(&s->voice, ev.u.f); break;
     case EV_NOTE_ON:
-        voice_pair_note_on(&s->voice, ev.u.note.hz, ev.u.note.velocity);
+        voice_bank_note_on(&s->voice, ev.u.note.key, ev.u.note.hz,
+                           ev.u.note.velocity);
         chandas_note_pulse(&s->chandas);
         break;
     case EV_SET_CHAIN: {
-        State next = voice_pair_state(&s->voice);
+        State next = voice_bank_state(&s->voice);
         next.chain = ev.u.chain;
-        voice_pair_set_state(&s->voice, next);
+        voice_bank_set_state(&s->voice, next);
         break;
     }
     case EV_ENGAGE:
@@ -225,10 +239,10 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         if (melody_samples_until_fire(&s->melody, &until) && until == 0) {
             float hz = melody_fire(&s->melody);
             if (!s->midi_driving) {
-                voice_pair_note_off(&s->voice);
+                voice_bank_note_off_all(&s->voice);
                 float vel =
-                    velocity_for_level(voice_pair_patch(&s->voice)->master_level);
-                voice_pair_note_on(&s->voice, hz, vel);
+                    velocity_for_level(voice_bank_patch(&s->voice)->master_level);
+                voice_bank_note_on(&s->voice, -1, hz, vel);
                 chandas_note_pulse(&s->chandas);
             }
         }
@@ -237,8 +251,8 @@ static void render(void *ud, float *data, size_t frames, int channels) {
             run = until;
         if (run < 1) run = 1;
         RenderCtx ctx = {s, data, done, channels, rec_armed,
-                         voice_pair_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
-        voice_pair_render_frames(&s->voice, run, emit_frame, &ctx);
+                         voice_bank_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
+        voice_bank_render_frames(&s->voice, run, emit_frame, &ctx);
         melody_advance(&s->melody, run);
         done += run;
     }
@@ -261,7 +275,7 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         atomic_store_explicit(&a->meter.frames, (uint32_t)frames,
                               memory_order_relaxed);
     }
-    pitch_store(&a->pitch, voice_pair_target_hz(&s->voice));
+    voices_store(a, &s->voice);
 }
 
 int gui_audio_start(App *a) {
@@ -272,11 +286,11 @@ int gui_audio_start(App *a) {
     AudioState *s = &g_as;
     memset(s, 0, sizeof *s);
     s->app = a;
-    voice_pair_init(&s->voice, a->sample_rate, a->shadow);
-    voice_pair_set_freq_hz(&s->voice, START_HZ);
+    voice_bank_init(&s->voice, a->sample_rate, a->shadow);
+    voice_bank_set_freq_hz(&s->voice, START_HZ);
     verb_init(&s->verb, a->sample_rate);
-    verb_configure(&s->verb, voice_pair_patch(&s->voice),
-                   voice_pair_compiled(&s->voice));
+    verb_configure(&s->verb, voice_bank_patch(&s->voice),
+                   voice_bank_compiled(&s->voice));
     verb_set_params(&s->verb, a->shadow_verb);
     melody_init(&s->melody, a->sample_rate, melody_params_default());
     chandas_init(&s->chandas, a->sample_rate);
@@ -291,7 +305,7 @@ void gui_audio_stop(App *a) {
     audio_out_stop(&a->audio);
     chandas_free(&g_as.chandas);
     verb_free(&g_as.verb);
-    voice_pair_free(&g_as.voice);
+    voice_bank_free(&g_as.voice);
 }
 
 /* ---------- MIDI ---------- */
@@ -310,18 +324,21 @@ static void on_midi(void *ud, const uint8_t msg[3]) {
     case 0x90:
         if (msg[2] > 0) {
             ev.kind = EV_NOTE_ON;
+            ev.u.note.key = msg[1];
             ev.u.note.hz = midi_to_hz(msg[1]);
             ev.u.note.velocity = (float)(msg[2] > 127 ? 127 : msg[2]) / 127.0f;
             EventRing_push(&a->midi_ev, ev);
             midi_note_press(&a->midi_note, msg[1]);
         } else {
             ev.kind = EV_NOTE_OFF;
+            ev.u.note.key = msg[1];
             EventRing_push(&a->midi_ev, ev);
             midi_note_release(&a->midi_note, msg[1]);
         }
         break;
     case 0x80:
         ev.kind = EV_NOTE_OFF;
+        ev.u.note.key = msg[1];
         EventRing_push(&a->midi_ev, ev);
         midi_note_release(&a->midi_note, msg[1]);
         break;

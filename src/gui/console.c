@@ -9,7 +9,7 @@
 #include "focus.h"
 
 /* widgets.c */
-extern float hint_chip(Ui *ui, P2 at, const char *text, bool lit);
+extern float hint_chip(Ui *ui, P2 at, const char *text, bool highlighted);
 
 #define TYPE_CPS 24.0f
 #define TYPE_JITTER 0.7f
@@ -221,15 +221,66 @@ void console_run_line(App *a, const char *line) {
     }
 }
 
-void console_tab_complete(App *a) {
-    if (!focus_console_active(a)) return;
+/* ---------- completion walk ---------- */
+
+/* the verbs the chip row offers for this line, in chip order */
+static int line_candidates(const char *text, const Verb **out) {
     Hint h;
-    hint_for(a->console_input.text, &h);
-    if (h.kind != H_COMPLETING || h.m_len == 0) return;
+    hint_for(text, &h);
+    if (h.kind == H_COMPLETING) {
+        for (int i = 0; i < h.m_len; i++) out[i] = h.m[i];
+        return h.m_len;
+    }
+    if (h.kind != H_ROSTER) return 0;
+    int n = verb_count();
+    if (n > MAX_VERBS) n = MAX_VERBS;
+    for (int i = 0; i < n; i++) out[i] = verb_at(i);
+    return n;
+}
+
+/* any edit to the line drops the highlight */
+static void line_sync(App *a) {
+    if (strcmp(a->line_seen, a->console_input.text) == 0) return;
+    snprintf(a->line_seen, sizeof a->line_seen, "%s", a->console_input.text);
+    a->line_lit = 0;
+}
+
+static void line_take(App *a, const Verb *v) {
     char text[256];
-    snprintf(text, sizeof text, "%s ", h.m[0]->name);
+    snprintf(text, sizeof text, v->nargs > 0 ? "%s " : "%s", v->name);
     set_input(a, text);
-    focus_console_take(a);
+    line_sync(a);
+}
+
+void console_tab(App *a) {
+    if (!focus_console_active(a)) return;
+    line_sync(a);
+    const Verb *m[MAX_VERBS];
+    int n = line_candidates(a->console_input.text, m);
+    if (n == 1 && a->console_input.len > 0) line_take(a, m[0]);
+    else if (n > 0) a->line_lit = a->line_lit % n + 1;
+}
+
+void console_enter(App *a) {
+    line_sync(a);
+    const Verb *m[MAX_VERBS];
+    int n = line_candidates(a->console_input.text, m);
+    if (a->line_lit > 0 && n > 0) {
+        line_take(a, m[(a->line_lit - 1) % n]);
+        return;
+    }
+    char line[256];
+    snprintf(line, sizeof line, "%s", a->console_input.text);
+    set_input(a, "");
+    line_sync(a);
+    if (line[0]) console_run_line(a, line);
+}
+
+bool console_escape(App *a) {
+    line_sync(a);
+    if (a->line_lit == 0) return false;
+    a->line_lit = 0;
+    return true;
 }
 
 /* Up and Down walk the lines that ran; walking off the newest end clears */
@@ -347,6 +398,7 @@ void draw_footer(App *a, Ui *ui, Rct r) {
         bool focused = ui->focus == fid;
         if (focused) walk_history(a, ui);
         ui_text_edit(ui, fid, &a->console_input);
+        line_sync(a);
         float row = text_row_height(small);
         float ty = roundf(cy - 0.5f * row);
         Rct saved = canvas_clip(c);
@@ -384,19 +436,11 @@ static void draw_hint(App *a, Ui *ui, FontId small, Rct row) {
     hint_for(a->console_input.text, &h);
     if (h.kind == H_ROSTER || h.kind == H_COMPLETING) {
         const Verb *rows[MAX_VERBS];
-        int n;
-        if (h.kind == H_COMPLETING) {
-            n = h.m_len;
-            for (int i = 0; i < n; i++) rows[i] = h.m[i];
-        } else {
-            n = verb_count();
-            if (n > MAX_VERBS) n = MAX_VERBS;
-            for (int i = 0; i < n; i++) rows[i] = verb_at(i);
-        }
+        int n = line_candidates(a->console_input.text, rows);
+        int lit = n > 0 && a->line_lit > 0 ? (a->line_lit - 1) % n : -1;
         float x = row.x0;
         for (int i = 0; i < n; i++) {
-            float w = hint_chip(ui, (P2){x, row.y0}, rows[i]->name,
-                                i == 0 && n > 1);
+            float w = hint_chip(ui, (P2){x, row.y0}, rows[i]->name, i == lit);
             x += w + GAP;
         }
         return;

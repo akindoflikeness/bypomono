@@ -281,6 +281,8 @@ typedef struct App {
     char console_typing[LOG_LINE_LEN];
     int console_revealed;
     float console_credit;
+    int line_lit;                /* highlighted completion + 1; 0 = none */
+    char line_seen[256];         /* the line line_lit was chosen against */
     uint32_t tips_told; /* bitmask by TipWhen */
     UiScroll log_scroll;
 
@@ -379,7 +381,11 @@ bool app_restore_state(App *a);
 /* console.c */
 void tell_new_tips(App *a);
 void console_run_line(App *a, const char *line);
-void console_tab_complete(App *a);
+/* Tab highlights and cycles, Enter takes the highlight or runs the line,
+   Escape backs out of the highlight (false when there was none) */
+void console_tab(App *a);
+void console_enter(App *a);
+bool console_escape(App *a);
 void draw_footer(App *a, Ui *ui, Rct r);
 void draw_console_drawer(App *a, Ui *ui, Rct footer);
 

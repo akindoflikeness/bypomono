@@ -63,7 +63,7 @@ static void handle_keys(App *a, Ui *ui) {
 
     if (ui->in.key_pressed[SDL_SCANCODE_TAB] && a->console_open
         && ui->focus == console_id)
-        console_tab_complete(a);
+        console_tab(a);
     presets_walk_keys(a, ui);
 
     if (ui->in.key_pressed[SDL_SCANCODE_ESCAPE]) {
@@ -76,6 +76,7 @@ static void handle_keys(App *a, Ui *ui) {
             a->preset_searching = false;
             a->have_selected = false;
             a->preset_armed = 0;
+        } else if (a->console_open && console_escape(a)) {
         } else if (a->console_open) {
             a->console_open = false;
             a->console_input.len = 0;
@@ -88,13 +89,8 @@ static void handle_keys(App *a, Ui *ui) {
     }
 
     if (a->console_open && ui->focus == console_id
-        && ui->in.key_pressed[SDL_SCANCODE_RETURN]) {
-        char line[256];
-        snprintf(line, sizeof line, "%s", a->console_input.text);
-        a->console_input.len = 0;
-        a->console_input.text[0] = '\0';
-        if (line[0]) console_run_line(a, line);
-    }
+        && ui->in.key_pressed[SDL_SCANCODE_RETURN])
+        console_enter(a);
 }
 
 void app_frame(App *a, Ui *ui) {

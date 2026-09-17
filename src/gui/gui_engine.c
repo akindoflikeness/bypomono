@@ -141,21 +141,21 @@ static void mod_tick(AudioState *s, size_t samples) {
     mod_advance(&s->mod, samples, chandas_tempo(&s->chandas));
     ModBase out;
     int g = mod_apply(&s->mod, &s->base, &out);
-    if (g & MOD_G_PATCH) voice_pair_set_patch(&s->voice, out.patch);
+    if (g & MOD_G_PATCH) voice_bank_set_patch(&s->voice, out.patch);
     if (g & MOD_G_VERB) verb_set_params(&s->verb, out.verb);
     if (g & MOD_G_CHANDAS) chandas_set_params(&s->chandas, out.chandas);
     if (g & MOD_G_MELODY) melody_set_params(&s->melody, out.melody);
     if (g & MOD_G_WARMTH) tape_set(&s->tape, out.warmth);
-    if (g & MOD_G_BEND) voice_pair_set_bend_semitones(&s->voice, out.bend);
+    if (g & MOD_G_BEND) voice_bank_set_bend_semitones(&s->voice, out.bend);
 }
 
 static void engine_apply(AudioState *s, Event ev) {
     switch (ev.kind) {
     case EV_SET_PATCH:
         s->base.patch = ev.u.patch;
-        voice_pair_set_patch(&s->voice, ev.u.patch);
-        verb_configure(&s->verb, voice_pair_patch(&s->voice),
-                       voice_pair_compiled(&s->voice));
+        voice_bank_set_patch(&s->voice, ev.u.patch);
+        verb_configure(&s->verb, voice_bank_patch(&s->voice),
+                       voice_bank_compiled(&s->voice));
         break;
     case EV_SET_VERB:
         s->base.verb = ev.u.verb;
@@ -186,10 +186,10 @@ static void engine_apply(AudioState *s, Event ev) {
         voice_bank_set_drone_hz(&s->voice, ev.u.f);
         verb_set_drone_hz(&s->verb, ev.u.f);
         break;
-    case EV_NOTE_OFF: voice_pair_note_off(&s->voice); break;
+    case EV_NOTE_OFF: voice_bank_note_off(&s->voice, ev.u.note.key); break;
     case EV_BEND:
         s->base.bend = ev.u.f;
-        voice_pair_set_bend_semitones(&s->voice, ev.u.f);
+        voice_bank_set_bend_semitones(&s->voice, ev.u.f);
         break;
     case EV_NOTE_ON:
         voice_bank_note_on(&s->voice, ev.u.note.key, ev.u.note.hz,

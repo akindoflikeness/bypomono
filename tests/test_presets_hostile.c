@@ -101,6 +101,12 @@ static void check_clamped(const Session *s, const char *what) {
           (double)s->verb.damp);
     CHECK(in_range(s->verb.haunt, 0.0f, 1.0f), "%s: haunt %g", what,
           (double)s->verb.haunt);
+    CHECK(s->patch.voices >= 1 && s->patch.voices <= POLY_MAX, "%s: voices %u",
+          what, s->patch.voices);
+    CHECK(s->patch.unison >= 1 && s->patch.unison <= UNISON_MAX,
+          "%s: unison %u", what, s->patch.unison);
+    CHECK(in_range(s->patch.unison_detune, 0.0f, UNISON_DETUNE_MAX),
+          "%s: unison_detune %g", what, (double)s->patch.unison_detune);
     CHECK(in_range(s->melody.rate_hz, 0.1f, 8.0f), "%s: melody rate %g", what,
           (double)s->melody.rate_hz);
     CHECK(s->melody.root_midi >= 24 && s->melody.root_midi <= 57,
@@ -129,6 +135,14 @@ static void check_clamped(const Session *s, const char *what) {
           "%s: tempo %g", what, (double)s->tempo_bpm);
     CHECK(in_range(s->warmth, MIN_WARMTH, MAX_WARMTH), "%s: warmth %g", what,
           (double)s->warmth);
+    CHECK(in_range(s->attack_s, 0.0f, ENV_TIME_MAX), "%s: attack %g", what,
+          (double)s->attack_s);
+    CHECK(in_range(s->decay_s, 0.0f, ENV_TIME_MAX), "%s: env decay %g", what,
+          (double)s->decay_s);
+    CHECK(in_range(s->sustain, 0.0f, 1.0f), "%s: sustain %g", what,
+          (double)s->sustain);
+    CHECK(in_range(s->release_s, ENV_RELEASE_MIN, ENV_TIME_MAX), "%s: release %g",
+          what, (double)s->release_s);
 }
 
 /* every numeric field, as the enclosing object and the key inside it */
@@ -140,6 +154,10 @@ static const NumField NUM_FIELDS[] = {
     {"", "", "drone_hz"},
     {"", "", "tempo_bpm"},
     {"", "", "warmth"},
+    {"", "", "attack_s"},
+    {"", "", "decay_s"},
+    {"", "", "sustain"},
+    {"", "", "release_s"},
     {"\"patch\": {", "}", "algorithm"},
     {"\"patch\": {", "}", "feedback"},
     {"\"patch\": {", "}", "index"},
@@ -148,6 +166,9 @@ static const NumField NUM_FIELDS[] = {
     {"\"patch\": {", "}", "glide_seconds"},
     {"\"patch\": {", "}", "field"},
     {"\"patch\": {", "}", "curve"},
+    {"\"patch\": {", "}", "voices"},
+    {"\"patch\": {", "}", "unison"},
+    {"\"patch\": {", "}", "unison_detune"},
     {"\"patch\": {\"ops\": [{", "}]}", "ratio"},
     {"\"patch\": {\"ops\": [{", "}]}", "detune_cents"},
     {"\"patch\": {\"ops\": [{", "}]}", "level"},

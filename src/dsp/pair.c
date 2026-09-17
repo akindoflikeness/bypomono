@@ -132,13 +132,34 @@ float voice_pair_target_hz(const VoicePair *p) {
     return voice_target_hz(&p->voices[pair_live(p)]);
 }
 
+void voice_pair_set_chain_now(VoicePair *p, Chain chain) {
+    for (int i = 0; i < 2; i++) voice_set_chain(&p->voices[i], chain);
+}
+
+void voice_pair_set_detune_cents(VoicePair *p, float cents) {
+    for (int i = 0; i < 2; i++) voice_set_detune_cents(&p->voices[i], cents);
+}
+
+void voice_pair_wake(VoicePair *p) {
+    for (int i = 0; i < 2; i++) voice_wake(&p->voices[i]);
+}
+
+bool voice_pair_silent(const VoicePair *p) {
+    for (int i = 0; i < 2; i++) {
+        const Voice *v = &p->voices[i];
+        if (v->chain.amp.kind != AMP_ENVELOPE || envelope_active(&v->env)) return false;
+    }
+    return true;
+}
+
 static bool chain_eq(const Chain *a, const Chain *b) {
     if (a->amp.kind != b->amp.kind) return false;
     if (a->amp.kind == AMP_ENVELOPE) {
         return a->amp.env.attack_s == b->amp.env.attack_s &&
                a->amp.env.decay_s == b->amp.env.decay_s &&
                a->amp.env.release_s == b->amp.env.release_s &&
-               a->amp.env.curve == b->amp.env.curve;
+               a->amp.env.curve == b->amp.env.curve &&
+               a->amp.env.sustain == b->amp.env.sustain;
     }
     return true;
 }
@@ -178,6 +199,7 @@ static void pair_b_emit(void *userdata, size_t n, const Frame *b) {
     f.master = a->master * ga + b->master * gb;
     f.field = a->field * ga + b->field * gb;
     f.base_hz = a->base_hz * ga + b->base_hz * gb;
+    f.side = a->side * ga + b->side * gb;
     c->emit(c->userdata, c->done + c->k, &f);
     c->k += 1;
     if (*c->step != 0.0f) {

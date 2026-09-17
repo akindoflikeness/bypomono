@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include <SDL2/SDL_scancode.h>
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
@@ -176,6 +177,76 @@ bool fader_int(Ui *ui, UiId id, Rct r, const char *label, int *v, int lo,
         }
     }
     return false;
+}
+
+/* ---------- knobs ---------- */
+
+#define KNOB_A0 (0.75f * PI_F)
+#define KNOB_SWEEP (1.5f * PI_F)
+#define KNOB_TEXT 11.0f
+
+float env_time_at(float t, float lo) {
+    float floor = fmaxf(ENV_TIME_FLOOR, lo);
+    t = clamp01(t);
+    if (t <= 0.0f) return lo;
+    return floor * powf(ENV_TIME_MAX / floor, t);
+}
+
+float env_time_pos(float v, float lo) {
+    float floor = fmaxf(ENV_TIME_FLOOR, lo);
+    if (!(v > floor)) return 0.0f;
+    return clamp01(logf(v / floor) / logf(ENV_TIME_MAX / floor));
+}
+
+static P2 on_circle(P2 c, float r, float a) {
+    return (P2){c.x + cosf(a) * r, c.y + sinf(a) * r};
+}
+
+FaderAct knob_track(Ui *ui, UiId id, Rct r, const char *label,
+                    const char *value, float t) {
+    Resp resp = ui_interact_drag(ui, id, r, 0.0f);
+    Canvas *c = ui->canvas;
+    t = clamp01(t);
+    FontId lf = ui_font(KNOB_TEXT);
+    FontId vf = ui_font(KNOB_TEXT);
+    float lh = text_row_height(lf), vh = text_row_height(vf);
+    float radius = floorf(fminf(rct_w(r) * 0.5f - 4.0f,
+                                (rct_h(r) - lh - vh - 8.0f) * 0.5f));
+    if (radius < 6.0f) radius = 6.0f;
+    P2 ce = {roundf(rct_center(r).x), roundf(r.y0 + lh + 4.0f + radius)};
+
+    text_draw(c, lf, (P2){ce.x, r.y0}, ALIGN_CENTER_TOP, label, PAPER, 0.0f);
+    /* the track is dotted so the value arc reads as the solid part */
+    int dots = (int)(KNOB_SWEEP * radius / 4.0f);
+    for (int i = 0; i <= dots; i++) {
+        P2 p = on_circle(ce, radius, KNOB_A0 + KNOB_SWEEP * (float)i / (float)dots);
+        draw_dot(c, (P2){roundf(p.x), roundf(p.y)}, PAPER);
+    }
+    if (t > 0.001f) {
+        P2 pts[64];
+        int n = 2 + (int)(KNOB_SWEEP * t * radius / 3.0f);
+        if (n > 64) n = 64;
+        for (int i = 0; i < n; i++)
+            pts[i] = on_circle(ce, radius, KNOB_A0 + KNOB_SWEEP * t * (float)i / (float)(n - 1));
+        draw_polyline(c, pts, (size_t)n, 2.0f, PAPER);
+    }
+    float a = KNOB_A0 + KNOB_SWEEP * t;
+    draw_line(c, on_circle(ce, radius * 0.3f, a), on_circle(ce, radius - 4.0f, a), 2.0f, PAPER);
+    if (resp.hovered) draw_circle_stroke(c, ce, radius + 3.0f, 1.0f, PAPER);
+    text_draw(c, vf, (P2){ce.x, r.y1}, ALIGN_CENTER_BOTTOM, value, PAPER, 0.0f);
+
+    FaderAct act = {FADER_NONE, t};
+    if (resp.hovered) ui->cursor = CURSOR_RESIZE_V;
+    if (resp.double_clicked && resp.hovered) {
+        act.kind = FADER_RESET;
+    } else if (resp.dragged && resp.drag_delta.y != 0.0f) {
+        bool fine = ui->in.key_down[SDL_SCANCODE_LSHIFT]
+                    || ui->in.key_down[SDL_SCANCODE_RSHIFT];
+        act.kind = FADER_SET;
+        act.t = clamp01(t - resp.drag_delta.y / KNOB_DRAG_PX
+                                * (fine ? KNOB_FINE : 1.0f));
+    }
+    return act;
 }
 
 /* ---------- scope furniture ---------- */

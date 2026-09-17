@@ -62,6 +62,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     breath_init(&v->breath, sample_rate, patch.ratio_mode);
     v->field_pitch = 1.0f;
     v->bend = 1.0f;
+    v->detune = 1.0f;
     v->chain = chain_default();
     envelope_init(&v->env, sample_rate);
     v->master_pos = clampf(patch.master_level, 0.0f, 1.0f);
@@ -108,6 +109,15 @@ bool voice_note_sounding(const Voice *v) {
 
 void voice_set_bend_semitones(Voice *v, float semitones) {
     v->bend = exp2f(semitones / 12.0f);
+}
+
+void voice_set_detune_cents(Voice *v, float cents) {
+    v->detune = exp2f(cents / 1200.0f);
+}
+
+void voice_wake(Voice *v) {
+    rip_line_clear(&v->rip_line);
+    v->rip_sig = 0.0f;
 }
 
 float voice_target_hz(const Voice *v) {
@@ -266,7 +276,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
             }
 
             float phase = v->phase[op]
-                + v->freq * v->bend * v->field_pitch * freq_mult[op] / v->sample_rate;
+                + v->freq * v->bend * v->detune * v->field_pitch * freq_mult[op] / v->sample_rate;
             v->phase[op] = fract_pos(phase);
         }
 
@@ -295,6 +305,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         frame.master = field.gain;
         frame.field = field.amount;
         frame.base_hz = v->freq;
+        frame.side = 0.0f;
         emit(userdata, n, &frame);
     }
 }

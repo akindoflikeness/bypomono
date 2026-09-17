@@ -38,7 +38,9 @@ enum {
     KEY_RIGHT = 79,
     KEY_LEFT = 80,
     KEY_DOWN = 81,
-    KEY_UP = 82
+    KEY_UP = 82,
+    KEY_LSHIFT = 225,
+    KEY_RSHIFT = 229
 };
 
 /* the part of the editor state a backend reads and writes */

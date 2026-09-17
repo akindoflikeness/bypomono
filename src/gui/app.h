@@ -197,8 +197,9 @@ typedef enum { DREAD_NORMAL, DREAD_LOW, DREAD_CRITICAL } Dread;
 typedef enum {
     CC_NONE = 0, CC_INDEX, CC_RIP, CC_FB, CC_FIELD, CC_CURVE, CC_RELEASE,
     CC_GLIDE, CC_DRONEHZ, CC_MIX, CC_GHOST, CC_DECAY, CC_DAMP, CC_HAUNT,
-    CC_WARMTH
+    CC_WARMTH, CC_ATTACK, CC_ENVDECAY, CC_SUSTAIN
 } CcTarget;
+#define CC_LAST CC_SUSTAIN
 const char *cc_target_name(CcTarget t);
 CcTarget cc_target_from_name(const char *s);
 
@@ -218,7 +219,7 @@ typedef struct App {
     MelodyParams shadow_melody;
     ChandasParams shadow_chandas;
     float shadow_warmth;
-    float shadow_release_s;
+    float shadow_attack_s, shadow_decay_s, shadow_sustain, shadow_release_s;
     float tempo_bpm;
     float drone_hz;
     ModBank mods;
@@ -237,6 +238,10 @@ typedef struct App {
     RecRing rec;
     MidiNoteAtom midi_note;
     PitchAtom pitch;
+    _Atomic uint32_t held_pcs; /* pitch classes of the held notes, bit per class */
+    /* the newest note's envelope: stage << 30 | milliseconds into it, and
+       its level in q16 */
+    _Atomic uint32_t env_clock, env_level_q16;
     CcState cc;
     AudioMeter meter;
     LfoMeter lfo_meter;
@@ -342,6 +347,8 @@ void gui_sync_chain(App *a);
 bool midi_driving(const App *a);
 int midi_port_names(char names[][128], int max);
 bool gui_set_midi_port(App *a, const char *name); /* NULL = close */
+/* audio thread: newest pitch and held pitch classes for the keyboard */
+void voices_store(App *a, const VoiceBank *b);
 void gui_run_record(App *a, const char *args);    /* console verb */
 void gui_stop_record(App *a);
 void gui_run_bind(App *a, int cc, CcTarget target);
@@ -360,6 +367,18 @@ bool fader_log(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
                float hi, const char *suffix);
 bool fader_int(Ui *ui, UiId id, Rct r, const char *label, int *v, int lo,
                int hi);
+/* A rotary knob: label above, value below, the arc from 7:30 round to 4:30.
+   Vertical drag sweeps the range in KNOB_DRAG_PX, Shift for a tenth of
+   that; double-click resets. FADER_SET carries the new position. */
+#define KNOB_DRAG_PX 150.0f
+#define KNOB_FINE 0.1f
+FaderAct knob_track(Ui *ui, UiId id, Rct r, const char *label,
+                    const char *value, float t);
+/* envelope times: `lo` at the bottom of the sweep, then equal ratios from
+   ENV_TIME_FLOOR (or lo, if higher) up to ENV_TIME_MAX */
+#define ENV_TIME_FLOOR 0.001f
+float env_time_at(float t, float lo);
+float env_time_pos(float v, float lo);
 void hard_rect(Canvas *c, Rct r, float width);
 void bubble_chain(Canvas *c, Ui *ui, P2 a, P2 b, bool active, float index,
                   double time);

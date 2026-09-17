@@ -81,6 +81,10 @@ Compiled compile(AlgorithmId id);
 /* ---------- patch ---------- */
 
 #define HEADROOM_DB (-14.0f)
+#define POLY_MAX 4
+#define UNISON_MAX 2
+#define UNISON_DETUNE_MAX 50.0f
+#define UNISON_DETUNE_DEFAULT 10.0f
 
 float midi_to_hz(uint8_t note);
 float index_response(uint8_t depth, float index);
@@ -115,6 +119,9 @@ typedef struct {
     float glide_seconds;
     float field;
     float curve;
+    uint8_t voices;      /* notes at once: 1 = mono, up to POLY_MAX */
+    uint8_t unison;      /* voices per note: 1 or UNISON_MAX */
+    float unison_detune; /* cents between the two unison voices */
 } Patch;
 
 Patch patch_init(AlgorithmId algorithm, RatioMode ratio_mode);
@@ -123,8 +130,12 @@ Patch patch_init(AlgorithmId algorithm, RatioMode ratio_mode);
 
 typedef struct {
     float attack_s, decay_s, release_s, curve;
+    float sustain; /* fraction of the velocity-derived sustain level */
 } EnvParams;
-EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5 */
+EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5, 1.0 */
+
+#define ENV_TIME_MAX 8.0f
+#define ENV_RELEASE_MIN 0.05f
 
 #define ENV_FLOOR 1e-4f
 #define VELOCITY_CEILING 0.8f
@@ -207,6 +218,7 @@ typedef struct {
     float master;
     float field;
     float base_hz;
+    float side; /* dry mix difference: left gets mix + side, right mix - side */
 } Frame;
 
 typedef void (*FrameEmit)(void *userdata, size_t n, const Frame *frame);
@@ -238,6 +250,7 @@ typedef struct {
     Breath breath;
     float field_smooth, curve_smooth, field_amount, field_pitch;
     float bend;
+    float detune; /* frequency ratio from the unison spread */
     Chain chain;
     Envelope env;
     float master_pos;
@@ -252,6 +265,9 @@ void voice_set_chain(Voice *v, Chain chain);
 void voice_note_on(Voice *v, float hz, float velocity);
 bool voice_note_sounding(const Voice *v);
 void voice_set_bend_semitones(Voice *v, float semitones);
+void voice_set_detune_cents(Voice *v, float cents);
+/* clears the rip line's memory before a silent voice takes a new note */
+void voice_wake(Voice *v);
 float voice_target_hz(const Voice *v);
 void voice_glide_to_hz(Voice *v, float hz);
 void voice_set_op_enabled(Voice *v, int op, bool on);
@@ -291,6 +307,59 @@ void voice_pair_set_bend_semitones(VoicePair *p, float semitones);
 void voice_pair_note_off(VoicePair *p);
 float voice_pair_target_hz(const VoicePair *p);
 void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *userdata);
+void voice_pair_set_chain_now(VoicePair *p, Chain chain); /* no crossfade */
+void voice_pair_set_detune_cents(VoicePair *p, float cents);
+void voice_pair_wake(VoicePair *p);
+/* both voices are note-driven and their envelopes have finished */
+bool voice_pair_silent(const VoicePair *p);
+
+/* ---------- bank ---------- */
+
+#define BANK_PAIRS (POLY_MAX * UNISON_MAX)
+#define BANK_CHUNK 128
+#define UNISON_WIDTH 0.5f
+
+/* Up to POLY_MAX notes, each played by UNISON_MAX crossfading pairs.
+   Slot = note * UNISON_MAX + copy. The drone always plays on note 0. */
+typedef struct {
+    VoicePair pairs[BANK_PAIRS];
+    float gain[BANK_PAIRS];
+    int key[POLY_MAX]; /* -1 = no key (sequencer or drone) */
+    bool held[POLY_MAX];
+    uint32_t stamp[POLY_MAX];
+    uint32_t clock;
+    int newest;
+    int poly; /* note slots reachable under the current patch and chain */
+    float spread, step;
+    Frame scratch[BANK_PAIRS][BANK_CHUNK];
+} VoiceBank;
+
+void voice_bank_init(VoiceBank *b, float sample_rate, Patch patch);
+void voice_bank_free(VoiceBank *b);
+bool voice_bank_crossing(const VoiceBank *b);
+State voice_bank_state(const VoiceBank *b);
+void voice_bank_set_state(VoiceBank *b, State next);
+void voice_bank_set_patch(VoiceBank *b, Patch patch);
+void voice_bank_set_chain_now(VoiceBank *b, Chain chain);
+const Patch *voice_bank_patch(const VoiceBank *b);
+const Compiled *voice_bank_compiled(const VoiceBank *b);
+const Chain *voice_bank_chain(const VoiceBank *b);
+int voice_bank_poly(const VoiceBank *b);
+void voice_bank_set_freq_hz(VoiceBank *b, float hz);
+void voice_bank_set_drone_hz(VoiceBank *b, float hz);
+void voice_bank_glide_to_hz(VoiceBank *b, float hz); /* the drone, note 0 */
+void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity);
+/* mono releases whatever sounds; poly releases the note on `key`, or every
+   held note for key -1 */
+void voice_bank_note_off(VoiceBank *b, int key);
+void voice_bank_note_off_all(VoiceBank *b);
+bool voice_bank_note_sounding(const VoiceBank *b);
+void voice_bank_set_bend_semitones(VoiceBank *b, float semitones);
+float voice_bank_target_hz(const VoiceBank *b); /* the newest note */
+const Envelope *voice_bank_newest_env(const VoiceBank *b);
+/* target hz of each held note (the drone counts as held); returns count */
+int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]);
+void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *userdata);
 
 /* ---------- shared filter/delay primitives ---------- */
 
@@ -757,7 +826,9 @@ typedef struct {
     ChandasParams chandas;
     float tempo_bpm;
     float warmth;
-    float release_s; /* Chain.amp.env.release_s, which lives outside Patch */
+    /* the note envelope (Chain.amp.env), which lives outside Patch; its
+       curve is Patch.curve */
+    float attack_s, decay_s, sustain, release_s;
     bool drone;
     ModBank mods;
 } Session;

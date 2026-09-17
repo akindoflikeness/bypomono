@@ -180,6 +180,8 @@ static void x_key(Gui *g, XKeyEvent *ev, bool down) {
     case XK_Right: case XK_KP_Right: sc = KEY_RIGHT; break;
     case XK_Up: case XK_KP_Up: sc = KEY_UP; break;
     case XK_Down: case XK_KP_Down: sc = KEY_DOWN; break;
+    case XK_Shift_L: sc = KEY_LSHIFT; break;
+    case XK_Shift_R: sc = KEY_RSHIFT; break;
     default: break;
     }
     if (sc >= 0) gui_in_key(g, sc, down);

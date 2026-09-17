@@ -14,6 +14,7 @@ static Frame impulse_frame(float v) {
     f.master = 1.0f;
     f.field = 0.0f;
     f.base_hz = 50.0f;
+    f.side = 0.0f;
     return f;
 }
 

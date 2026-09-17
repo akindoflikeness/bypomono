@@ -349,7 +349,7 @@ static int parse_cc_word(const char *w) {
 
 static void bindable_list(char *out, size_t cap) {
     out[0] = '\0';
-    for (int t = CC_INDEX; t <= CC_WARMTH; t++)
+    for (int t = CC_INDEX; t <= CC_LAST; t++)
         scat(out, cap, "%s%s", t == CC_INDEX ? "" : " ",
              cc_target_name((CcTarget)t));
 }

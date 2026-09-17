@@ -348,7 +348,8 @@ static const char *const OP_KEYS[] = {"enabled", "ratio", "detune_cents",
                                       "level"};
 static const char *const PATCH_KEYS[] = {
     "algorithm", "ratio_mode", "ops",   "feedback", "index",
-    "rip",       "master_level", "glide_seconds", "field", "curve"};
+    "rip",       "master_level", "glide_seconds", "field", "curve",
+    "voices",    "unison",       "unison_detune"};
 /* rt60 is the old name for decay */
 static const char *const VERB_KEYS[] = {"mix",   "ghost", "decay",
                                         "damp",  "haunt", "rt60"};
@@ -428,7 +429,7 @@ static void parse_patch(Js *j, Patch *p) {
     char key[64];
     int r;
     while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, PATCH_KEYS, 10);
+        int k = js_key(key, PATCH_KEYS, 13);
         if (k >= 0 && js_dup(j, &seen, k)) return;
         switch (k) {
         case 0: {
@@ -460,6 +461,9 @@ static void parse_patch(Js *j, Patch *p) {
         case 7: p->glide_seconds = js_f32(j, p->glide_seconds); break;
         case 8: p->field = js_f32(j, p->field); break;
         case 9: p->curve = js_f32(j, p->curve); break;
+        case 10: p->voices = js_u8(j, p->voices); break;
+        case 11: p->unison = js_u8(j, p->unison); break;
+        case 12: p->unison_detune = js_f32(j, p->unison_detune); break;
         default: js_skip(j); break;
         }
         if (j->err) return;
@@ -489,12 +493,6 @@ static void parse_verb(Js *j, VerbParams *v) {
         }
         if (j->err) return;
     }
-}
-
-static uint8_t js_u8(Js *j, uint8_t dflt) {
-    double d;
-    if (!js_uint(j, 255.0, &d)) return dflt;
-    return (uint8_t)d;
 }
 
 static void parse_melody(Js *j, MelodyParams *m) {
@@ -917,7 +915,10 @@ char *session_to_json(const Session *s) {
     sb_key_f(&b, "    ", "master_level", s->patch.master_level, true);
     sb_key_f(&b, "    ", "glide_seconds", s->patch.glide_seconds, true);
     sb_key_f(&b, "    ", "field", s->patch.field, true);
-    sb_key_f(&b, "    ", "curve", s->patch.curve, false);
+    sb_key_f(&b, "    ", "curve", s->patch.curve, true);
+    sb_key_u(&b, "    ", "voices", s->patch.voices, true);
+    sb_key_u(&b, "    ", "unison", s->patch.unison, true);
+    sb_key_f(&b, "    ", "unison_detune", s->patch.unison_detune, false);
     sb_put(&b, "  },\n");
 
     sb_put(&b, "  \"verb\": {\n");
@@ -962,6 +963,9 @@ char *session_to_json(const Session *s) {
 
     sb_key_f(&b, "  ", "tempo_bpm", s->tempo_bpm, true);
     sb_key_f(&b, "  ", "warmth", s->warmth, true);
+    sb_key_f(&b, "  ", "attack_s", s->attack_s, true);
+    sb_key_f(&b, "  ", "decay_s", s->decay_s, true);
+    sb_key_f(&b, "  ", "sustain", s->sustain, true);
     sb_key_f(&b, "  ", "release_s", s->release_s, true);
     sb_key_b(&b, "  ", "drone", s->drone, false);
     sb_put(&b, "}");

@@ -235,7 +235,10 @@ void app_init_defaults(App *a) {
     a->shadow_melody = s.melody;
     a->shadow_chandas = s.chandas;
     a->shadow_warmth = s.warmth;
-    a->shadow_release_s = env_params_default().release_s;
+    a->shadow_attack_s = s.attack_s;
+    a->shadow_decay_s = s.decay_s;
+    a->shadow_sustain = s.sustain;
+    a->shadow_release_s = s.release_s;
     a->tempo_bpm = s.tempo_bpm;
     a->drone_hz = s.drone_hz;
     a->chain = chain_default();

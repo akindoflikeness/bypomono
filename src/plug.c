@@ -46,6 +46,13 @@ const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_SH_RANGE] = {"range", "melody", 1, 13, 8, K_STEP},
     [P_SH_RATE] = {"rate hz", "melody", 0.1, 8, 1.618034, K_FLOAT},
     [P_WARMTH] = {"warmth", "", 0, 1, 0.5, K_FLOAT},
+    [P_POLY] = {"poly", "voices", 0, 1, 0, K_ONOFF},
+    [P_UNISON] = {"unison", "voices", 0, 1, 0, K_ONOFF},
+    [P_DETUNE] = {"detune ct", "voices", 0, UNISON_DETUNE_MAX,
+                  UNISON_DETUNE_DEFAULT, K_FLOAT},
+    [P_ATTACK] = {"attack s", "envelope", 0, ENV_TIME_MAX, 0.008, K_FLOAT},
+    [P_ENV_DECAY] = {"decay s", "envelope", 0, ENV_TIME_MAX, 2, K_FLOAT},
+    [P_SUSTAIN] = {"sustain", "envelope", 0, 1, 1, K_FLOAT},
 };
 
 double plug_getv(const Plug *p, int id) {
@@ -88,6 +95,9 @@ static Patch patch_of_vals(const Plug *p) {
     patch.curve = (float)getv(p, P_CURVE);
     for (int i = 0; i < NUM_OPS; i++)
         patch.ops[i].enabled = getv(p, P_OP1 + i) > 0.5;
+    patch.voices = getv(p, P_POLY) > 0.5 ? POLY_MAX : 1;
+    patch.unison = getv(p, P_UNISON) > 0.5 ? UNISON_MAX : 1;
+    patch.unison_detune = (float)getv(p, P_DETUNE);
     return patch;
 }
 
@@ -98,6 +108,9 @@ static Chain chain_of_vals(const Plug *p) {
     } else {
         want.amp.kind = AMP_ENVELOPE;
         want.amp.env = env_params_default();
+        want.amp.env.attack_s = (float)getv(p, P_ATTACK);
+        want.amp.env.decay_s = (float)getv(p, P_ENV_DECAY);
+        want.amp.env.sustain = (float)getv(p, P_SUSTAIN);
         want.amp.env.curve = (float)getv(p, P_CURVE);
         want.amp.env.release_s = (float)getv(p, P_RELEASE);
     }
@@ -107,9 +120,9 @@ static Chain chain_of_vals(const Plug *p) {
 /* audio thread: push the atomics into the engine */
 static void apply_vals(Plug *p) {
     if (!p->engine_alive) return;
-    voice_pair_set_patch(&p->voice, patch_of_vals(p));
-    verb_configure(&p->verb, voice_pair_patch(&p->voice),
-                   voice_pair_compiled(&p->voice));
+    voice_bank_set_patch(&p->voice, patch_of_vals(p));
+    verb_configure(&p->verb, voice_bank_patch(&p->voice),
+                   voice_bank_compiled(&p->voice));
     VerbParams vp = {(float)getv(p, P_MIX), (float)getv(p, P_GHOST),
                      (float)getv(p, P_DECAY), (float)getv(p, P_DAMP),
                      (float)getv(p, P_HAUNT)};
@@ -135,7 +148,7 @@ static void apply_vals(Plug *p) {
     mp.root_midi = (uint8_t)plug_getv_int(p, P_SH_ROOT);
     mp.range_degrees = (uint8_t)plug_getv_int(p, P_SH_RANGE);
     mp.rate_hz = (float)getv(p, P_SH_RATE);
-    if (was_enabled && !mp.enabled) voice_pair_note_off(&p->voice);
+    if (was_enabled && !mp.enabled) voice_bank_note_off_all(&p->voice);
     melody_set_params(&p->melody, mp);
     tape_set(&p->tape, (float)getv(p, P_WARMTH));
     p->base.patch = *voice_pair_patch(&p->voice);
@@ -146,16 +159,16 @@ static void apply_vals(Plug *p) {
 
     /* polite in the DAW: silent until notes unless DRONE is thrown */
     p->engaged = getv(p, P_DRONE) > 0.5;
-    State st = voice_pair_state(&p->voice);
+    State st = voice_bank_state(&p->voice);
     st.chain = chain_of_vals(p);
-    voice_pair_set_state(&p->voice, st);
+    voice_bank_set_state(&p->voice, st);
     /* glide only when the hz itself moved: glide_to_hz retriggers the
        breath gesture and overrides a sounding note's pitch */
     float hz = (float)getv(p, P_DRONE_HZ);
     if (hz != p->applied_drone_hz) {
         p->applied_drone_hz = hz;
-        voice_pair_glide_to_hz(&p->voice, hz);
-        voice_pair_set_drone_hz(&p->voice, hz);
+        voice_bank_glide_to_hz(&p->voice, hz);
+        voice_bank_set_drone_hz(&p->voice, hz);
         verb_set_drone_hz(&p->verb, hz);
     }
     atomic_store_explicit(&p->dirty, false, memory_order_relaxed);
@@ -191,6 +204,9 @@ Session plug_session_of_vals(const Plug *p) {
     s.chandas.dimension = (float)getv(p, P_CH_DIM);
     s.chandas.tail = (float)getv(p, P_CH_TAIL);
     s.warmth = (float)getv(p, P_WARMTH);
+    s.attack_s = (float)getv(p, P_ATTACK);
+    s.decay_s = (float)getv(p, P_ENV_DECAY);
+    s.sustain = (float)getv(p, P_SUSTAIN);
     s.release_s = (float)getv(p, P_RELEASE);
     s.drone = getv(p, P_DRONE) > 0.5;
     return s;
@@ -211,6 +227,9 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_LEVEL, s->patch.master_level);
     for (int i = 0; i < NUM_OPS; i++)
         setv(p, P_OP1 + i, s->patch.ops[i].enabled ? 1 : 0);
+    setv(p, P_POLY, s->patch.voices > 1 ? 1 : 0);
+    setv(p, P_UNISON, s->patch.unison > 1 ? 1 : 0);
+    setv(p, P_DETUNE, s->patch.unison_detune);
     setv(p, P_MIX, s->verb.mix);
     setv(p, P_GHOST, s->verb.ghost);
     setv(p, P_DECAY, s->verb.decay);
@@ -235,6 +254,9 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_SH_RANGE, (double)s->melody.range_degrees);
     setv(p, P_SH_RATE, s->melody.rate_hz);
     setv(p, P_WARMTH, s->warmth);
+    setv(p, P_ATTACK, s->attack_s);
+    setv(p, P_ENV_DECAY, s->decay_s);
+    setv(p, P_SUSTAIN, s->sustain);
     setv(p, P_RELEASE, s->release_s);
     setv(p, P_DRONE, s->drone ? 1 : 0);
     atomic_store_explicit(&p->dirty, true, memory_order_relaxed);
@@ -257,6 +279,9 @@ static void mirror_patch_vals(Plug *p, const Patch *patch) {
     setv(p, P_LEVEL, patch->master_level);
     for (int i = 0; i < NUM_OPS; i++)
         setv(p, P_OP1 + i, patch->ops[i].enabled ? 1 : 0);
+    setv(p, P_POLY, patch->voices > 1 ? 1 : 0);
+    setv(p, P_UNISON, patch->unison > 1 ? 1 : 0);
+    setv(p, P_DETUNE, patch->unison_detune);
 }
 
 static void apply_gui_event(Plug *p, Event ev) {
@@ -284,7 +309,7 @@ static void apply_gui_event(Plug *p, Event ev) {
     case EV_SET_MELODY:
         p->base.melody = ev.u.melody;
         if (p->melody.params.enabled && !ev.u.melody.enabled)
-            voice_pair_note_off(&p->voice);
+            voice_bank_note_off_all(&p->voice);
         melody_set_params(&p->melody, ev.u.melody);
         setv(p, P_SH_ON, ev.u.melody.enabled ? 1 : 0);
         setv(p, P_SH_SRC, ev.u.melody.source == HOLD_XORSHIFT ? 1 : 0);
@@ -316,8 +341,8 @@ static void apply_gui_event(Plug *p, Event ev) {
     case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
     case EV_SET_TEMPO: chandas_set_tempo(&p->chandas, ev.u.f); break;
     case EV_GLIDE_TO:
-        voice_pair_glide_to_hz(&p->voice, ev.u.f);
-        voice_pair_set_drone_hz(&p->voice, ev.u.f);
+        voice_bank_glide_to_hz(&p->voice, ev.u.f);
+        voice_bank_set_drone_hz(&p->voice, ev.u.f);
         verb_set_drone_hz(&p->verb, ev.u.f);
         p->applied_drone_hz = ev.u.f;
         setv(p, P_DRONE_HZ, ev.u.f);
@@ -328,15 +353,19 @@ static void apply_gui_event(Plug *p, Event ev) {
         voice_pair_set_bend_semitones(&p->voice, ev.u.f);
         break;
     case EV_NOTE_ON:
-        voice_pair_note_on(&p->voice, ev.u.note.hz, ev.u.note.velocity);
+        voice_bank_note_on(&p->voice, ev.u.note.key, ev.u.note.hz,
+                           ev.u.note.velocity);
         chandas_note_pulse(&p->chandas);
         mod_note_on(&p->mod);
         break;
     case EV_SET_CHAIN: {
-        State next = voice_pair_state(&p->voice);
+        State next = voice_bank_state(&p->voice);
         next.chain = ev.u.chain;
-        voice_pair_set_state(&p->voice, next);
+        voice_bank_set_state(&p->voice, next);
         if (ev.u.chain.amp.kind == AMP_ENVELOPE) {
+            setv(p, P_ATTACK, ev.u.chain.amp.env.attack_s);
+            setv(p, P_ENV_DECAY, ev.u.chain.amp.env.decay_s);
+            setv(p, P_SUSTAIN, ev.u.chain.amp.env.sustain);
             setv(p, P_CURVE, ev.u.chain.amp.env.curve);
             setv(p, P_RELEASE, ev.u.chain.amp.env.release_s);
         }
@@ -369,7 +398,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     Stereo w = verb_process(&p->verb, frame);
     w = chandas_process(&p->chandas, w);
     w = tape_process(&p->tape, w);
-    bool notes_live = voice_pair_chain(&p->voice)->amp.kind == AMP_ENVELOPE;
+    bool notes_live = voice_bank_chain(&p->voice)->amp.kind == AMP_ENVELOPE;
     float g = engage_gate_next(&p->gate, p->engaged || notes_live);
     float l = soft_clip(w.l * g), r = soft_clip(w.r * g);
     e->l[e->base + n] = l;
@@ -417,10 +446,10 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
         size_t until;
         if (melody_samples_until_fire(&p->melody, &until) && until == 0) {
             float hz = melody_fire(&p->melody);
-            voice_pair_note_off(&p->voice);
+            voice_bank_note_off_all(&p->voice);
             float vel =
-                velocity_for_level(voice_pair_patch(&p->voice)->master_level);
-            voice_pair_note_on(&p->voice, hz, vel);
+                velocity_for_level(voice_bank_patch(&p->voice)->master_level);
+            voice_bank_note_on(&p->voice, -1, hz, vel);
             chandas_note_pulse(&p->chandas);
             mod_note_on(&p->mod);
         }
@@ -432,7 +461,7 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
         if (run < 1) run = 1;
         if (modulating) mod_tick(p, run);
         Emit e = {p, gapp, l, r, base + done};
-        voice_pair_render_frames(&p->voice, run, emit_frame, &e);
+        voice_bank_render_frames(&p->voice, run, emit_frame, &e);
         melody_advance(&p->melody, run);
         done += run;
     }
@@ -443,16 +472,20 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
     switch (hdr->type) {
     case CLAP_EVENT_NOTE_ON: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
-        voice_pair_note_on(&p->voice, midi_to_hz((uint8_t)ev->key),
+        if (ev->key < 0 || ev->key > 127) break;
+        voice_bank_note_on(&p->voice, ev->key, midi_to_hz((uint8_t)ev->key),
                            (float)ev->velocity);
         chandas_note_pulse(&p->chandas);
         mod_note_on(&p->mod);
         break;
     }
     case CLAP_EVENT_NOTE_OFF:
-    case CLAP_EVENT_NOTE_CHOKE:
-        voice_pair_note_off(&p->voice);
+    case CLAP_EVENT_NOTE_CHOKE: {
+        /* key -1 is the CLAP wildcard: every note */
+        const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
+        voice_bank_note_off(&p->voice, ev->key < 0 ? -1 : ev->key);
         break;
+    }
     case CLAP_EVENT_PARAM_VALUE: {
         const clap_event_param_value_t *ev =
             (const clap_event_param_value_t *)hdr;
@@ -466,12 +499,13 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
         const clap_event_midi_t *ev = (const clap_event_midi_t *)hdr;
         uint8_t status = ev->data[0] & 0xF0;
         if (status == 0x90 && ev->data[2] > 0) {
-            voice_pair_note_on(&p->voice, midi_to_hz(ev->data[1]),
+            voice_bank_note_on(&p->voice, ev->data[1] & 0x7f,
+                               midi_to_hz(ev->data[1] & 0x7f),
                                (float)ev->data[2] / 127.0f);
             chandas_note_pulse(&p->chandas);
             mod_note_on(&p->mod);
         } else if (status == 0x80 || status == 0x90) {
-            voice_pair_note_off(&p->voice);
+            voice_bank_note_off(&p->voice, ev->data[1] & 0x7f);
         } else if (status == 0xE0) {
             int raw = ((ev->data[2] & 0x7f) << 7) | (ev->data[1] & 0x7f);
             p->base.bend = (float)(raw - 8192) / 8192.0f * BEND_SEMITONES;
@@ -621,6 +655,12 @@ static bool params_value_to_text(const clap_plugin_t *pl, clap_id id,
     case P_SH_SRC:
         snprintf(out, size, "%s", v ? "random" : "golden");
         return true;
+    case P_POLY:
+        snprintf(out, size, "%s", v ? "4 voices" : "mono");
+        return true;
+    case P_UNISON:
+        snprintf(out, size, "%s", v ? "2 voices" : "off");
+        return true;
     case P_CH_DIV:
         snprintf(out, size, "%s",
                  CHANDAS_DIVISIONS[v < 0 ? 0 : (v > 24 ? 24 : v)].name);
@@ -749,15 +789,13 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
                           uint32_t min_frames, uint32_t max_frames) {
     Plug *p = plugin->plugin_data;
     p->sr = sr;
-    voice_pair_init(&p->voice, (float)sr, patch_of_vals(p));
-    voice_pair_set_freq_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
+    voice_bank_init(&p->voice, (float)sr, patch_of_vals(p));
+    voice_bank_set_freq_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     p->applied_drone_hz = (float)getv(p, P_DRONE_HZ);
     /* born in the right chain: nothing to crossfade from on insert */
-    Chain c = chain_of_vals(p);
-    voice_set_chain(&p->voice.voices[0], c);
-    voice_set_chain(&p->voice.voices[1], c);
+    voice_bank_set_chain_now(&p->voice, chain_of_vals(p));
     verb_init(&p->verb, (float)sr);
-    voice_pair_set_drone_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
+    voice_bank_set_drone_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     verb_set_drone_hz(&p->verb, (float)getv(p, P_DRONE_HZ));
     melody_init(&p->melody, (float)sr, melody_params_default());
     chandas_init(&p->chandas, (float)sr);
@@ -777,7 +815,7 @@ static void plug_deactivate(const clap_plugin_t *plugin) {
     if (p->engine_alive) {
         chandas_free(&p->chandas);
         verb_free(&p->verb);
-        voice_pair_free(&p->voice);
+        voice_bank_free(&p->voice);
         p->engine_alive = false;
     }
     p->active = false;
@@ -789,7 +827,7 @@ static void plug_stop_processing(const clap_plugin_t *plugin) {}
 static void plug_reset(const clap_plugin_t *plugin) {
     Plug *p = plugin->plugin_data;
     if (!p->engine_alive) return;
-    voice_pair_note_off(&p->voice);
+    voice_bank_note_off_all(&p->voice);
     chandas_reset(&p->chandas);
     tape_clear(&p->tape);
 }

@@ -159,7 +159,46 @@ static void sustain_scales_the_velocity_law(void) {
     CHECK(envelope_active(&e), "a held note at zero sustain is still held");
 }
 
+/* a knob moved under a sounding note must bend the shape from where the
+   level already is */
+static void moving_a_setting_mid_note_does_not_step_the_level(void) {
+    for (int k = 0; k < 4; k++) {
+        EnvParams p = env_params_default();
+        p.attack_s = 0.05f;
+        p.decay_s = 2.0f;
+        p.sustain = 0.8f;
+        p.release_s = 2.0f;
+        Envelope e;
+        envelope_init(&e, SR);
+        envelope_note_on(&e, 0.9f);
+        /* k 3 measures the release, the others the held stages */
+        for (size_t i = 0; i < (size_t)(SR * (k == 1 ? 0.02f : 0.4f)); i++)
+            envelope_tick(&e, &p);
+        if (k == 3) {
+            envelope_note_off(&e);
+            for (size_t i = 0; i < (size_t)(SR * 0.3f); i++) envelope_tick(&e, &p);
+        }
+        float before = envelope_level(&e);
+        float steady = fabsf(before - envelope_tick(&e, &p));
+        float worst = 0.0f;
+        for (int step = 1; step <= 40; step++) {
+            switch (k) {
+            case 0: p.decay_s = 2.0f - 0.045f * (float)step; break;
+            case 1: p.attack_s = 0.05f + 0.02f * (float)step; break;
+            case 2: p.sustain = 0.8f - 0.02f * (float)step; break;
+            default: p.release_s = 2.0f + 0.1f * (float)step; break;
+            }
+            float was = envelope_level(&e);
+            float now = envelope_tick(&e, &p);
+            worst = fmaxf(worst, fabsf(now - was));
+        }
+        CHECK(worst <= steady * 4.0f + 1e-6f,
+              "setting %d stepped the level by %g against a steady %g", k, worst, steady);
+    }
+}
+
 void test_envelope(void) {
+    moving_a_setting_mid_note_does_not_step_the_level();
     sustain_scales_the_velocity_law();
     velocity_is_the_fader_and_the_knob_is_the_last_fifth();
     velocity_for_level_peaks_on_the_drone_floor();

@@ -808,10 +808,11 @@ static void envelope_knobs(App *a, Ui *ui, Rct r) {
         case 0:
         case 1: {
             float *v = k == 0 ? &a->shadow_attack_s : &a->shadow_decay_s;
+            float lo = k == 0 ? ENV_ATTACK_MIN : 0.0f;
             time_text(val, sizeof val, *v);
             act = knob_track(ui, id, kr, k == 0 ? "attack" : "decay", val,
-                             env_time_pos(*v, 0.0f));
-            if (reaches && act.kind == FADER_SET) *v = env_time_at(act.t, 0.0f);
+                             env_time_pos(*v, lo));
+            if (reaches && act.kind == FADER_SET) *v = env_time_at(act.t, lo);
             if (reaches && act.kind == FADER_RESET)
                 *v = k == 0 ? def.attack_s : def.decay_s;
             break;

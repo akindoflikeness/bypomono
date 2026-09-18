@@ -4,7 +4,6 @@
 
 #define MOD_SCALE TAU_F
 #define FB_SCALE PI_F
-#define RAMP_SECONDS 0.002f
 #define PARAM_GLIDE_S 0.013f
 #define RIP_DELAY_SECONDS (0.029f * PHI)
 #define RIP_SCALE PI_F
@@ -21,11 +20,14 @@ static void rip_line_init(RipLine *r, float sample_rate, float hz) {
     r->delay = delay;
     r->rot_hz = hz;
     phase_rotator_init(&r->rot, allpass_coeff_for(hz, sample_rate, PHASE_PER_PASS));
+    r->rot_to = r->rot.a;
+    r->rot_k = glide_k(GATE_GLIDE_S, sample_rate);
     r->lp = 0.0f;
     r->fb = 0.0f;
 }
 
 static float rip_line_process(RipLine *r, float x) {
+    r->rot.a = glide_to(r->rot.a, r->rot_to, r->rot_k);
     size_t read = (r->write + r->len - r->delay) % r->len;
     float y = phase_rotator_process(&r->rot, r->buf[read]);
     r->lp = y + RIP_DAMP * (r->lp - y);
@@ -49,6 +51,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
         v->phase[i] = 0.0f;
         v->out[i] = 0.0f;
         v->gain[i] = patch.ops[i].enabled ? 1.0f : 0.0f;
+        v->level_s[i] = patch.ops[i].level;
         v->pending_reset[i] = false;
     }
     v->fb_hist[0] = 0.0f;
@@ -59,10 +62,17 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->index = clampf(patch.index, 0.0f, 1.0f);
     rip_line_init(&v->rip_line, sample_rate, START_HZ);
     v->rip_sig = 0.0f;
+    v->rip_smooth = clampf(patch.rip, 0.0f, 1.0f);
     breath_init(&v->breath, sample_rate, patch.ratio_mode);
     v->field_pitch = 1.0f;
     v->bend = 1.0f;
+    v->bend_to = 1.0f;
     v->detune = 1.0f;
+    v->detune_to = 1.0f;
+    v->fb_smooth = patch.feedback;
+    v->amp_bridge = 0.0f;
+    v->floor_last = 0.0f;
+    v->amp_seen = AMP_DRONE;
     v->chain = chain_default();
     envelope_init(&v->env, sample_rate);
     v->master_pos = clampf(patch.master_level, 0.0f, 1.0f);
@@ -86,12 +96,13 @@ void voice_set_freq_hz(Voice *v, float hz) {
     v->target_freq = hz;
 }
 
-/* solving for the coefficient is a bisection, so only pay for it when the
-   drone pitch actually moved */
+/* Solving for the coefficient is a bisection, so only pay for it when the
+   drone pitch actually moved. The rotator then travels to it: writing the
+   coefficient of a filter with a live state steps its output. */
 void voice_set_drone_hz(Voice *v, float hz) {
     if (hz == v->rip_line.rot_hz) return;
     v->rip_line.rot_hz = hz;
-    v->rip_line.rot.a = allpass_coeff_for(hz, v->sample_rate, PHASE_PER_PASS);
+    v->rip_line.rot_to = allpass_coeff_for(hz, v->sample_rate, PHASE_PER_PASS);
 }
 
 void voice_set_chain(Voice *v, Chain chain) {
@@ -108,11 +119,11 @@ bool voice_note_sounding(const Voice *v) {
 }
 
 void voice_set_bend_semitones(Voice *v, float semitones) {
-    v->bend = exp2f(semitones / 12.0f);
+    v->bend_to = exp2f(semitones / 12.0f);
 }
 
 void voice_set_detune_cents(Voice *v, float cents) {
-    v->detune = exp2f(cents / 1200.0f);
+    v->detune_to = exp2f(cents / 1200.0f);
 }
 
 void voice_wake(Voice *v) {
@@ -127,6 +138,11 @@ float voice_target_hz(const Voice *v) {
 void voice_glide_to_hz(Voice *v, float hz) {
     v->target_freq = hz;
     breath_trigger(&v->breath);
+}
+
+void voice_drone_to_hz(Voice *v, float hz) {
+    v->target_freq = hz;
+    breath_drift(&v->breath);
 }
 
 static void reset_op(Voice *v, int op) {
@@ -160,14 +176,14 @@ void voice_set_op_enabled(Voice *v, int op, bool on) {
     }
 }
 
-void voice_set_patch(Voice *v, Patch patch) {
+static void voice_apply_patch(Voice *v, Patch patch, bool reset) {
     bool restructure = patch.algorithm != v->patch.algorithm;
     bool was_enabled[NUM_OPS];
     for (int i = 0; i < NUM_OPS; i++) was_enabled[i] = v->patch.ops[i].enabled;
     v->patch = patch;
     if (restructure) {
         v->compiled = compile(v->patch.algorithm);
-        reset_all(v);
+        if (reset) reset_all(v);
     }
     breath_set_mode(&v->breath, v->patch.ratio_mode);
     for (int op = 0; op < NUM_OPS; op++) {
@@ -181,6 +197,27 @@ void voice_set_patch(Voice *v, Patch patch) {
             v->pending_reset[op] = true;
         }
     }
+}
+
+void voice_set_patch(Voice *v, Patch patch) {
+    voice_apply_patch(v, patch, true);
+}
+
+void voice_set_patch_live(Voice *v, Patch patch) {
+    voice_apply_patch(v, patch, false);
+}
+
+void voice_take_levels(Voice *v, const Patch *next) {
+    v->patch.feedback = next->feedback;
+    v->patch.index = next->index;
+    v->patch.rip = next->rip;
+    v->patch.master_level = next->master_level;
+    v->patch.glide_seconds = next->glide_seconds;
+    v->patch.field = next->field;
+    v->patch.curve = next->curve;
+    v->patch.voices = next->voices;
+    v->patch.unison = next->unison;
+    v->patch.unison_detune = next->unison_detune;
 }
 
 void voice_set_algorithm(Voice *v, AlgorithmId algorithm) {
@@ -197,7 +234,6 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     float glide = v->patch.glide_seconds > 0.0f
         ? expf(-1.0f / (v->patch.glide_seconds * v->sample_rate))
         : 0.0f;
-    float ramp_step = 1.0f / (RAMP_SECONDS * v->sample_rate);
     float freq_mult[NUM_OPS];
     for (int i = 0; i < NUM_OPS; i++) {
         freq_mult[i] = v->patch.ops[i].ratio * exp2f(v->patch.ops[i].detune_cents / 1200.0f);
@@ -216,33 +252,39 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     AmpSource amp = v->chain.amp;
     float field_target = clampf(v->patch.field, 0.0f, 1.0f);
     float curve_target = clampf(v->patch.curve, 0.0f, 1.0f);
-    float param_k = 1.0f - expf(-1.0f / (PARAM_GLIDE_S * v->sample_rate));
+    float param_k = glide_k(PARAM_GLIDE_S, v->sample_rate);
     float inv_carriers = 1.0f / (float)v->compiled.carrier_count;
-    float rip = clampf(v->patch.rip, 0.0f, 1.0f);
-    v->rip_line.fb = RIP_MAX_FB * rip;
-    float rip_amount = RIP_SCALE * rip;
+    float rip_target = clampf(v->patch.rip, 0.0f, 1.0f);
     const int *eval_order = v->compiled.eval_order;
 
     for (size_t n = 0; n < count; n++) {
         v->freq = v->target_freq + (v->freq - v->target_freq) * glide;
-        v->index += (index_target - v->index) * param_k;
+        v->index = glide_to(v->index, index_target, param_k);
+        v->fb_smooth = glide_to(v->fb_smooth, v->patch.feedback, param_k);
+        v->bend = glide_to(v->bend, v->bend_to, param_k);
+        v->detune = glide_to(v->detune, v->detune_to, param_k);
         float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
         float eff_level[NUM_OPS];
         for (int i = 0; i < NUM_OPS; i++) {
-            eff_level[i] = level[i] * (index_exp[i] > 0.0f ? powf(index, index_exp[i]) : 1.0f);
+            v->level_s[i] += (level[i] - v->level_s[i]) * param_k;
+            eff_level[i] =
+                v->level_s[i] * (index_exp[i] > 0.0f ? powf(index, index_exp[i]) : 1.0f);
         }
-        float eff_feedback = v->patch.feedback * powf(index, fb_exp);
+        float eff_feedback = v->fb_smooth * powf(index, fb_exp);
 
-        float rip_pm = rip_amount * (v->rip_sig / (1.0f + fabsf(v->rip_sig)));
+        /* rip drives the carriers' phase, so it has to arrive smoothly */
+        v->rip_smooth += (rip_target - v->rip_smooth) * param_k;
+        v->rip_line.fb = RIP_MAX_FB * v->rip_smooth;
+        float rip_pm = RIP_SCALE * v->rip_smooth * (v->rip_sig / (1.0f + fabsf(v->rip_sig)));
 
         for (int e = 0; e < NUM_OPS; e++) {
             int op = eval_order[e];
             bool enabled = v->patch.ops[op].enabled;
 
             float target = enabled ? 1.0f : 0.0f;
-            float g = v->gain[op];
-            v->gain[op] = g < target ? fminf(g + ramp_step, target)
-                                     : fmaxf(g - ramp_step, target);
+            float g = v->gain[op] + (target - v->gain[op]) * param_k;
+            if (target == 0.0f && g < GATE_FLOOR) g = 0.0f;
+            v->gain[op] = g;
 
             if (!enabled && v->gain[op] == 0.0f) {
                 if (v->pending_reset[op]) {
@@ -272,7 +314,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
             v->out[op] = y;
             if (op == v->compiled.feedback_op) {
                 v->fb_hist[1] = v->fb_hist[0];
-                v->fb_hist[0] = osc * level[op] * v->gain[op];
+                v->fb_hist[0] = osc * v->level_s[op] * v->gain[op];
             }
 
             float phase = v->phase[op]
@@ -294,6 +336,13 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         float floor_ = amp.kind == AMP_DRONE
             ? v->master
             : master_gain(envelope_amplitude(&v->env, v->master_pos));
+        if (amp.kind != v->amp_seen) {
+            v->amp_bridge = v->floor_last - floor_;
+            v->amp_seen = amp.kind;
+        }
+        floor_ = clampf(floor_ + v->amp_bridge, 0.0f, 1.0f);
+        v->amp_bridge -= v->amp_bridge * param_k;
+        v->floor_last = floor_;
         v->field_smooth += (field_target - v->field_smooth) * param_k;
         v->curve_smooth += (curve_target - v->curve_smooth) * param_k;
         Field field = breath_tick(&v->breath, v->freq, v->field_smooth, floor_, v->curve_smooth);

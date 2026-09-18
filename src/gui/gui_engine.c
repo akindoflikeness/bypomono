@@ -182,7 +182,7 @@ static void engine_apply(AudioState *s, Event ev) {
         break;
     case EV_SET_TEMPO: chandas_set_tempo(&s->chandas, ev.u.f); break;
     case EV_GLIDE_TO:
-        voice_bank_glide_to_hz(&s->voice, ev.u.f);
+        voice_bank_drone_to_hz(&s->voice, ev.u.f);
         voice_bank_set_drone_hz(&s->voice, ev.u.f);
         verb_set_drone_hz(&s->verb, ev.u.f);
         break;

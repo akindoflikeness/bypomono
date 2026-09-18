@@ -22,7 +22,7 @@ static void sanitize_clamps_the_documented_ranges(void) {
     s.decay_s = 99.0f;
     s.sustain = 2.0f;
     Session out = session_sanitize(s);
-    CHECK(out.attack_s == 0.0f, "attack_s %g", out.attack_s);
+    CHECK(out.attack_s == ENV_ATTACK_MIN, "attack_s %g", out.attack_s);
     CHECK(out.decay_s == ENV_TIME_MAX, "decay_s %g", out.decay_s);
     CHECK(out.sustain == 1.0f, "sustain %g", out.sustain);
     CHECK(out.patch.index == 1.0f, "index %g", out.patch.index);

@@ -320,7 +320,9 @@ static void chandas_write(Chandas *h, Stereo dry, Stereo wet) {
 
 Stereo chandas_process(Chandas *h, Stereo dry) {
     h->since_pulse += 1.0f;
-    if (!h->params.enabled) {
+    /* switched off, the grains keep sounding until the mix has travelled to
+       nothing: returning the dry signal outright drops the wet in one sample */
+    if (!h->params.enabled && h->mix_s <= 0.0f) {
         Stereo zero = {0.0f, 0.0f};
         chandas_write(h, dry, zero);
         h->mix_s += (0.0f - h->mix_s) * (1.0f - h->glide);
@@ -339,7 +341,8 @@ Stereo chandas_process(Chandas *h, Stereo dry) {
     for (size_t k = 0; k < CHANDAS_STREAMS; k++) {
         float entry = fmaxf(base / chandas_subdivisions[k], 8.0f);
         if (h->countdown[k] <= 0.0f) {
-            chandas_spawn(h, k, entry);
+            /* no new grains once it is switched off; the ones in the air finish */
+            if (h->params.enabled) chandas_spawn(h, k, entry);
             h->countdown[k] += entry;
         }
         h->countdown[k] -= 1.0f;
@@ -381,7 +384,7 @@ Stereo chandas_process(Chandas *h, Stereo dry) {
         wet.l *= g;
         wet.r *= g;
     }
-    float target = clampf(h->params.mix, 0.0f, 1.0f);
+    float target = h->params.enabled ? clampf(h->params.mix, 0.0f, 1.0f) : 0.0f;
     h->mix_s += (target - h->mix_s) * (1.0f - h->glide);
     if (target <= 0.0f && h->mix_s < 1e-4f) {
         h->mix_s = 0.0f;

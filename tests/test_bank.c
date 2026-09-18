@@ -178,7 +178,8 @@ static void going_mono_lets_the_chord_go(void) {
     voice_bank_set_patch(&b, voiced(1, 1, 0.0f));
     CHECK(voice_bank_poly(&b) == 1, "poly is %d", voice_bank_poly(&b));
     for (int n = 1; n < POLY_MAX; n++) CHECK(!b.held[n], "note %d still held", n);
-    voice_bank_render_frames(&b, (size_t)(SR * 0.05f), noop_emit, NULL);
+    /* the gate is a one-pole, so silence is reached rather than stepped to */
+    voice_bank_render_frames(&b, (size_t)(SR * 0.2f), noop_emit, NULL);
     for (int s = 2; s < BANK_PAIRS; s++) CHECK(b.gain[s] == 0.0f, "slot %d at gain %g", s, (double)b.gain[s]);
     voice_bank_free(&b);
 }
@@ -203,16 +204,16 @@ static void stereo_emit(void *userdata, size_t n, const Frame *f) {
 static void unison_detunes_and_spreads_the_pair(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 2, 20.0f));
-    CHECK_NEAR(b.pairs[0].voices[0].detune, exp2f(-10.0f / 1200.0f), 1e-6f, "copy 0 detune %g",
-               (double)b.pairs[0].voices[0].detune);
-    CHECK_NEAR(b.pairs[1].voices[1].detune, exp2f(10.0f / 1200.0f), 1e-6f, "copy 1 detune %g",
-               (double)b.pairs[1].voices[1].detune);
+    CHECK_NEAR(b.pairs[0].voices[0].detune_to, exp2f(-10.0f / 1200.0f), 1e-6f, "copy 0 detune %g",
+               (double)b.pairs[0].voices[0].detune_to);
+    CHECK_NEAR(b.pairs[1].voices[1].detune_to, exp2f(10.0f / 1200.0f), 1e-6f, "copy 1 detune %g",
+               (double)b.pairs[1].voices[1].detune_to);
     Stereo_ ctx = { 0 };
     voice_bank_render_frames(&b, (size_t)(SR / 4), stereo_emit, &ctx);
     CHECK(ctx.peak_side > 1e-4f, "unison stayed in the middle (side %g)", (double)ctx.peak_side);
 
     voice_bank_set_patch(&b, voiced(1, 1, 20.0f));
-    CHECK(b.pairs[0].voices[0].detune == 1.0f, "a lone voice kept its detune");
+    CHECK(b.pairs[0].voices[0].detune_to == 1.0f, "a lone voice kept its detune");
     voice_bank_render_frames(&b, (size_t)(SR / 4), noop_emit, NULL);
     CHECK(b.spread == 0.0f && b.gain[1] == 0.0f, "unison never faded out");
     voice_bank_free(&b);
@@ -253,7 +254,46 @@ static void a_returning_copy_is_on_the_note(void) {
     voice_bank_free(&b);
 }
 
+typedef struct {
+    float h1, h2;
+    int seen;
+    float worst;
+} Curve;
+
+/* a step in a control shows up as curvature, which a step in the waveform
+   itself does not reach */
+static void curve_emit(void *userdata, size_t n, const Frame *f) {
+    Curve *c = userdata;
+    float x = f->mix + f->side;
+    if (c->seen >= 2) c->worst = fmaxf(c->worst, fabsf(x - 2.0f * c->h1 + c->h2));
+    c->h2 = c->h1;
+    c->h1 = x;
+    c->seen++;
+}
+
+static void moving_rip_does_not_step_the_carriers(void) {
+    static VoiceBank b;
+    Patch p = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
+    p.index = 0.0f; /* plain carriers, so a step has nothing to hide behind */
+    p.rip = 0.0f;
+    voice_bank_init(&b, SR, p);
+    voice_bank_drone_to_hz(&b, 110.0f);
+    voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
+    Curve steady = {0};
+    voice_bank_render_frames(&b, (size_t)(SR / 4), curve_emit, &steady);
+
+    p.rip = 0.5f;
+    voice_bank_set_patch(&b, p);
+    Curve moved = {0};
+    voice_bank_render_frames(&b, (size_t)(SR / 4), curve_emit, &moved);
+    CHECK(moved.worst <= steady.worst * 20.0f,
+          "a rip step bent the carriers by %g against a steady %g", moved.worst,
+          steady.worst);
+    voice_bank_free(&b);
+}
+
 void test_bank(void) {
+    moving_rip_does_not_step_the_carriers();
     mono_is_the_pair_it_replaced();
     four_notes_sound_together();
     a_fifth_note_takes_the_oldest();

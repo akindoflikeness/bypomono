@@ -43,6 +43,7 @@ static void pair_cross_to(VoicePair *p, State next) {
     in->master = live->master;
     in->master_pos = live->master_pos;
     in->index = live->index;
+    in->fb_smooth = live->fb_smooth;
     in->field_smooth = live->field_smooth;
     in->curve_smooth = live->curve_smooth;
     voice_set_patch(&p->voices[incoming], next.patch);

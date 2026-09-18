@@ -57,6 +57,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->target_freq = 110.0f;
     v->master = master_gain(patch.master_level);
     v->index = clampf(patch.index, 0.0f, 1.0f);
+    v->fb_smooth = clampf(patch.feedback, 0.0f, 1.0f);
     rip_line_init(&v->rip_line, sample_rate, START_HZ);
     v->rip_sig = 0.0f;
     breath_init(&v->breath, sample_rate, patch.ratio_mode);
@@ -221,17 +222,19 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     float rip = clampf(v->patch.rip, 0.0f, 1.0f);
     v->rip_line.fb = RIP_MAX_FB * rip;
     float rip_amount = RIP_SCALE * rip;
+    float fb_target = clampf(v->patch.feedback, 0.0f, 1.0f);
     const int *eval_order = v->compiled.eval_order;
 
     for (size_t n = 0; n < count; n++) {
         v->freq = v->target_freq + (v->freq - v->target_freq) * glide;
         v->index += (index_target - v->index) * param_k;
+        v->fb_smooth += (fb_target - v->fb_smooth) * param_k;
         float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
         float eff_level[NUM_OPS];
         for (int i = 0; i < NUM_OPS; i++) {
             eff_level[i] = level[i] * (index_exp[i] > 0.0f ? powf(index, index_exp[i]) : 1.0f);
         }
-        float eff_feedback = v->patch.feedback * powf(index, fb_exp);
+        float eff_feedback = v->fb_smooth * powf(index, fb_exp);
 
         float rip_pm = rip_amount * (v->rip_sig / (1.0f + fabsf(v->rip_sig)));
 

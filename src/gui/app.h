@@ -90,14 +90,23 @@ typedef struct {
     } u;
 } Event;
 
-/* what the audio thread's lfos are doing, for drawing */
+/* what the audio thread's lfos are doing, for drawing. the random shapes
+   have no picture to walk, so their own output is kept and drawn as a scope */
+#define LFO_HIST 256
+#define LFO_HIST_EVERY 8 /* control blocks between samples */
+
 typedef struct {
     _Atomic uint32_t phase_q16[MOD_LFOS];
     _Atomic uint32_t value_bits[MOD_LFOS]; /* float bits */
+    _Atomic int32_t hist[MOD_LFOS][LFO_HIST]; /* value * 127 */
+    _Atomic uint32_t hist_head[MOD_LFOS];
+    uint32_t skip;
 } LfoMeter;
 void lfo_meter_store(LfoMeter *m, const Mod *mod);
 float lfo_meter_phase(const LfoMeter *m, int slot);
 float lfo_meter_value(const LfoMeter *m, int slot);
+/* the last n samples, oldest first; returns how many were written */
+int lfo_meter_history(const LfoMeter *m, int slot, float *out, int n);
 
 typedef struct {
     float ops[NUM_OPS];
@@ -301,6 +310,7 @@ typedef struct App {
     int log_len, log_head; /* newest at head-1 */
     /* lines run with -v: they stay above the log and redraw every frame */
     char pins[PIN_MAX][LOG_LINE_LEN];
+    bool pin_folded[PIN_MAX]; /* text only, no strips */
     int pin_count;
     bool console_open, console_focus, console_focused;
     UiText console_input;

@@ -245,6 +245,7 @@ typedef struct {
     bool pending_reset[NUM_OPS];
     float freq, target_freq;
     float master, index;
+    float fb_smooth; /* glided, so modulating fb cannot zipper */
     RipLine rip_line;
     float rip_sig;
     Breath breath;

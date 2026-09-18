@@ -65,6 +65,14 @@ typedef bool (*VerbParse)(Command *c, char *err, size_t err_len);
 /* what the line shows: logged once when it runs, redrawn live when pinned.
    false when there is nothing to show */
 typedef bool (*VerbView)(App *a, const Command *c, View *out);
+/* what the line would do if it ran, drawn under the input before Enter */
+typedef bool (*VerbPreview)(App *a, const Command *c, View *out);
+/* the words that could follow what is typed so far; prefix is the word being
+   typed, and may be empty */
+#define CAND_MAX 40
+#define CAND_LEN 32
+typedef int (*VerbComplete)(char *const words[], int nwords, const char *prefix,
+                            char out[][CAND_LEN], int max);
 
 typedef struct Verb {
     const char *name;
@@ -79,6 +87,8 @@ typedef struct Verb {
     VerbRun run;
     VerbParse parse; /* non-NULL makes it a raw verb */
     VerbView view;
+    VerbPreview preview;
+    VerbComplete complete;
     const char *form;  /* raw verbs: the usage after the name */
     const char *extra; /* more help lines, '\n' separated */
 } Verb;
@@ -87,14 +97,37 @@ typedef struct Verb {
 bool mod_parse_lfo(Command *c, char *err, size_t err_len);
 bool mod_run_lfo(App *a, const Command *c, char *err, size_t err_len);
 bool mod_view_lfo(App *a, const Command *c, View *out);
+bool mod_preview_lfo(App *a, const Command *c, View *out);
+int mod_complete_lfo(char *const words[], int nwords, const char *prefix,
+                     char out[][CAND_LEN], int max);
 bool mod_parse_mods(Command *c, char *err, size_t err_len);
 bool mod_run_mods(App *a, const Command *c, char *err, size_t err_len);
 bool mod_view_mods(App *a, const Command *c, View *out);
+
+/* ---------- the line being typed ---------- */
+
+typedef struct {
+    bool bad;
+    char why[768];              /* the first line of the parse error */
+    char cand[CAND_MAX][CAND_LEN];
+    int ncand;
+    int prefix_len;             /* how much of cand[] the typed word covers */
+    View preview;               /* what Enter would do */
+    bool has_preview;
+} LineState;
+
+/* candidates, ghost text and preview for a half-typed line */
+void line_state(App *a, const char *line, LineState *out);
+/* the typed line with candidate `pick` taken; false when there is nothing to
+   take */
+bool line_take(const char *line, const LineState *s, int pick, char *out,
+               size_t cap);
 
 /* the live view of a pinned line; false when it no longer parses */
 bool command_view(App *a, const char *line, View *out);
 /* -v toggles a pin: true when the line is now pinned */
 bool console_toggle_pin(App *a, const char *pin, char *err, size_t err_len);
+void console_unpin_at(App *a, int i);
 
 int verb_count(void);
 const Verb *verb_at(int i);

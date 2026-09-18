@@ -236,6 +236,53 @@ static void hostile_mods_never_escape_their_ranges(void) {
     }
 }
 
+static void nowhere(void *ud, size_t n, const Frame *f) { (void)ud; (void)n; (void)f; }
+
+/* an lfo writes fb every control block, so it glides to its target instead
+   of arriving on the first sample (rip is smoothed on main) */
+static void fb_glides(void) {
+    Patch patch = patch_init(ALGORITHMS[0], RATIO_HARMONIC);
+    patch.feedback = 0.0f;
+    Voice v;
+    voice_init(&v, SR, patch);
+    CHECK(v.fb_smooth == 0.0f, "born off target");
+    Patch loud = patch;
+    loud.feedback = 1.0f;
+    voice_set_patch(&v, loud);
+    voice_render_frames(&v, 1, nowhere, NULL);
+    CHECK(v.fb_smooth > 0.0f && v.fb_smooth < 0.05f,
+          "fb jumped to %g in one sample", v.fb_smooth);
+    voice_render_frames(&v, (size_t)(SR * 0.1f), nowhere, NULL);
+    CHECK(v.fb_smooth > 0.99f, "fb only reached %g in 100 ms", v.fb_smooth);
+    voice_free(&v);
+}
+
+/* the random shapes are drawn from what they did, so the readout has to
+   carry their spread */
+static void random_shapes_fill_their_history(void) {
+    static LfoMeter meter;
+    memset(&meter, 0, sizeof meter);
+    Mod m;
+    mod_init(&m, SR);
+    LfoParams p = lfo(LFO_SH, 6.0f);
+    mod_set_lfo(&m, 0, p);
+    for (int i = 0; i < 3000; i++) {
+        mod_advance(&m, MOD_BLOCK, 120.0f);
+        lfo_meter_store(&meter, &m);
+    }
+    float hist[LFO_HIST];
+    int n = lfo_meter_history(&meter, 0, hist, LFO_HIST);
+    CHECK(n == LFO_HIST, "history holds %d of %d", n, LFO_HIST);
+    float lo = 1.0f, hi = -1.0f, steps = 0.0f;
+    for (int i = 0; i < n; i++) {
+        if (hist[i] < lo) lo = hist[i];
+        if (hist[i] > hi) hi = hist[i];
+        if (i && fabsf(hist[i] - hist[i - 1]) > 0.01f) steps += 1.0f;
+    }
+    CHECK(hi - lo > 0.5f, "sample-hold spread is only %g", hi - lo);
+    CHECK(steps > 2.0f, "only %g steps in the window", steps);
+}
+
 /* ---------- the lfo and mods verbs ---------- */
 
 #include "../src/gui/command.h"
@@ -352,6 +399,8 @@ static void minus_v_toggles_a_pin(void) {
 }
 
 void test_mod(void) {
+    fb_glides();
+    random_shapes_fill_their_history();
     lfo_line_reads_every_word();
     lfo_errors_name_the_word_and_what_it_wants();
     lfo_runs_make_point_and_remove();

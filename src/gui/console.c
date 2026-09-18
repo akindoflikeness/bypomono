@@ -8,9 +8,7 @@
 #include "command.h"
 #include "focus.h"
 
-/* widgets.c */
-extern float hint_chip(Ui *ui, P2 at, const char *text, bool highlighted);
-
+#define DIM_INK 120
 #define TYPE_CPS 24.0f
 #define TYPE_JITTER 0.7f
 #define CONSOLE_CPS 80.0f
@@ -72,14 +70,6 @@ void tell_new_tips(App *a) {
 
 /* ---------- small helpers ---------- */
 
-static void trim_into(const char *s, char *out, size_t cap) {
-    while (*s && isspace((unsigned char)*s)) s++;
-    size_t n = strlen(s);
-    while (n > 0 && isspace((unsigned char)s[n - 1])) n--;
-    if (n >= cap) n = cap - 1;
-    memcpy(out, s, n);
-    out[n] = '\0';
-}
 
 static int utf8_len(const char *s) {
     int n = 0;
@@ -110,82 +100,10 @@ static void log_lines(App *a, const char *text) {
     }
 }
 
-static void first_line(const char *text, char *out, size_t cap) {
-    const char *nl = strchr(text, '\n');
-    size_t n = nl ? (size_t)(nl - text) : strlen(text);
-    if (n >= cap) n = cap - 1;
-    memcpy(out, text, n);
-    out[n] = '\0';
-}
 
 static void set_input(App *a, const char *text) {
     snprintf(a->console_input.text, sizeof a->console_input.text, "%s", text);
     a->console_input.len = (int)strlen(a->console_input.text);
-}
-
-/* ---------- hints ---------- */
-
-typedef enum { H_ROSTER, H_COMPLETING, H_PREVIEW, H_BAD } HintKind;
-
-#define MAX_VERBS 32
-
-typedef struct {
-    HintKind kind;
-    const Verb *m[MAX_VERBS];
-    int m_len;
-    char line[512], note[256];
-    char why[768];
-} Hint;
-
-static void hint_for(const char *raw_in, Hint *out) {
-    memset(out, 0, sizeof *out);
-    char raw[LOG_LINE_LEN];
-    trim_into(raw_in, raw, sizeof raw);
-    if (!raw[0]) {
-        out->kind = H_ROSTER;
-        return;
-    }
-    char head[64];
-    size_t hn = 0;
-    while (raw[hn] && !isspace((unsigned char)raw[hn])) hn++;
-    size_t copy = hn < sizeof head - 1 ? hn : sizeof head - 1;
-    memcpy(head, raw, copy);
-    head[copy] = '\0';
-    bool single = raw[hn] == '\0';
-    if (single && !verb_lookup(head) && strcmp(head, "?") != 0) {
-        out->m_len = verb_complete(head, out->m, MAX_VERBS);
-        if (out->m_len == 0) {
-            out->kind = H_BAD;
-            const Verb *near = verb_nearest(head);
-            if (near)
-                snprintf(out->why, sizeof out->why,
-                         "no verb called %s; did you mean %s?", head, near->name);
-            else
-                snprintf(out->why, sizeof out->why, "no verb called %s", head);
-        } else {
-            out->kind = H_COMPLETING;
-        }
-        return;
-    }
-    Command c;
-    char err[768];
-    if (!parse_line(raw, &c, err, sizeof err)) {
-        out->kind = H_BAD;
-        first_line(err, out->why, sizeof out->why);
-        return;
-    }
-    switch (c.kind) {
-    case CMD_RUN:
-        out->kind = H_PREVIEW;
-        command_echo(&c, out->line, sizeof out->line);
-        snprintf(out->note, sizeof out->note, "%s", c.verb->about);
-        break;
-    case CMD_HELP:
-        out->kind = H_BAD;
-        first_line(c.text, out->why, sizeof out->why);
-        break;
-    case CMD_NOP: out->kind = H_ROSTER; break;
-    }
 }
 
 /* ---------- running ---------- */
@@ -223,19 +141,12 @@ void console_run_line(App *a, const char *line) {
 
 /* ---------- completion walk ---------- */
 
-/* the verbs the chip row offers for this line, in chip order */
-static int line_candidates(const char *text, const Verb **out) {
-    Hint h;
-    hint_for(text, &h);
-    if (h.kind == H_COMPLETING) {
-        for (int i = 0; i < h.m_len; i++) out[i] = h.m[i];
-        return h.m_len;
-    }
-    if (h.kind != H_ROSTER) return 0;
-    int n = verb_count();
-    if (n > MAX_VERBS) n = MAX_VERBS;
-    for (int i = 0; i < n; i++) out[i] = verb_at(i);
-    return n;
+/* what the typed line offers and would do; rebuilt whenever it is read */
+static LineState g_state;
+
+static const LineState *line_now(App *a) {
+    line_state(a, a->console_input.text, &g_state);
+    return &g_state;
 }
 
 /* any edit to the line drops the highlight */
@@ -245,9 +156,20 @@ static void line_sync(App *a) {
     a->line_lit = 0;
 }
 
-static void line_take(App *a, const Verb *v) {
-    char text[256];
-    snprintf(text, sizeof text, v->nargs > 0 ? "%s " : "%s", v->name);
+/* the candidate the ghost text shows: the highlighted one, else the first */
+static int line_pick(const App *a, const LineState *s) {
+    if (s->ncand == 0) return -1;
+    return a->line_lit > 0 ? (a->line_lit - 1) % s->ncand : 0;
+}
+
+/* only Tab highlights, so nothing is inverted until it is pressed */
+static int line_sel(const App *a, const LineState *s) {
+    return a->line_lit > 0 ? line_pick(a, s) : -1;
+}
+
+static void take_candidate(App *a, const LineState *s, int pick) {
+    char text[LOG_LINE_LEN];
+    if (!line_take(a->console_input.text, s, pick, text, sizeof text)) return;
     set_input(a, text);
     line_sync(a);
 }
@@ -255,21 +177,24 @@ static void line_take(App *a, const Verb *v) {
 void console_tab(App *a) {
     if (!focus_console_active(a)) return;
     line_sync(a);
-    const Verb *m[MAX_VERBS];
-    int n = line_candidates(a->console_input.text, m);
-    if (n == 1 && a->console_input.len > 0) line_take(a, m[0]);
-    else if (n > 0) a->line_lit = a->line_lit % n + 1;
+    const LineState *s = line_now(a);
+    if (s->ncand == 1)
+        take_candidate(a, s, 0);
+    else if (s->ncand > 0)
+        a->line_lit = a->line_lit % s->ncand + 1;
 }
 
 void console_enter(App *a) {
     line_sync(a);
-    const Verb *m[MAX_VERBS];
-    int n = line_candidates(a->console_input.text, m);
-    if (a->line_lit > 0 && n > 0) {
-        line_take(a, m[(a->line_lit - 1) % n]);
-        return;
+    if (a->line_lit > 0) {
+        const LineState *s = line_now(a);
+        int pick = line_pick(a, s);
+        if (pick >= 0) {
+            take_candidate(a, s, pick);
+            return;
+        }
     }
-    char line[256];
+    char line[LOG_LINE_LEN];
     snprintf(line, sizeof line, "%s", a->console_input.text);
     set_input(a, "");
     line_sync(a);
@@ -405,12 +330,19 @@ void draw_footer(App *a, Ui *ui, Rct r) {
         canvas_set_clip(c, rct_intersect(saved, field));
         float tw = text_width(small, a->console_input.text, 0.0f);
         float tx = tw <= rct_w(field) ? field.x0 : field.x1 - tw;
-        if (a->console_input.len == 0)
+        if (a->console_input.len == 0) {
             text_draw(c, small, (P2){field.x0, cy}, ALIGN_LEFT_CENTER,
                       "command", PAPER, 0.0f);
-        else
+        } else {
             text_draw(c, small, (P2){tx, ty}, ALIGN_LEFT_TOP,
                       a->console_input.text, PAPER, 0.0f);
+            /* the rest of the candidate, dim, where typing it would land */
+            const LineState *s = line_now(a);
+            int pick = line_pick(a, s);
+            if (pick >= 0 && (int)strlen(s->cand[pick]) > s->prefix_len)
+                text_draw(c, small, (P2){roundf(tx + tw), ty}, ALIGN_LEFT_TOP,
+                          s->cand[pick] + s->prefix_len, DIM_INK, 0.0f);
+        }
         if (focused)
             draw_block_caret(c, ui, small, (P2){tx, ty},
                              a->console_input.text, INK_BLACK);
@@ -426,34 +358,6 @@ void draw_footer(App *a, Ui *ui, Rct r) {
             focus_console_take(a);
         }
     }
-}
-
-/* ---------- drawer ---------- */
-
-static void draw_hint(App *a, Ui *ui, FontId small, Rct row) {
-    Canvas *c = ui->canvas;
-    Hint h;
-    hint_for(a->console_input.text, &h);
-    if (h.kind == H_ROSTER || h.kind == H_COMPLETING) {
-        const Verb *rows[MAX_VERBS];
-        int n = line_candidates(a->console_input.text, rows);
-        int lit = n > 0 && a->line_lit > 0 ? (a->line_lit - 1) % n : -1;
-        float x = row.x0;
-        for (int i = 0; i < n; i++) {
-            float w = hint_chip(ui, (P2){x, row.y0}, rows[i]->name, i == lit);
-            x += w + GAP;
-        }
-        return;
-    }
-    if (h.kind == H_PREVIEW) {
-        char line[1024];
-        snprintf(line, sizeof line, "%s — %s · enter", h.line, h.note);
-        text_draw(c, small, (P2){row.x0, row.y0}, ALIGN_LEFT_TOP, line, PAPER,
-                  0.0f);
-        return;
-    }
-    text_draw(c, small, (P2){row.x0, row.y0}, ALIGN_LEFT_TOP, h.why, PAPER,
-              0.0f);
 }
 
 /* ---------- strips ---------- */
@@ -504,30 +408,111 @@ static float draw_view_line(Canvas *c, FontId f, float x, float y,
     return line_height(place, row);
 }
 
+/* ---------- what the line offers and would do ---------- */
+
+/* the candidate words, the highlighted one inverted */
+static void draw_cands(Canvas *c, FontId f, Rct row, const LineState *s,
+                       int pick) {
+    float x = row.x0;
+    int from = 0;
+    /* keep the highlighted word on screen by starting the row at it */
+    if (pick > 0) {
+        float need = 0.0f;
+        for (int i = 0; i <= pick; i++)
+            need += text_width(f, s->cand[i], 0.0f) + 2.0f * GAP;
+        while (need > rct_w(row) && from < pick) {
+            need -= text_width(f, s->cand[from], 0.0f) + 2.0f * GAP;
+            from++;
+        }
+    }
+    for (int i = from; i < s->ncand; i++) {
+        float w = text_width(f, s->cand[i], 0.0f);
+        if (x + w > row.x1) break;
+        if (i == pick) {
+            draw_rect_filled(c, rct(x - 1.0f, row.y0 - 1.0f, x + w + 1.0f,
+                                    row.y0 + text_row_height(f) + 1.0f),
+                             PAPER);
+            text_draw(c, f, (P2){x, row.y0}, ALIGN_LEFT_TOP, s->cand[i],
+                      INK_BLACK, 0.0f);
+        } else {
+            text_draw(c, f, (P2){x, row.y0}, ALIGN_LEFT_TOP, s->cand[i],
+                      DIM_INK, 0.0f);
+        }
+        x += w + 2.0f * GAP;
+    }
+}
+
+/* a word still being typed is not an error yet, so the reason waits until
+   nothing completes it */
+static bool hint_shows_why(const LineState *s) {
+    return s->bad && s->ncand == 0;
+}
+
+static float hint_height(const LineState *s, float row) {
+    float h = s->ncand > 1 ? row + TIGHT : 0.0f;
+    if (hint_shows_why(s)) return h + row;
+    for (int i = 0; i < s->preview.n; i++)
+        h += line_height(s->preview.line[i].place, row) + (i ? TIGHT : 0.0f);
+    return fmaxf(h, row);
+}
+
+static void draw_hint(App *a, Canvas *c, FontId f, Rct zone,
+                      const LineState *s) {
+    float row = text_row_height(f);
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, rct_intersect(saved, zone));
+    float y = zone.y0;
+    if (s->ncand > 1) {
+        draw_cands(c, f, rct(zone.x0, y, zone.x1, y + row), s, line_sel(a, s));
+        y += row + TIGHT;
+    }
+    if (hint_shows_why(s)) {
+        text_draw(c, f, (P2){zone.x0, y}, ALIGN_LEFT_TOP, s->why, PAPER, 0.0f);
+        canvas_set_clip(c, saved);
+        return;
+    }
+    for (int i = 0; i < s->preview.n; i++) {
+        const ViewLine *l = &s->preview.line[i];
+        y += draw_view_line(c, f, zone.x0, y, l->text, l->place, &l->graph)
+             + TIGHT;
+    }
+    canvas_set_clip(c, saved);
+}
+
 /* ---------- pins ---------- */
 
 static View pin_views[PIN_MAX];
 static bool pin_live[PIN_MAX];
 
-static float pins_height(App *a, float row) {
+static float pin_height(App *a, int i, float row) {
+    if (!pin_live[i]) return row + GROUP;
     float h = 0.0f;
-    for (int i = 0; i < a->pin_count; i++) {
-        pin_live[i] = command_view(a, a->pins[i], &pin_views[i]);
-        if (!pin_live[i]) {
-            h += row + GROUP;
-            continue;
-        }
-        for (int k = 0; k < pin_views[i].n; k++)
-            h += line_height(pin_views[i].line[k].place, row) + GROUP;
+    for (int k = 0; k < pin_views[i].n; k++) {
+        GraphPlace place = a->pin_folded[i] ? GRAPH_NONE
+                                            : pin_views[i].line[k].place;
+        h += line_height(place, row) + GROUP;
+        if (a->pin_folded[i]) break; /* folded shows its first line only */
     }
     return h;
 }
 
-static void draw_pins(App *a, Canvas *c, FontId f, Rct zone) {
+static float pins_height(App *a, float row) {
+    float h = 0.0f;
+    for (int i = 0; i < a->pin_count; i++) {
+        pin_live[i] = command_view(a, a->pins[i], &pin_views[i]);
+        h += pin_height(a, i, row);
+    }
+    return h;
+}
+
+static void draw_pins(App *a, Ui *ui, FontId f, Rct zone) {
+    Canvas *c = ui->canvas;
+    float row = text_row_height(f);
     Rct saved = canvas_clip(c);
     canvas_set_clip(c, rct_intersect(saved, zone));
     float y = zone.y0;
     float x = zone.x0 + GROUP;
+    int let_go = -1;
     for (int i = 0; i < a->pin_count; i++) {
         float top = y;
         if (!pin_live[i]) {
@@ -537,14 +522,30 @@ static void draw_pins(App *a, Canvas *c, FontId f, Rct zone) {
         } else {
             for (int k = 0; k < pin_views[i].n; k++) {
                 const ViewLine *l = &pin_views[i].line[k];
-                y += draw_view_line(c, f, x, y, l->text, l->place, &l->graph)
+                GraphPlace place = a->pin_folded[i] ? GRAPH_NONE : l->place;
+                y += draw_view_line(c, f, x, y, l->text, place, &l->graph)
                      + GROUP;
+                if (a->pin_folded[i]) {
+                    text_draw(c, f, (P2){x + rct_w(zone) - 6.0f * GROUP, y - row
+                                                                         - GROUP},
+                              ALIGN_LEFT_TOP, "folded", DIM_INK, 0.0f);
+                    break;
+                }
             }
         }
-        /* a rule down the left marks what is pinned */
-        draw_rect_filled(c, rct(zone.x0, top, zone.x0 + 2.0f, y - GROUP), PAPER);
+        /* a rule down the left marks what is pinned; a click lets it go */
+        Rct block = rct(zone.x0, top, zone.x1, y - GROUP);
+        Resp r = ui_interact(ui, ui_id_n("pin", i), block, 0.0f);
+        if (r.hovered) ui->cursor = CURSOR_POINTER;
+        if (r.clicked) let_go = i;
+        draw_rect_filled(c, rct(zone.x0, top, zone.x0 + 2.0f, y - GROUP),
+                         r.hovered ? PAPER : DIM_INK);
     }
     canvas_set_clip(c, saved);
+    if (let_go >= 0) {
+        push_log(a, "%s let go", a->pins[let_go]);
+        console_unpin_at(a, let_go);
+    }
 }
 
 void draw_console_drawer(App *a, Ui *ui, Rct footer) {
@@ -552,8 +553,12 @@ void draw_console_drawer(App *a, Ui *ui, Rct footer) {
     FontId small = ui_font(11.0f);
     float row = text_row_height(small);
     float pinned_h = a->pin_count ? pins_height(a, row) : 0.0f;
-    float h = fminf(FOOTER_OPEN_H + pinned_h + (pinned_h > 0.0f ? GAP : 0.0f),
-                    floorf((float)c->h * (pinned_h > 0.0f ? 0.7f : 0.5f)));
+    const LineState *state = line_now(a);
+    float hint_h = hint_height(state, row);
+    float grown = pinned_h + (pinned_h > 0.0f ? GAP : 0.0f)
+                  + fmaxf(hint_h - HINT_ROW_H, 0.0f);
+    float h = fminf(FOOTER_OPEN_H + grown,
+                    floorf((float)c->h * (grown > 0.0f ? 0.7f : 0.5f)));
     Rct rect = rct(footer.x0, footer.y0 - h, footer.x1, footer.y0);
     draw_rect_filled(c, rect, INK_BLACK);
     draw_rect_filled(c, rct(rect.x0, rect.y0, rect.x1, rect.y0 + 1.0f), PAPER);
@@ -563,11 +568,11 @@ void draw_console_drawer(App *a, Ui *ui, Rct footer) {
     char visible[LOG_LINE_LEN];
     console_visible(a, visible, sizeof visible);
     Rct inner = rct_shrink(rect, GAP);
-    float body_h = fmaxf(rct_h(rect) - 2.0f * GAP - HINT_ROW_H - GAP, 0.0f);
+    float body_h = fmaxf(rct_h(rect) - 2.0f * GAP - hint_h - GAP, 0.0f);
     if (pinned_h > 0.0f) {
         float zone_h = fminf(pinned_h, fmaxf(body_h - 3.0f * row, row));
         Rct zone = rct(inner.x0, inner.y0, inner.x1, inner.y0 + zone_h);
-        draw_pins(a, c, small, zone);
+        draw_pins(a, ui, small, zone);
         for (float x = inner.x0; x < inner.x1; x += 3.0f)
             draw_rect_filled(c, rct_xywh(x, zone.y1 + 1.0f, 1.0f, 1.0f),
                              MARK_INK);
@@ -610,5 +615,5 @@ void draw_console_drawer(App *a, Ui *ui, Rct footer) {
     canvas_set_clip(c, saved);
 
     float hy = inner.y0 + body_h + GAP;
-    draw_hint(a, ui, small, rct(inner.x0, hy, inner.x1, hy + HINT_ROW_H));
+    draw_hint(a, c, small, rct(inner.x0, hy, inner.x1, hy + hint_h), state);
 }

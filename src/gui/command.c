@@ -87,6 +87,12 @@ static bool run_undo(App *a, const Command *c, char *err, size_t n);
 static bool run_bind(App *a, const Command *c, char *err, size_t n);
 static bool run_unbind(App *a, const Command *c, char *err, size_t n);
 static bool run_help(App *a, const Command *c, char *err, size_t n);
+static bool run_pins(App *a, const Command *c, char *err, size_t n);
+static bool parse_pins(Command *c, char *err, size_t n);
+static int pins_complete(char *const words[], int nwords, const char *prefix,
+                         char out[][CAND_LEN], int max);
+static int add_cand(char out[][CAND_LEN], int n, int max, const char *prefix,
+                    const char *word);
 
 static const Flag REC_FLAGS[] = {
     {"end", "seconds", "finish the take on its own after this long"},
@@ -94,35 +100,49 @@ static const Flag REC_FLAGS[] = {
 
 static const Verb VERBS[] = {
     {"save", {NULL}, G_PRESETS, {"name", NULL}, 1, 1, false, NULL, 0,
-     "write the current sound under a name", run_save, NULL, NULL, NULL, NULL},
+     "write the current sound under a name", run_save, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"overwrite", {NULL}, G_PRESETS, {"preset", NULL}, 1, 1, false, NULL, 0,
-     "replace a preset with the current sound", run_overwrite, NULL, NULL, NULL, NULL},
+     "replace a preset with the current sound", run_overwrite, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"delete", {NULL}, G_PRESETS, {"preset", NULL}, 1, 0, false, NULL, 0,
-     "move a preset to the trash, or the highlighted one", run_delete, NULL, NULL, NULL, NULL},
+     "move a preset to the trash, or the highlighted one", run_delete, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"rename", {NULL}, G_PRESETS, {"preset", "new name"}, 2, 2, false, NULL, 0,
-     "give a preset a different name, where it sits", run_rename, NULL, NULL, NULL, NULL},
+     "give a preset a different name, where it sits", run_rename, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"move", {NULL}, G_PRESETS, {"preset", "folder"}, 2, 2, false, NULL, 0,
-     "put a preset in a folder that already exists", run_move, NULL, NULL, NULL, NULL},
+     "put a preset in a folder that already exists", run_move, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"add", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, false, NULL, 0,
-     "make an empty folder", run_add, NULL, NULL, NULL, NULL},
+     "make an empty folder", run_add, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"remove", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, false, NULL, 0,
-     "move a folder and everything in it to the trash", run_remove, NULL, NULL, NULL, NULL},
+     "move a folder and everything in it to the trash", run_remove, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"undo", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
-     "put back the last trashed, renamed, moved or overwritten item", run_undo, NULL, NULL, NULL, NULL},
+     "put back the last trashed, renamed, moved or overwritten item", run_undo, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"bind", {NULL}, G_MIDI, {"cc", "control"}, 2, 2, true, NULL, 0,
-     "point a controller at a control", run_bind, NULL, NULL, NULL, NULL},
+     "point a controller at a control", run_bind, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"unbind", {NULL}, G_MIDI, {"cc", NULL}, 1, 1, true, NULL, 0,
-     "let a controller go, or 'all' of them", run_unbind, NULL, NULL, NULL, NULL},
+     "let a controller go, or 'all' of them", run_unbind, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"rec", {"record", NULL}, G_RECORDING, {"name", NULL}, 1, 0, false,
-     REC_FLAGS, 1, "start a take, or finish the one running", run_rec, NULL, NULL, NULL, NULL},
+     REC_FLAGS, 1, "start a take, or finish the one running", run_rec, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"help", {NULL}, G_CONSOLE, {"verb or group", NULL}, 1, 0, false, NULL, 0,
-     "list the verbs, or explain one", run_help, NULL, NULL, NULL, NULL},
+     "list the verbs, or explain one", run_help, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {.name = "lfo",
      .group = G_MODULATION,
      .about = "make, shape and point an lfo; lfo alone lists them",
      .run = mod_run_lfo,
      .parse = mod_parse_lfo,
      .view = mod_view_lfo,
+     .preview = mod_preview_lfo,
+     .complete = mod_complete_lfo,
      .form = "[1-16] [shape] [rate <hz|1/4>] [phase <deg>] [free|retrig|once] "
              "[bi|uni] [to <target> <depth|off>]... [rm] [-v]",
      .extra = "shapes  sine tri saw ramp square exp sh drift\n"
@@ -131,6 +151,14 @@ static const Verb VERBS[] = {
               "        chandas mix|rate|spread|size|warp|dim|tail\n"
               "depth   -1 to 1 of the target's range; pitch is +-12 semitones\n"
               "-v      pin it above the log, live; -v again lets it go"},
+    {.name = "pins",
+     .group = G_CONSOLE,
+     .about = "the views pinned above the log",
+     .run = run_pins,
+     .parse = parse_pins,
+     .complete = pins_complete,
+     .form = "[rm <n>|fold <n>|open <n>|clear]",
+     .extra = "a click on a pinned view lets it go, as does -v on its line"},
     {.name = "mods",
      .group = G_MODULATION,
      .about = "the routing table: every lfo and where it points",
@@ -602,13 +630,20 @@ bool command_run(App *a, const Command *c, char *err, size_t err_len) {
     return true;
 }
 
+void console_unpin_at(App *a, int i) {
+    if (i < 0 || i >= a->pin_count) return;
+    int rest = a->pin_count - i - 1;
+    memmove(a->pins[i], a->pins[i + 1], (size_t)rest * sizeof a->pins[0]);
+    memmove(&a->pin_folded[i], &a->pin_folded[i + 1],
+            (size_t)rest * sizeof a->pin_folded[0]);
+    a->pin_count--;
+}
+
 bool console_toggle_pin(App *a, const char *pin, char *err, size_t err_len) {
     if (err_len) err[0] = '\0';
     for (int i = 0; i < a->pin_count; i++) {
         if (strcmp(a->pins[i], pin) != 0) continue;
-        memmove(a->pins[i], a->pins[i + 1],
-                (size_t)(a->pin_count - i - 1) * sizeof a->pins[0]);
-        a->pin_count--;
+        console_unpin_at(a, i);
         return false;
     }
     if (a->pin_count >= PIN_MAX) {
@@ -617,7 +652,166 @@ bool console_toggle_pin(App *a, const char *pin, char *err, size_t err_len) {
                PIN_MAX);
         return false;
     }
+    a->pin_folded[a->pin_count] = false;
     snprintf(a->pins[a->pin_count++], sizeof a->pins[0], "%s", pin);
+    return true;
+}
+
+/* ---------- pins ---------- */
+
+static bool parse_pins(Command *c, char *err, size_t n) {
+    if (c->nwords == 0) return true;
+    const char *w = c->words[0];
+    bool one_of = strcasecmp(w, "rm") == 0 || strcasecmp(w, "fold") == 0
+                  || strcasecmp(w, "open") == 0;
+    if (strcasecmp(w, "clear") == 0) {
+        if (c->nwords > 1)
+            return reason(err, n, "pins clear takes nothing, not '%s'",
+                          c->words[1]);
+        return true;
+    }
+    if (!one_of)
+        return reason(err, n, "pins takes rm, fold, open or clear, not '%s'", w);
+    if (c->nwords < 2)
+        return reason(err, n, "pins %s wants which pin, 1 to %d", w, PIN_MAX);
+    char *end = NULL;
+    long at = strtol(c->words[1], &end, 10);
+    if (!end || *end || at < 1 || at > PIN_MAX)
+        return reason(err, n, "pins %s wants a pin, 1 to %d, not '%s'", w,
+                      PIN_MAX, c->words[1]);
+    return true;
+}
+
+static int pins_complete(char *const words[], int nwords, const char *prefix,
+                         char out[][CAND_LEN], int max) {
+    int n = 0;
+    if (nwords == 0) {
+        static const char *const KEYS[] = {"rm", "fold", "open", "clear"};
+        for (size_t i = 0; i < sizeof KEYS / sizeof KEYS[0]; i++)
+            n = add_cand(out, n, max, prefix, KEYS[i]);
+        return n;
+    }
+    if (strcasecmp(words[nwords - 1], "clear") != 0)
+        for (int i = 1; i <= PIN_MAX; i++) {
+            char num[8];
+            snprintf(num, sizeof num, "%d", i);
+            n = add_cand(out, n, max, prefix, num);
+        }
+    return n;
+}
+
+static bool run_pins(App *a, const Command *c, char *err, size_t n) {
+    if (c->nwords == 0) {
+        if (a->pin_count == 0) {
+            push_log(a, "nothing is pinned. any line with -v pins its view");
+            return true;
+        }
+        for (int i = 0; i < a->pin_count; i++)
+            push_log(a, "%d  %s%s", i + 1, a->pins[i],
+                     a->pin_folded[i] ? "  (folded)" : "");
+        return true;
+    }
+    if (strcasecmp(c->words[0], "clear") == 0) {
+        int was = a->pin_count;
+        a->pin_count = 0;
+        push_log(a, "%d pin%s let go", was, was == 1 ? "" : "s");
+        return true;
+    }
+    int at = (int)strtol(c->words[1], NULL, 10) - 1;
+    if (at >= a->pin_count)
+        return reason(err, n, "there is no pin %d; pins lists them", at + 1);
+    if (strcasecmp(c->words[0], "rm") == 0) {
+        char was[LOG_LINE_LEN];
+        snprintf(was, sizeof was, "%s", a->pins[at]);
+        console_unpin_at(a, at);
+        push_log(a, "%s let go", was);
+        return true;
+    }
+    a->pin_folded[at] = strcasecmp(c->words[0], "fold") == 0;
+    push_log(a, "%s %s", a->pins[at],
+             a->pin_folded[at] ? "folded" : "open");
+    return true;
+}
+
+/* ---------- the line being typed ---------- */
+
+static bool starts_with_ci(const char *s, const char *prefix) {
+    size_t n = strlen(prefix);
+    return strncasecmp(s, prefix, n) == 0;
+}
+
+static int add_cand(char out[][CAND_LEN], int n, int max, const char *prefix,
+                    const char *word) {
+    if (n >= max || !starts_with_ci(word, prefix)) return n;
+    for (int i = 0; i < n; i++)
+        if (strcasecmp(out[i], word) == 0) return n;
+    snprintf(out[n], CAND_LEN, "%s", word);
+    return n + 1;
+}
+
+void line_state(App *a, const char *line, LineState *out) {
+    memset(out, 0, sizeof *out);
+    char buf[LOG_LINE_LEN * 2];
+    char *words[CMD_WORDS + 2];
+    int n = split_words(line ? line : "", buf, sizeof buf, words, CMD_WORDS + 2);
+    /* a trailing space means the word being typed is empty */
+    size_t len = line ? strlen(line) : 0;
+    bool fresh_word = len == 0 || isspace((unsigned char)line[len - 1]);
+    const char *prefix = fresh_word || n == 0 ? "" : words[n - 1];
+    int given = fresh_word ? n : n - 1; /* words already finished */
+    out->prefix_len = (int)strlen(prefix);
+
+    if (given <= 0) {
+        for (int i = 0; i < verb_count(); i++)
+            out->ncand = add_cand(out->cand, out->ncand, CAND_MAX, prefix,
+                                  verb_at(i)->name);
+    } else {
+        const Verb *v = verb_lookup(words[0]);
+        if (v && v->complete)
+            out->ncand = v->complete(words + 1, given - 1, prefix, out->cand,
+                                     CAND_MAX);
+    }
+
+    if (n == 0) return;
+    Command c;
+    char err[768];
+    if (!parse_line(line, &c, err, sizeof err)) {
+        out->bad = true;
+        const char *nl = strchr(err, '\n');
+        size_t m = nl ? (size_t)(nl - err) : strlen(err);
+        if (m >= sizeof out->why) m = sizeof out->why - 1;
+        memcpy(out->why, err, m);
+        out->why[m] = '\0';
+        return;
+    }
+    if (c.kind == CMD_HELP) {
+        view_add(&out->preview, "%s", c.verb ? "the verb's help" : "the verbs");
+        out->has_preview = true;
+        return;
+    }
+    if (c.kind != CMD_RUN || !c.verb) return;
+    if (c.verb->preview && c.verb->preview(a, &c, &out->preview)) {
+        out->has_preview = true;
+        return;
+    }
+    char echo[512];
+    command_echo(&c, echo, sizeof echo);
+    view_add(&out->preview, "%s - %s", echo, c.verb->about);
+    out->has_preview = true;
+}
+
+bool line_take(const char *line, const LineState *s, int pick, char *out,
+               size_t cap) {
+    if (pick < 0 || pick >= s->ncand) return false;
+    size_t len = strlen(line);
+    size_t keep = len - (size_t)s->prefix_len;
+    snprintf(out, cap, "%.*s%s", (int)keep, line, s->cand[pick]);
+    /* one trailing space, so the next word starts where the cursor is */
+    size_t n = strlen(out);
+    if (n + 2 < cap) {
+        out[n] = ' ';
+        out[n + 1] = '\0';
+    }
     return true;
 }
 

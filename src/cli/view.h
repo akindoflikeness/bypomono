@@ -38,6 +38,9 @@ typedef struct {
    steep edges fill their column. mark_x < 0 draws no playhead */
 typedef float (*GraphFn)(float x, void *ud);
 void graph_plot(Graph *g, int cols, GraphFn f, void *ud, float mark_x);
+/* samples oldest first, as a scope: the newest lands in the last column and
+   several samples per column keep their span */
+void graph_from_samples(Graph *g, const float *v, int n, int cols, float scale);
 
 void view_clear(View *v);
 /* appends a text line and returns it, or NULL when the view is full */

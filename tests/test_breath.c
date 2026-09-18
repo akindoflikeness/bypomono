@@ -324,7 +324,43 @@ static void a_closed_field_is_untouched(void) {
     }
 }
 
+/* the drone pitch fader sends a value a frame; only the first should start
+   a gesture, while every note still gets its own */
+static float breath_run(bool drag) {
+    Breath b;
+    breath_init(&b, SR, RATIO_GOLDEN);
+    breath_drift(&b);
+    float prev = breath_tick(&b, 110.0f, 0.6f, 0.2f, 0.5f).gain;
+    float worst = 0.0f;
+    for (int frame = 0; frame < 30; frame++) {
+        if (drag) breath_drift(&b);
+        for (int i = 0; i < (int)(SR * 0.016f); i++) {
+            Field f = breath_tick(&b, 110.0f, 0.6f, 0.2f, 0.5f);
+            worst = fmaxf(worst, fabsf(f.gain - prev));
+            prev = f.gain;
+        }
+    }
+    return worst;
+}
+
+static void dragging_the_drone_pitch_starts_one_gesture(void) {
+    float still = breath_run(false);
+    float dragged = breath_run(true);
+    CHECK(dragged <= still * 2.0f + 1e-9f,
+          "a dragged fader moved the gain by %g against %g when left alone",
+          dragged, still);
+
+    Breath n;
+    breath_init(&n, SR, RATIO_GOLDEN);
+    breath_trigger(&n);
+    breath_tick(&n, 110.0f, 0.6f, 0.2f, 0.5f);
+    float at_trigger = n.since_trigger;
+    breath_trigger(&n);
+    CHECK(n.since_trigger < at_trigger, "a note did not restart the gesture");
+}
+
 void test_breath(void) {
+    dragging_the_drone_pitch_starts_one_gesture();
     the_gain_never_falls_below_master_or_rises_above_unity();
     a_closed_field_is_exactly_master_and_no_pitch_movement();
     the_sequencer_cannot_drive_the_rate_to_audio();

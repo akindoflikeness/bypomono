@@ -50,7 +50,7 @@ const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_UNISON] = {"unison", "voices", 0, 1, 0, K_ONOFF},
     [P_DETUNE] = {"detune ct", "voices", 0, UNISON_DETUNE_MAX,
                   UNISON_DETUNE_DEFAULT, K_FLOAT},
-    [P_ATTACK] = {"attack s", "envelope", 0, ENV_TIME_MAX, 0.008, K_FLOAT},
+    [P_ATTACK] = {"attack s", "envelope", ENV_ATTACK_MIN, ENV_TIME_MAX, 0.008, K_FLOAT},
     [P_ENV_DECAY] = {"decay s", "envelope", 0, ENV_TIME_MAX, 2, K_FLOAT},
     [P_SUSTAIN] = {"sustain", "envelope", 0, 1, 1, K_FLOAT},
 };
@@ -167,7 +167,7 @@ static void apply_vals(Plug *p) {
     float hz = (float)getv(p, P_DRONE_HZ);
     if (hz != p->applied_drone_hz) {
         p->applied_drone_hz = hz;
-        voice_bank_glide_to_hz(&p->voice, hz);
+        voice_bank_drone_to_hz(&p->voice, hz);
         voice_bank_set_drone_hz(&p->voice, hz);
         verb_set_drone_hz(&p->verb, hz);
     }
@@ -341,7 +341,7 @@ static void apply_gui_event(Plug *p, Event ev) {
     case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
     case EV_SET_TEMPO: chandas_set_tempo(&p->chandas, ev.u.f); break;
     case EV_GLIDE_TO:
-        voice_bank_glide_to_hz(&p->voice, ev.u.f);
+        voice_bank_drone_to_hz(&p->voice, ev.u.f);
         voice_bank_set_drone_hz(&p->voice, ev.u.f);
         verb_set_drone_hz(&p->verb, ev.u.f);
         p->applied_drone_hz = ev.u.f;

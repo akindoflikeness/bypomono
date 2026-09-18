@@ -39,6 +39,8 @@ float soft_clip_to(float x, float ceiling);
 
 /* ---------- gate ---------- */
 
+/* the house glide: every switch and every coefficient travels over this,
+   because nothing in the engine may arrive instantly */
 #define GATE_GLIDE_S 0.013f
 #define GATE_FLOOR 1e-6f
 
@@ -136,6 +138,10 @@ EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5, 1.0 */
 
 #define ENV_TIME_MAX 8.0f
 #define ENV_RELEASE_MIN 0.05f
+/* the shortest attack that still arrives instead of ticking: a note landing
+   on a voice whose tail has nearly gone would otherwise slam from silence to
+   full level inside a couple of samples */
+#define ENV_ATTACK_MIN 0.002f
 
 #define ENV_FLOOR 1e-4f
 #define VELOCITY_CEILING 0.8f
@@ -146,6 +152,7 @@ typedef enum { ENV_IDLE, ENV_HELD, ENV_RELEASED } EnvStage;
 typedef struct {
     EnvStage stage;
     float t, from, level, peak, sustain, sample_rate;
+    EnvParams seen; /* the settings the clock below was measured against */
 } Envelope;
 
 void envelope_init(Envelope *e, float sample_rate);
@@ -174,8 +181,8 @@ typedef struct {
     float since_trigger;
     float boost_level;
     float interval;
-    float last_amount;
-    float declick_from;
+    float last_amount, last_pitch;
+    float declick_from, declick_from_pitch;
     float declick_left;
 } Breath;
 
@@ -184,6 +191,9 @@ typedef struct { float amount, gain, pitch; } Field;
 void breath_init(Breath *b, float sample_rate, RatioMode mode);
 void breath_set_mode(Breath *b, RatioMode mode);
 void breath_trigger(Breath *b);
+/* a drone pitch move: starts the gesture only once the last one has landed,
+   so dragging the fader does not restart it every frame */
+void breath_drift(Breath *b);
 void breath_release(Breath *b);
 float breath_rate_hz(float freq);
 Field breath_tick(Breath *b, float freq, float field, float floor_, float curve);
@@ -229,7 +239,9 @@ typedef struct {
     size_t write;
     size_t delay;
     PhaseRotator rot;
-    float rot_hz; /* pitch the rotator is currently solved for */
+    float rot_hz;  /* pitch the rotator is currently solved for */
+    float rot_to;  /* coefficient it is travelling toward */
+    float rot_k;
     float lp;
     float fb;
 } RipLine;
@@ -247,11 +259,16 @@ typedef struct {
     float master, index;
     float fb_smooth; /* glided, so modulating fb cannot zipper */
     RipLine rip_line;
-    float rip_sig;
+    float rip_sig, rip_smooth;
     Breath breath;
     float field_smooth, curve_smooth, field_amount, field_pitch;
-    float bend;
-    float detune; /* frequency ratio from the unison spread */
+    float bend, bend_to;
+    float detune, detune_to; /* frequency ratio from the unison spread */
+    /* the amplitude authority changing hands must not step the level, so the
+       new one starts where the old one was and closes the gap over the house
+       glide */
+    float amp_bridge, floor_last;
+    AmpKind amp_seen;
     Chain chain;
     Envelope env;
     float master_pos;
@@ -271,8 +288,14 @@ void voice_set_detune_cents(Voice *v, float cents);
 void voice_wake(Voice *v);
 float voice_target_hz(const Voice *v);
 void voice_glide_to_hz(Voice *v, float hz);
+void voice_drone_to_hz(Voice *v, float hz); /* glide, gesture only if settled */
 void voice_set_op_enabled(Voice *v, int op, bool on);
 void voice_set_patch(Voice *v, Patch patch);
+/* the same, for a voice that can still be heard: it takes the new structure
+   without the phase reset, because the crossfade is what hides the change */
+void voice_set_patch_live(Voice *v, Patch patch);
+/* levels and macros only; the voice keeps the structure it is sounding */
+void voice_take_levels(Voice *v, const Patch *next);
 void voice_set_algorithm(Voice *v, AlgorithmId algorithm);
 float voice_op_phase(const Voice *v, int op);
 void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata);
@@ -301,6 +324,7 @@ void voice_pair_set_op_enabled(VoicePair *p, int op, bool on);
 void voice_pair_set_freq_hz(VoicePair *p, float hz);
 void voice_pair_set_drone_hz(VoicePair *p, float hz);
 void voice_pair_glide_to_hz(VoicePair *p, float hz);
+void voice_pair_drone_to_hz(VoicePair *p, float hz);
 void voice_pair_note_on(VoicePair *p, float hz, float velocity);
 bool voice_pair_note_sounding(const VoicePair *p);
 const Chain *voice_pair_chain(const VoicePair *p);
@@ -349,6 +373,7 @@ int voice_bank_poly(const VoiceBank *b);
 void voice_bank_set_freq_hz(VoiceBank *b, float hz);
 void voice_bank_set_drone_hz(VoiceBank *b, float hz);
 void voice_bank_glide_to_hz(VoiceBank *b, float hz); /* the drone, note 0 */
+void voice_bank_drone_to_hz(VoiceBank *b, float hz);  /* the drone hz control */
 void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity);
 /* mono releases whatever sounds; poly releases the note on `key`, or every
    held note for key -1 */
@@ -518,6 +543,7 @@ typedef struct {
     size_t len;
     size_t write;
     size_t delay;
+    float delay_f, delay_to; /* samples; the read travels between lengths */
     float delay_seconds;
     float fb, fb_target, lp;
     float lfo_phase, lfo_inc;
@@ -528,7 +554,9 @@ typedef struct {
     size_t len;
     size_t write;
     size_t delay;
+    float delay_f, delay_to;
     PhaseRotator rot;
+    float rot_to;
     float fb;
 } GhostLine;
 
@@ -543,7 +571,8 @@ typedef struct {
     float sample_rate;
     VerbParams params;
     float mix_s, ghost_s, haunt_s, damp_s;
-    float send[NUM_OPS];
+    float send[NUM_OPS], send_to[NUM_OPS];
+    float carrier[NUM_OPS], carrier_to[NUM_OPS]; /* 1 = carrier, ramped */
     bool is_carrier[NUM_OPS];
     Comb combs_l[NUM_OPS], combs_r[NUM_OPS];
     Allpass ap_l[2], ap_r[2];
@@ -553,6 +582,7 @@ typedef struct {
     Svf room_hp_l, room_hp_r;
     float room_hp_g, room_hp_for_hz;
     float ghost_hz; /* pitch the ghost rotators are currently solved for */
+    bool configured; /* the first configure lands outright, later ones travel */
     Svf svf_l[2], svf_r[2];
 } StereoVerb;
 
@@ -840,6 +870,16 @@ Session session_sanitize(Session s);
 /* ---------- inline helpers ---------- */
 
 #include <math.h>
+/* The one path a changing value takes. Nothing in the engine arrives
+   instantly: a value written straight into a live signal is a click, and at
+   modern speeds a glide short enough to feel immediate costs nothing. New
+   parameters go through here rather than rolling their own. */
+static inline float glide_k(float seconds, float sample_rate) {
+    return 1.0f - expf(-1.0f / fmaxf(seconds * fmaxf(sample_rate, 1.0f), 1.0f));
+}
+static inline float glide_to(float now, float target, float k) {
+    return now + (target - now) * k;
+}
 static inline float fract_pos(float x) { return x - floorf(x); }
 /* NaN fails both comparisons, so it has to be rejected explicitly */
 static inline float clampf(float x, float lo, float hi) {

@@ -34,7 +34,7 @@ State voice_pair_state(const VoicePair *p) {
     return s;
 }
 
-static void pair_cross_to(VoicePair *p, State next) {
+static void pair_cross_to(VoicePair *p, State next, bool audible) {
     int incoming = p->blend < 0.5f ? 1 : 0;
     /* the incoming voice starts its smoothed controls where the audible one
        is, so a patch change glides the level instead of stepping it */
@@ -46,7 +46,13 @@ static void pair_cross_to(VoicePair *p, State next) {
     in->fb_smooth = live->fb_smooth;
     in->field_smooth = live->field_smooth;
     in->curve_smooth = live->curve_smooth;
-    voice_set_patch(&p->voices[incoming], next.patch);
+    /* mid-fade the incoming voice can already be heard, so it keeps its
+       phases; from silence it restrikes as before */
+    if (audible) {
+        voice_set_patch_live(&p->voices[incoming], next.patch);
+    } else {
+        voice_set_patch(&p->voices[incoming], next.patch);
+    }
     voice_set_chain(&p->voices[incoming], next.chain);
     p->target = incoming;
     float want = (float)incoming;
@@ -56,14 +62,23 @@ static void pair_cross_to(VoicePair *p, State next) {
 
 void voice_pair_set_state(VoicePair *p, State next) {
     State cur = voice_pair_state(p);
+    bool crossing = voice_pair_crossing(p);
     if (!state_is_structural_change(&cur, &next)) {
-        for (int i = 0; i < 2; i++) {
-            voice_set_patch(&p->voices[i], next.patch);
-            voice_set_chain(&p->voices[i], next.chain);
+        int live = p->target;
+        voice_set_patch(&p->voices[live], next.patch);
+        voice_set_chain(&p->voices[live], next.chain);
+        int fading = 1 - live;
+        if (crossing) {
+            /* the outgoing voice is still audible: it takes the levels but
+               never a restructure, which would reset its phases under us */
+            voice_take_levels(&p->voices[fading], &next.patch);
+        } else {
+            voice_set_patch(&p->voices[fading], next.patch);
+            voice_set_chain(&p->voices[fading], next.chain);
         }
         return;
     }
-    pair_cross_to(p, next);
+    pair_cross_to(p, next, crossing);
 }
 
 void voice_pair_set_patch(VoicePair *p, Patch patch) {
@@ -100,6 +115,12 @@ void voice_pair_set_drone_hz(VoicePair *p, float hz) {
 void voice_pair_glide_to_hz(VoicePair *p, float hz) {
     for (int i = 0; i < 2; i++) {
         voice_glide_to_hz(&p->voices[i], hz);
+    }
+}
+
+void voice_pair_drone_to_hz(VoicePair *p, float hz) {
+    for (int i = 0; i < 2; i++) {
+        voice_drone_to_hz(&p->voices[i], hz);
     }
 }
 

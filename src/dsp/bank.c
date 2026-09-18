@@ -64,6 +64,9 @@ static void sync_copy(VoicePair *dst, const VoicePair *src) {
         v->field_amount = from->field_amount;
         v->field_pitch = from->field_pitch;
         v->bend = from->bend;
+        v->rip_smooth = from->rip_smooth;
+        v->fb_smooth = from->fb_smooth;
+        for (int op = 0; op < NUM_OPS; op++) v->level_s[op] = from->level_s[op];
         v->env = from->env;
         v->breath = from->breath;
         voice_wake(v);
@@ -106,7 +109,7 @@ void voice_bank_init(VoiceBank *b, float sample_rate, Patch patch) {
     apply_voicing(b);
     for (int s = 0; s < BANK_PAIRS; s++) b->gain[s] = slot_wanted(b, s) ? 1.0f : 0.0f;
     b->spread = reach_unison(b) > 1 ? 1.0f : 0.0f;
-    b->step = 1.0f / fmaxf(GATE_GLIDE_S * sample_rate, 1.0f);
+    b->step = glide_k(GATE_GLIDE_S, sample_rate);
 }
 
 void voice_bank_free(VoiceBank *b) {
@@ -181,6 +184,11 @@ void voice_bank_set_drone_hz(VoiceBank *b, float hz) {
 
 void voice_bank_glide_to_hz(VoiceBank *b, float hz) {
     for (int copy = 0; copy < UNISON_MAX; copy++) voice_pair_glide_to_hz(slot_pair(b, 0, copy), hz);
+}
+
+void voice_bank_drone_to_hz(VoiceBank *b, float hz) {
+    for (int copy = 0; copy < UNISON_MAX; copy++)
+        voice_pair_drone_to_hz(slot_pair(b, 0, copy), hz);
 }
 
 /* same key again, then a free slot, then the oldest released, then the
@@ -276,8 +284,12 @@ static void capture_emit(void *userdata, size_t n, const Frame *frame) {
     c->buf[c->i++] = *frame;
 }
 
-static float ramp(float x, float target, float step) {
-    return x < target ? fminf(x + step, target) : fmaxf(x - step, target);
+/* the house gate: a one-pole, because a linear ramp kinks at both ends and
+   under dense playing those kinks are the crackle */
+static float ramp(float x, float target, float k) {
+    float next = glide_to(x, target, k);
+    if (fabsf(target - next) < 1e-4f) next = target;
+    return next;
 }
 
 void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *userdata) {
@@ -304,7 +316,9 @@ void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *
         /* one voice at full gain is the mono instrument, untouched */
         if (n == 1 && live[0] == 0 && b->gain[0] == 1.0f && b->spread == 0.0f && spread_to == 0.0f) {
             for (size_t k = 0; k < run; k++) emit(userdata, done + k, &b->scratch[0][k]);
-            for (int s = 1; s < BANK_PAIRS; s++) b->gain[s] = ramp(b->gain[s], target[s], b->step * (float)run);
+            for (int s = 1; s < BANK_PAIRS; s++)
+                for (size_t k = 0; k < run; k++)
+                    b->gain[s] = ramp(b->gain[s], target[s], b->step);
             done += run;
             continue;
         }

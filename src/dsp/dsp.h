@@ -258,6 +258,7 @@ typedef struct {
     float freq, target_freq;
     float master, index;
     float fb_smooth; /* glided, so modulating fb cannot zipper */
+    float level_s[NUM_OPS]; /* op levels are gains straight to the mix */
     RipLine rip_line;
     float rip_sig, rip_smooth;
     Breath breath;

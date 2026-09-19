@@ -255,9 +255,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     float curve_target = clampf(v->patch.curve, 0.0f, 1.0f);
     float param_k = glide_k(PARAM_GLIDE_S, v->sample_rate);
     float inv_carriers = 1.0f / (float)v->compiled.carrier_count;
-    float rip = clampf(v->patch.rip, 0.0f, 1.0f);
-    v->rip_line.fb = RIP_MAX_FB * rip;
-    float rip_amount = RIP_SCALE * rip;
+    float rip_target = clampf(v->patch.rip, 0.0f, 1.0f);
     float fb_target = clampf(v->patch.feedback, 0.0f, 1.0f);
     const int *eval_order = v->compiled.eval_order;
 
@@ -265,6 +263,8 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         v->freq = v->target_freq + (v->freq - v->target_freq) * glide;
         v->index += (index_target - v->index) * param_k;
         v->fb_smooth += (fb_target - v->fb_smooth) * param_k;
+        v->bend += (v->bend_to - v->bend) * param_k;
+        v->detune += (v->detune_to - v->detune) * param_k;
         float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
         float eff_level[NUM_OPS];
         for (int i = 0; i < NUM_OPS; i++) {

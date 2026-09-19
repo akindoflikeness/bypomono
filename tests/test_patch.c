@@ -10,6 +10,45 @@ static void golden_ratios_are_phi_powers(void) {
     CHECK(fabsf(PHI * PHI - (PHI + 1.0f)) < 1e-4f, "phi*phi != phi+1");
 }
 
+static void palettes_belong_to_operator_numbers(void) {
+    for (int mode = 0; mode < RATIO_MODE_COUNT; mode++) {
+        for (int alg = 0; alg < 8; alg++) {
+            Patch patch = patch_init(ALGORITHMS[alg], (RatioMode)mode);
+            for (int op = 0; op < NUM_OPS; op++) {
+                float want = ratio_mode_ratio((RatioMode)mode, op);
+                CHECK_NEAR(patch.ops[op].ratio, want, 1e-6f,
+                           "mode %d algorithm %d op %d ratio %g vs %g", mode,
+                           alg + 1, op + 1, (double)patch.ops[op].ratio,
+                           (double)want);
+            }
+        }
+    }
+}
+
+static void loading_a_palette_only_replaces_ratios(void) {
+    Patch patch = patch_init(ALGORITHMS[4], RATIO_HARMONIC);
+    for (int op = 0; op < NUM_OPS; op++) {
+        patch.ops[op].enabled = (op & 1) == 0;
+        patch.ops[op].detune_cents = (float)(op - 2) * 17.0f;
+        patch.ops[op].level = 0.1f * (float)(op + 1);
+    }
+    patch_apply_ratio_mode(&patch, RATIO_PLASTIC);
+    CHECK(patch.algorithm == ALGORITHMS[4], "palette changed the algorithm");
+    CHECK(patch.ratio_mode == RATIO_PLASTIC, "palette mode %d",
+          (int)patch.ratio_mode);
+    for (int op = 0; op < NUM_OPS; op++) {
+        CHECK_NEAR(patch.ops[op].ratio,
+                   ratio_mode_ratio(RATIO_PLASTIC, op), 1e-6f,
+                   "palette op %d ratio", op + 1);
+        CHECK(patch.ops[op].enabled == ((op & 1) == 0),
+              "palette changed op %d enable", op + 1);
+        CHECK_NEAR(patch.ops[op].detune_cents, (float)(op - 2) * 17.0f, 1e-6f,
+                   "palette changed op %d detune", op + 1);
+        CHECK_NEAR(patch.ops[op].level, 0.1f * (float)(op + 1), 1e-6f,
+                   "palette changed op %d level", op + 1);
+    }
+}
+
 static void init_levels_follow_golden_decay(void) {
     Patch patch = patch_init(ALGORITHMS[0], RATIO_HARMONIC);
     Compiled compiled = compile(ALGORITHMS[0]);
@@ -67,6 +106,8 @@ static void midi_reference_pitches(void) {
 
 void test_patch(void) {
     golden_ratios_are_phi_powers();
+    palettes_belong_to_operator_numbers();
+    loading_a_palette_only_replaces_ratios();
     init_levels_follow_golden_decay();
     plastic_number_satisfies_its_cubic();
     golden_mirror_is_symmetric_around_the_fundamental();

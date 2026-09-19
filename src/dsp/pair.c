@@ -130,6 +130,10 @@ void voice_pair_note_on(VoicePair *p, float hz, float velocity) {
     }
 }
 
+void voice_pair_note_steal(VoicePair *p, float hz, float velocity) {
+    for (int i = 0; i < 2; i++) voice_note_steal(&p->voices[i], hz, velocity);
+}
+
 bool voice_pair_note_sounding(const VoicePair *p) {
     return voice_note_sounding(&p->voices[pair_live(p)]);
 }
@@ -182,6 +186,20 @@ static bool chain_eq(const Chain *a, const Chain *b) {
                a->amp.env.release_s == b->amp.env.release_s &&
                a->amp.env.curve == b->amp.env.curve &&
                a->amp.env.sustain == b->amp.env.sustain;
+    }
+    return true;
+}
+
+static bool op_params_eq(const OpParams *a, const OpParams *b) {
+    return a->enabled == b->enabled &&
+           a->ratio == b->ratio &&
+           a->detune_cents == b->detune_cents &&
+           a->level == b->level;
+}
+
+static bool patch_ops_eq(const Patch *a, const Patch *b) {
+    for (int op = 0; op < NUM_OPS; op++) {
+        if (!op_params_eq(&a->ops[op], &b->ops[op])) return false;
     }
     return true;
 }
@@ -253,6 +271,7 @@ void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *
             int idle = 1 - t;
             bool stale = p->voices[idle].patch.ratio_mode != patch.ratio_mode ||
                          p->voices[idle].patch.algorithm != patch.algorithm ||
+                         !patch_ops_eq(&p->voices[idle].patch, &patch) ||
                          !chain_eq(&p->voices[idle].chain, &chain);
             if (stale) {
                 voice_set_patch(&p->voices[idle], patch);

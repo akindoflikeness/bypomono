@@ -563,7 +563,9 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
     y += TIGHT;
 
     Compiled compiled = compile(a->shadow.algorithm);
+    Patch defaults = patch_init(a->shadow.algorithm, a->shadow.ratio_mode);
     int toggled = -1;
+    bool operator_changed = false;
     for (int i = 0; i < NUM_OPS; i++) {
         float row_h = th + 2.0f * SNUG;
         if (row_h < 22.0f) row_h = 22.0f;
@@ -601,11 +603,33 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
         text_draw(c, body, (P2){bx, y + row_h * 0.5f}, ALIGN_LEFT_CENTER, tag,
                   PAPER, 0.0f);
         y += row_h + GROUP;
+
+        /* Ratio and level are direct operator controls. The graph above can
+           turn this oscillator into a carrier or a modulator, but it never
+           gets to replace either value. The logarithmic range gives useful
+           resolution around 1x while retaining deliberately extreme FM. */
+        char label[24], value[32];
+        snprintf(label, sizeof label, "op %d ratio", i + 1);
+        snprintf(value, sizeof value, "x%.4f", (double)a->shadow.ops[i].ratio);
+        operator_changed |=
+            fad_log(ui, ui_id_n("rrail.ratio", i), rct_xywh(x, y, w, FADER_H),
+                    label, &a->shadow.ops[i].ratio, OP_RATIO_MIN, OP_RATIO_MAX,
+                    defaults.ops[i].ratio, value);
+        y += FADER_H + GROUP;
+
+        snprintf(label, sizeof label, "op %d level", i + 1);
+        snprintf(value, sizeof value, "%.3f", (double)a->shadow.ops[i].level);
+        operator_changed |=
+            fad_lin(ui, ui_id_n("rrail.level", i), rct_xywh(x, y, w, FADER_H),
+                    label, &a->shadow.ops[i].level, 0.0f, 1.0f,
+                    defaults.ops[i].level, value);
+        y += FADER_H + GROUP;
     }
     if (toggled >= 0) {
         a->shadow.ops[toggled].enabled = !a->shadow.ops[toggled].enabled;
-        send_patch(a);
+        operator_changed = true;
     }
+    if (operator_changed) send_patch(a);
     y += GROUP;
 
     {

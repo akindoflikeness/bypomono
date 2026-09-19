@@ -121,6 +121,33 @@ static void a_crossing_lands_and_leaves_a_clean_understudy(void) {
     voice_pair_free(&p);
 }
 
+static void custom_operator_tuning_lands_on_both_voices(void) {
+    VoicePair p;
+    settled(&p, RATIO_GOLDEN);
+
+    /* A palette name is no longer the tuning itself.  Keep the same name so
+       this catches an idle voice that is only checked by ratio_mode. */
+    Patch next = *voice_pair_patch(&p);
+    next.ops[1].ratio = 2.7182818f;
+    next.ops[1].level = 0.37f;
+    next.ops[3].ratio = 0.73f;
+    next.ops[3].level = 0.61f;
+    voice_pair_set_patch(&p, next);
+    CHECK(voice_pair_crossing(&p), "a direct ratio change must cross");
+    voice_pair_render_frames(&p, (size_t)(SR * CROSSFADE_SECONDS * 2.0f), noop_emit, NULL);
+
+    CHECK(!voice_pair_crossing(&p), "the custom-tuning crossing never ended");
+    for (int voice = 0; voice < 2; voice++) {
+        for (int op = 0; op < NUM_OPS; op++) {
+            CHECK(p.voices[voice].patch.ops[op].ratio == next.ops[op].ratio,
+                  "voice %d op %d ratio is stale", voice, op);
+            CHECK(p.voices[voice].patch.ops[op].level == next.ops[op].level,
+                  "voice %d op %d level is stale", voice, op);
+        }
+    }
+    voice_pair_free(&p);
+}
+
 static void the_understudy_is_on_the_same_note(void) {
     VoicePair p;
     settled(&p, RATIO_GOLDEN);
@@ -167,6 +194,7 @@ void test_pair(void) {
     putting_an_envelope_in_the_path_crosses_to_it();
     both_voices_take_the_note();
     a_crossing_lands_and_leaves_a_clean_understudy();
+    custom_operator_tuning_lands_on_both_voices();
     the_understudy_is_on_the_same_note();
     a_mode_change_introduces_no_step();
 }

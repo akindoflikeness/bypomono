@@ -56,6 +56,7 @@ static void sync_copy(VoicePair *dst, const VoicePair *src) {
         Voice *v = &dst->voices[i];
         v->freq = from->freq;
         v->target_freq = from->target_freq;
+        v->steal_glide_seconds = from->steal_glide_seconds;
         v->master = from->master;
         v->master_pos = from->master_pos;
         v->index = from->index;
@@ -214,6 +215,11 @@ void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity) {
     int note = b->poly > 1 ? pick_note(b, key) : 0;
     /* mono glides from wherever it is; a fresh poly slot starts on its pitch */
     bool fresh = b->poly > 1 && note_silent(b, note);
+    /* A ringing release is reusable but has no key-down owner, so it keeps
+       the player's ordinary glide. The safety slew is only for overwriting a
+       held voice. An anonymous event (-1) has no identity to retrigger. */
+    bool stealing = b->poly > 1 && b->held[note]
+                 && (key < 0 || b->key[note] != key);
     int unison = reach_unison(b);
     for (int copy = 0; copy < UNISON_MAX; copy++) {
         VoicePair *p = slot_pair(b, note, copy);
@@ -225,7 +231,10 @@ void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity) {
             voice_pair_wake(p);
             if (copy < unison) b->gain[s] = 1.0f;
         }
-        voice_pair_note_on(p, hz, velocity);
+        if (stealing)
+            voice_pair_note_steal(p, hz, velocity);
+        else
+            voice_pair_note_on(p, hz, velocity);
     }
     b->key[note] = key;
     b->held[note] = true;

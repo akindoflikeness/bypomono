@@ -107,18 +107,6 @@ static int algorithm_index(const Patch *patch) {
     return 0;
 }
 
-static Patch rebuild(const Patch *old, int algorithm_index, RatioMode mode) {
-    Patch p = patch_init(ALGORITHMS[algorithm_index], mode);
-    for (int i = 0; i < NUM_OPS; i++) {
-        p.ops[i].enabled = old->ops[i].enabled;
-        p.ops[i].detune_cents = old->ops[i].detune_cents;
-    }
-    p.feedback = old->feedback;
-    p.master_level = old->master_level;
-    p.glide_seconds = old->glide_seconds;
-    return p;
-}
-
 static void print_status(const Patch *patch, const VerbParams *verb) {
     Compiled compiled = compile(patch->algorithm);
     char glyphs[NUM_NODES + 1];
@@ -143,9 +131,12 @@ static void banner(void) {
     printf("BLOW YOUR PHASE OFF — droning at %g Hz (A2), golden mode, algorithm I\n",
            (double)START_HZ);
     printf("commands:\n");
-    printf("  alg <1-5>        switch algorithm (hard restrike)\n");
-    printf("  mode <name>      harmonic | fibonacci | golden | goldenmirror | plastic\n");
+    printf("  alg <1-8>        switch algorithm; operator tuning stays put\n");
+    printf("  mode <name>      load a ratio palette: harmonic | fibonacci | golden | goldenmirror | plastic\n");
     printf("  op <1-5> on|off  operator power switch (off = true reset)\n");
+    printf("  ratio <1-5> <x>  set an operator multiplier (%.2f to %.0f)\n",
+           (double)OP_RATIO_MIN, (double)OP_RATIO_MAX);
+    printf("  oplevel <1-5> <x> set an operator level (0 to 1)\n");
     printf("  note <0-127>     glide to MIDI note   |  hz <freq>  glide to frequency\n");
     printf("  index <0-1>      the INDEX macro: 0 = pure sines, 1 = full madness\n");
     printf("  rip <0-1>        the Rip: carriers phase-modulated by their own inverted past\n");
@@ -209,14 +200,14 @@ int main(void) {
         } else if (strcmp(a, "alg") == 0 && argc >= 2) {
             int k = atoi(b);
             if (k >= 1 && k <= 8) {
-                shadow = rebuild(&shadow, k - 1, shadow.ratio_mode);
+                shadow.algorithm = ALGORITHMS[k - 1];
                 send_patch = true;
             } else
                 printf("alg wants 1-8\n");
         } else if (strcmp(a, "mode") == 0 && argc >= 2) {
             RatioMode m;
             if (parse_mode(b, &m)) {
-                shadow = rebuild(&shadow, algorithm_index(&shadow), m);
+                patch_apply_ratio_mode(&shadow, m);
                 send_patch = true;
             } else
                 printf("modes: harmonic fibonacci golden goldenmirror plastic\n");
@@ -228,6 +219,22 @@ int main(void) {
                 send_patch = true;
             } else
                 printf("usage: op <1-%d> on|off\n", NUM_OPS);
+        } else if (strcmp(a, "ratio") == 0 && argc >= 3) {
+            int k = atoi(b);
+            if (k >= 1 && k <= NUM_OPS && parse_f(c, OP_RATIO_MIN,
+                                                   OP_RATIO_MAX, &x)) {
+                shadow.ops[k - 1].ratio = x;
+                send_patch = true;
+            } else
+                printf("usage: ratio <1-%d> <%.2f-%.0f>\n", NUM_OPS,
+                       (double)OP_RATIO_MIN, (double)OP_RATIO_MAX);
+        } else if (strcmp(a, "oplevel") == 0 && argc >= 3) {
+            int k = atoi(b);
+            if (k >= 1 && k <= NUM_OPS && parse_f(c, 0.0f, 1.0f, &x)) {
+                shadow.ops[k - 1].level = x;
+                send_patch = true;
+            } else
+                printf("usage: oplevel <1-%d> <0-1>\n", NUM_OPS);
         } else if (strcmp(a, "note") == 0 && argc >= 2) {
             int n = atoi(b);
             if (n >= 0 && n < 128) {

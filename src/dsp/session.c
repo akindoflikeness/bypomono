@@ -50,7 +50,8 @@ Session session_sanitize(Session s) {
     s.patch.unison_detune = clampf(s.patch.unison_detune, 0.0f, UNISON_DETUNE_MAX);
     for (int i = 0; i < NUM_OPS; i++) {
         s.patch.ops[i].level = clampf(s.patch.ops[i].level, 0.0f, 1.0f);
-        s.patch.ops[i].ratio = clampf(s.patch.ops[i].ratio, 0.01f, 64.0f);
+        s.patch.ops[i].ratio = clampf(s.patch.ops[i].ratio, OP_RATIO_MIN,
+                                      OP_RATIO_MAX);
         s.patch.ops[i].detune_cents = clampf(s.patch.ops[i].detune_cents, -1200.0f, 1200.0f);
     }
     s.verb.mix = clampf(s.verb.mix, 0.0f, 1.0f);

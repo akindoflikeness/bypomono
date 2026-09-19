@@ -18,6 +18,9 @@ enum {
     P_WARMTH,
     P_POLY, P_UNISON, P_DETUNE,
     P_ATTACK, P_ENV_DECAY, P_SUSTAIN,
+    /* Append-only: existing CLAP parameter IDs are part of saved host state. */
+    P_OP_RATIO1, P_OP_RATIO2, P_OP_RATIO3, P_OP_RATIO4, P_OP_RATIO5,
+    P_OP_LEVEL1, P_OP_LEVEL2, P_OP_LEVEL3, P_OP_LEVEL4, P_OP_LEVEL5,
     P_COUNT
 };
 

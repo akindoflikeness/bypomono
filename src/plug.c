@@ -53,6 +53,21 @@ const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_ATTACK] = {"attack s", "envelope", ENV_ATTACK_MIN, ENV_TIME_MAX, 0.008, K_FLOAT},
     [P_ENV_DECAY] = {"decay s", "envelope", 0, ENV_TIME_MAX, 2, K_FLOAT},
     [P_SUSTAIN] = {"sustain", "envelope", 0, 1, 1, K_FLOAT},
+    [P_OP_RATIO1] = {"op 1 ratio", "operators", OP_RATIO_MIN, OP_RATIO_MAX, 1, K_FLOAT},
+    [P_OP_RATIO2] = {"op 2 ratio", "operators", OP_RATIO_MIN, OP_RATIO_MAX, PHI, K_FLOAT},
+    [P_OP_RATIO3] = {"op 3 ratio", "operators", OP_RATIO_MIN, OP_RATIO_MAX, PHI * PHI, K_FLOAT},
+    [P_OP_RATIO4] = {"op 4 ratio", "operators", OP_RATIO_MIN, OP_RATIO_MAX,
+                     PHI * PHI * PHI, K_FLOAT},
+    [P_OP_RATIO5] = {"op 5 ratio", "operators", OP_RATIO_MIN, OP_RATIO_MAX,
+                     PHI * PHI * PHI * PHI, K_FLOAT},
+    /* Algorithm I (SSSS) starts with its depth-compensated operator gains. */
+    [P_OP_LEVEL1] = {"op 1 level", "operators", 0, 1,
+                     1.0 / (PHI * PHI * PHI), K_FLOAT},
+    [P_OP_LEVEL2] = {"op 2 level", "operators", 0, 1,
+                     1.0 / (PHI * PHI), K_FLOAT},
+    [P_OP_LEVEL3] = {"op 3 level", "operators", 0, 1, 1.0 / PHI, K_FLOAT},
+    [P_OP_LEVEL4] = {"op 4 level", "operators", 0, 1, 1.0 / PHI, K_FLOAT},
+    [P_OP_LEVEL5] = {"op 5 level", "operators", 0, 1, 1, K_FLOAT},
 };
 
 double plug_getv(const Plug *p, int id) {
@@ -78,13 +93,20 @@ static int plug_getv_int(const Plug *p, int id) {
     return (int)lround(v);
 }
 
+static RatioMode ratio_mode_of_vals(const Plug *p) {
+    int mode = plug_getv_int(p, P_RATIO_MODE);
+    if (mode < 0) mode = 0;
+    if (mode >= RATIO_MODE_COUNT) mode = RATIO_MODE_COUNT - 1;
+    return (RatioMode)mode;
+}
+
 #define getv plug_getv
 #define setv plug_setv
 #define SPEC PLUG_SPEC
 
 static Patch patch_of_vals(const Plug *p) {
     int alg = plug_getv_int(p, P_ALGORITHM);
-    RatioMode mode = (RatioMode)plug_getv_int(p, P_RATIO_MODE);
+    RatioMode mode = ratio_mode_of_vals(p);
     Patch patch = patch_init(ALGORITHMS[alg & 7], mode);
     patch.feedback = (float)getv(p, P_FB);
     patch.index = (float)getv(p, P_INDEX);
@@ -93,8 +115,13 @@ static Patch patch_of_vals(const Plug *p) {
     patch.glide_seconds = (float)getv(p, P_GLIDE);
     patch.field = (float)getv(p, P_FIELD);
     patch.curve = (float)getv(p, P_CURVE);
-    for (int i = 0; i < NUM_OPS; i++)
+    for (int i = 0; i < NUM_OPS; i++) {
         patch.ops[i].enabled = getv(p, P_OP1 + i) > 0.5;
+        /* These are artist-owned operator settings. ratio_mode only loads a
+           palette into them on an explicit host palette event. */
+        patch.ops[i].ratio = (float)getv(p, P_OP_RATIO1 + i);
+        patch.ops[i].level = (float)getv(p, P_OP_LEVEL1 + i);
+    }
     patch.voices = getv(p, P_POLY) > 0.5 ? POLY_MAX : 1;
     patch.unison = getv(p, P_UNISON) > 0.5 ? UNISON_MAX : 1;
     patch.unison_detune = (float)getv(p, P_DETUNE);
@@ -225,8 +252,11 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_FIELD, s->patch.field);
     setv(p, P_CURVE, s->patch.curve);
     setv(p, P_LEVEL, s->patch.master_level);
-    for (int i = 0; i < NUM_OPS; i++)
+    for (int i = 0; i < NUM_OPS; i++) {
         setv(p, P_OP1 + i, s->patch.ops[i].enabled ? 1 : 0);
+        setv(p, P_OP_RATIO1 + i, s->patch.ops[i].ratio);
+        setv(p, P_OP_LEVEL1 + i, s->patch.ops[i].level);
+    }
     setv(p, P_POLY, s->patch.voices > 1 ? 1 : 0);
     setv(p, P_UNISON, s->patch.unison > 1 ? 1 : 0);
     setv(p, P_DETUNE, s->patch.unison_detune);
@@ -277,8 +307,11 @@ static void mirror_patch_vals(Plug *p, const Patch *patch) {
     setv(p, P_FIELD, patch->field);
     setv(p, P_CURVE, patch->curve);
     setv(p, P_LEVEL, patch->master_level);
-    for (int i = 0; i < NUM_OPS; i++)
+    for (int i = 0; i < NUM_OPS; i++) {
         setv(p, P_OP1 + i, patch->ops[i].enabled ? 1 : 0);
+        setv(p, P_OP_RATIO1 + i, patch->ops[i].ratio);
+        setv(p, P_OP_LEVEL1 + i, patch->ops[i].level);
+    }
     setv(p, P_POLY, patch->voices > 1 ? 1 : 0);
     setv(p, P_UNISON, patch->unison > 1 ? 1 : 0);
     setv(p, P_DETUNE, patch->unison_detune);
@@ -467,6 +500,18 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
     }
 }
 
+/* Ratio mode is a palette-loading action when it arrives from the host.
+   Direct operator ratio events write their own value and are otherwise never
+   regenerated from topology or the selected palette. */
+static void set_host_param_value(Plug *p, int id, double value) {
+    setv(p, id, value);
+    if (id != P_RATIO_MODE) return;
+
+    RatioMode mode = ratio_mode_of_vals(p);
+    for (int i = 0; i < NUM_OPS; i++)
+        setv(p, P_OP_RATIO1 + i, ratio_mode_ratio(mode, i));
+}
+
 static void handle_event(Plug *p, const clap_event_header_t *hdr) {
     if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
     switch (hdr->type) {
@@ -490,7 +535,7 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
         const clap_event_param_value_t *ev =
             (const clap_event_param_value_t *)hdr;
         if (ev->param_id < P_COUNT) {
-            setv(p, (int)ev->param_id, ev->value);
+            set_host_param_value(p, (int)ev->param_id, ev->value);
             apply_vals(p);
         }
         break;
@@ -692,7 +737,8 @@ static void params_flush(const clap_plugin_t *pl,
             continue;
         const clap_event_param_value_t *ev =
             (const clap_event_param_value_t *)hdr;
-        if (ev->param_id < P_COUNT) setv(p, (int)ev->param_id, ev->value);
+        if (ev->param_id < P_COUNT)
+            set_host_param_value(p, (int)ev->param_id, ev->value);
     }
     if (p->engine_alive)
         apply_vals(p);

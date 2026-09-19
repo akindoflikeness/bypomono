@@ -10,6 +10,12 @@
 #define RIP_MAX_FB 0.9f
 #define FIELD_TO_INDEX 0.1f
 #define RIP_DAMP (1.0f / (PHI * PHI))
+/* Held-voice-only anti-click policy. This 20 ms floor clears the measured
+   multi-operator steal seam; the player's glide setting can only make it
+   longer, never turn it into a new pitch-control mode. */
+#define STEAL_GLIDE_SECONDS 0.020f
+#define STEAL_GLIDE_SETTLE_HZ 0.001f
+#define STEAL_GLIDE_SETTLE_RELATIVE 1e-4f
 
 static void rip_line_init(RipLine *r, float sample_rate, float hz) {
     size_t delay = (size_t)(RIP_DELAY_SECONDS * sample_rate);
@@ -58,6 +64,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->fb_hist[1] = 0.0f;
     v->freq = 110.0f;
     v->target_freq = 110.0f;
+    v->steal_glide_seconds = 0.0f;
     v->master = master_gain(patch.master_level);
     v->index = clampf(patch.index, 0.0f, 1.0f);
     v->fb_smooth = clampf(patch.feedback, 0.0f, 1.0f);
@@ -95,6 +102,7 @@ void voice_note_off(Voice *v) {
 void voice_set_freq_hz(Voice *v, float hz) {
     v->freq = hz;
     v->target_freq = hz;
+    v->steal_glide_seconds = 0.0f;
 }
 
 /* Solving for the coefficient is a bisection, so only pay for it when the
@@ -112,6 +120,16 @@ void voice_set_chain(Voice *v, Chain chain) {
 
 void voice_note_on(Voice *v, float hz, float velocity) {
     voice_glide_to_hz(v, hz);
+    envelope_note_on(&v->env, velocity);
+}
+
+void voice_note_steal(Voice *v, float hz, float velocity) {
+    voice_glide_to_hz(v, hz);
+    /* A phase-continuous frequency step is still a sharp spectral seam once
+       several freely tuned operators are feeding PM. This floor applies only
+       while reusing a sounding poly voice; the patch's normal glide remains
+       the user's control for every other move. */
+    v->steal_glide_seconds = STEAL_GLIDE_SECONDS;
     envelope_note_on(&v->env, velocity);
 }
 
@@ -138,11 +156,13 @@ float voice_target_hz(const Voice *v) {
 
 void voice_glide_to_hz(Voice *v, float hz) {
     v->target_freq = hz;
+    v->steal_glide_seconds = 0.0f;
     breath_trigger(&v->breath);
 }
 
 void voice_drone_to_hz(Voice *v, float hz) {
     v->target_freq = hz;
+    v->steal_glide_seconds = 0.0f;
     breath_drift(&v->breath);
 }
 
@@ -232,9 +252,11 @@ float voice_op_phase(const Voice *v, int op) {
 }
 
 void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata) {
-    float glide = v->patch.glide_seconds > 0.0f
-        ? expf(-1.0f / (v->patch.glide_seconds * v->sample_rate))
+    float glide_seconds = fmaxf(v->patch.glide_seconds, 0.0f);
+    float glide = glide_seconds > 0.0f
+        ? expf(-1.0f / (glide_seconds * v->sample_rate))
         : 0.0f;
+    float steal_glide = expf(-1.0f / (STEAL_GLIDE_SECONDS * v->sample_rate));
     float freq_mult[NUM_OPS];
     for (int i = 0; i < NUM_OPS; i++) {
         freq_mult[i] = v->patch.ops[i].ratio * exp2f(v->patch.ops[i].detune_cents / 1200.0f);
@@ -260,7 +282,15 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     const int *eval_order = v->compiled.eval_order;
 
     for (size_t n = 0; n < count; n++) {
-        v->freq = v->target_freq + (v->freq - v->target_freq) * glide;
+        float freq_glide = v->steal_glide_seconds > 0.0f
+                          && glide_seconds < STEAL_GLIDE_SECONDS
+                          ? steal_glide : glide;
+        v->freq = v->target_freq + (v->freq - v->target_freq) * freq_glide;
+        if (v->steal_glide_seconds > 0.0f
+            && fabsf(v->freq - v->target_freq)
+                   <= fmaxf(STEAL_GLIDE_SETTLE_HZ,
+                             fabsf(v->target_freq) * STEAL_GLIDE_SETTLE_RELATIVE))
+            v->steal_glide_seconds = 0.0f;
         v->index += (index_target - v->index) * param_k;
         v->fb_smooth += (fb_target - v->fb_smooth) * param_k;
         v->bend += (v->bend_to - v->bend) * param_k;

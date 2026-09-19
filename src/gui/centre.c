@@ -24,21 +24,12 @@ int algorithm_index_of(const Patch *p) {
     return 0;
 }
 
-Patch app_rebuild(const Patch *old, int algorithm_index, RatioMode mode) {
-    Patch derived = patch_init(ALGORITHMS[algorithm_index], mode);
-    Patch p = *old;
-    p.algorithm = derived.algorithm;
-    p.ratio_mode = derived.ratio_mode;
-    for (int i = 0; i < NUM_OPS; i++) {
-        p.ops[i].ratio = derived.ops[i].ratio;
-        p.ops[i].level = derived.ops[i].level;
-    }
-    return p;
-}
-
 void app_set_algorithm(App *a, int idx) {
     if (idx == algorithm_index_of(&a->shadow)) return;
-    a->shadow = app_rebuild(&a->shadow, idx, a->shadow.ratio_mode);
+    /* The graph changes here; the five oscillators do not. In particular,
+       a carrier becoming a modulator (or vice versa) keeps its ratio and
+       level so the topology can be auditioned against a stable palette. */
+    a->shadow.algorithm = ALGORITHMS[idx];
     Event ev = {.kind = EV_SET_PATCH, .u.patch = a->shadow};
     app_send(a, ev);
     Compiled compiled = compile(a->shadow.algorithm);
@@ -1279,9 +1270,9 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
         app_send(a, ev);
     }
 
-    /* ratio mode */
+    /* ratio palettes: an explicit load, never a side effect of topology */
     y += GROUP;
-    inverted_strip(c, rct(x0, y, x1, y + strip_h), "RATIO MODE");
+    inverted_strip(c, rct(x0, y, x1, y + strip_h), "RATIO PALETTE");
     y += strip_h + GROUP;
     {
         FontId f = ui_font(12.0f);
@@ -1304,8 +1295,7 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
         y += 21.0f + GROUP;
         if (new_mode >= 0) {
             RatioMode mode = (RatioMode)new_mode;
-            a->shadow = app_rebuild(&a->shadow, algorithm_index_of(&a->shadow),
-                                    mode);
+            patch_apply_ratio_mode(&a->shadow, mode);
             Event ev = {.kind = EV_SET_PATCH, .u.patch = a->shadow};
             app_send(a, ev);
             char ratios[128];
@@ -1314,7 +1304,7 @@ void draw_controls_house(App *a, Ui *ui, Rct r) {
                 at += (size_t)snprintf(ratios + at, sizeof ratios - at,
                                        i ? " %.3f" : "%.3f",
                                        (double)a->shadow.ops[i].ratio);
-            push_log(a, "ratio mode %s. op ratios: %s.", mode_name_of(mode),
+            push_log(a, "ratio palette %s loaded. op ratios: %s.", mode_name_of(mode),
                      ratios);
         }
     }

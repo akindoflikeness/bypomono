@@ -85,7 +85,7 @@ static void check_clamped(const Session *s, const char *what) {
     for (int i = 0; i < NUM_OPS; i++) {
         CHECK(in_range(s->patch.ops[i].level, 0.0f, 1.0f), "%s: op%d level %g",
               what, i, (double)s->patch.ops[i].level);
-        CHECK(in_range(s->patch.ops[i].ratio, 0.01f, 64.0f), "%s: op%d ratio %g",
+        CHECK(in_range(s->patch.ops[i].ratio, OP_RATIO_MIN, OP_RATIO_MAX), "%s: op%d ratio %g",
               what, i, (double)s->patch.ops[i].ratio);
         CHECK(in_range(s->patch.ops[i].detune_cents, -1200.0f, 1200.0f),
               "%s: op%d detune %g", what, i,

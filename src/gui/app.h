@@ -452,7 +452,6 @@ void app_init_defaults(App *a);
 extern const char *const ROMAN[8];
 const char *mode_name_of(RatioMode m);
 int algorithm_index_of(const Patch *p);
-Patch app_rebuild(const Patch *old, int algorithm_index, RatioMode mode);
 void app_set_algorithm(App *a, int idx);
 void app_set_engaged(App *a, bool on);
 

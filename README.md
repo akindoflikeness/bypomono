@@ -34,7 +34,7 @@
 <pre align="center">
 ┌────────────────────────────────────────────────────────────────────┐
 │  <a href="#download">DOWNLOAD</a>  ·  <a href="#install">INSTALL</a>  ·  <a href="#build-from-source">BUILD</a>  ·  <a href="#algorithmic-phase-modulation">PM</a>  ·  <a href="#phase-violence">VIOLENCE</a>  ·  <a href="#operator-structures">OPERATORS</a>  │
-│     <a href="#chambers">CHAMBERS</a>  ·  <a href="#ratio-modes">RATIOS</a>  ·  <a href="#progenitor">PROGENITOR</a>  ·  <a href="#textural-utility">WARMTH</a>  ·  <a href="#console">CONSOLE</a>      │
+│     <a href="#chambers">CHAMBERS</a>  ·  <a href="#ratio-palettes">RATIOS</a>  ·  <a href="#progenitor">PROGENITOR</a>  ·  <a href="#textural-utility">WARMTH</a>  ·  <a href="#console">CONSOLE</a>      │
 │                 <a href="#presets">PRESETS</a>  ·  <a href="#contributors">CONTRIBUTORS</a>  ·  <a href="#on-ai">ON AI</a>                 │
 └────────────────────────────────────────────────────────────────────┘
 </pre>
@@ -127,7 +127,10 @@ sudo dnf install gcc make pkgconf-pkg-config SDL2-devel freetype-devel alsa-lib-
 
 The architecture is PM with a dual algorithm selector: the arrangement of
 modulators, carriers and feedback is chosen by roman numeral I to VIII, and the
-ratio mode selector gives five separate irrational ratio configurations.
+ratio palette supplies five named starting configurations for operators 1–5.
+Loading a palette writes those five ratios directly to the operators; their
+ratios can then be tuned independently and are preserved when the algorithm
+changes.
 PM depth is tuned through these recursive algorithms
 
 <!-- TODO(you): check the arrows below — drawn from the README's own description of the chain; Chandas listens "before and after". -->
@@ -135,7 +138,7 @@ PM depth is tuned through these recursive algorithms
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"primaryColor":"#000000","primaryTextColor":"#ffffff","primaryBorderColor":"#ffffff","lineColor":"#ffffff","secondaryColor":"#000000","tertiaryColor":"#000000","background":"#000000","clusterBkg":"#000000","clusterBorder":"#ffffff","edgeLabelBackground":"#000000"}}}%%
 flowchart LR
-  subgraph OPS["OPERATORS · I–VIII · ratio mode"]
+  subgraph OPS["OPERATORS · I–VIII · ratio palette"]
     direction LR
     O1["1"] --> O2["2"] --> O3["3"]
     O4["4"] --> O5["5"]
@@ -242,7 +245,7 @@ A sum of the carriers leaks into a short delay through an all pass filter to act
 | II   | `SSSP` | true 4-op stack `1→2→3→4`, plus sine `5`          | 2        | 4         | op 1 (depth 4)     |
 | III  | `PSSP` | 3-op stack `1→2→3`, plus sines `4`, `5`           | 3        | 3         | op 1 (depth 3)     |
 | IV   | `PPSP` | FM pair `1→2`, plus sines `3`, `4`, `5`           | 4        | 2         | op 1 (depth 2)     |
-| V    | `PPPP` | five parallel sines (pure additive)               | 5        | 1         | op 1 (depth 1)     |
+| V    | `PPPP` | five independently tuned parallel sines (additive) | 5        | 1         | op 1 (depth 1)     |
 | VI   | `PPPF` | FM pair `4→5`, plus sines `1`, `2`, `3`           | 4        | 2         | **op 5 (depth 1)** |
 | VII  | `PPFF` | FM pairs `1→2` and `4→5`, plus sine `3`           | 3        | 2         | **op 2 (depth 1)** |
 | VIII | `PFFF` | 3-op stack `1→2→3` and FM pair `4→5`              | 2        | 3         | **op 3 (depth 1)** |
@@ -264,9 +267,9 @@ Here it was used to define phase offsets via the all pass filter networks.
 </tr>
 </table>
 
-## Ratio Modes
+## Ratio Palettes
 
-<!-- TODO(you): a line or two on why irrational ratios → stable inharmonic timbres, then anything per mode. Ratios below are read from src/dsp/patch.c (ratio_mode_ratio). -->
+<!-- The values below are read from src/dsp/patch.c (ratio_mode_ratio). -->
 
 <table align="center">
 <tr>

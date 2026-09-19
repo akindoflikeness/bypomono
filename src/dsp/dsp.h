@@ -54,6 +54,12 @@ float engage_gate_next(EngageGate *g, bool open);
 #define NUM_NODES 4
 #define ALGORITHM_SPACE 81
 
+/* Direct-operator tuning contract shared by the UI, plug-in, and session
+   loader. These bound the control surface only: neither note pitch nor an
+   algorithm is allowed to derive or replace an operator's stored ratio. */
+#define OP_RATIO_MIN 0.01f
+#define OP_RATIO_MAX 64.0f
+
 typedef enum { COMBINE_SERIES = 0, COMBINE_PARALLEL = 1, COMBINE_FEEDBACK = 2 } Combine;
 typedef uint8_t AlgorithmId; /* base-3 trits, one per node; compare with == */
 
@@ -127,6 +133,9 @@ typedef struct {
 } Patch;
 
 Patch patch_init(AlgorithmId algorithm, RatioMode ratio_mode);
+/* Loads one of the named ratio palettes into the operators. This is an
+   explicit tuning action: changing an algorithm never calls it. */
+void patch_apply_ratio_mode(Patch *patch, RatioMode ratio_mode);
 
 /* ---------- envelope ---------- */
 
@@ -256,6 +265,9 @@ typedef struct {
     float gain[NUM_OPS];
     bool pending_reset[NUM_OPS];
     float freq, target_freq;
+    /* A reassigned poly voice gets this temporary minimum glide so an
+       arbitrary manual ratio set cannot create a hard steal seam. */
+    float steal_glide_seconds;
     float master, index;
     float fb_smooth; /* glided, so modulating fb cannot zipper */
     float level_s[NUM_OPS]; /* op levels are gains straight to the mix */
@@ -282,6 +294,9 @@ void voice_set_freq_hz(Voice *v, float hz);
 void voice_set_drone_hz(Voice *v, float hz); /* retunes the rip rotator */
 void voice_set_chain(Voice *v, Chain chain);
 void voice_note_on(Voice *v, float hz, float velocity);
+/* Like note_on, but a held polyphonic voice is being reassigned. It preserves
+   the user's normal glide setting while imposing a brief click-safe minimum. */
+void voice_note_steal(Voice *v, float hz, float velocity);
 bool voice_note_sounding(const Voice *v);
 void voice_set_bend_semitones(Voice *v, float semitones);
 void voice_set_detune_cents(Voice *v, float cents);
@@ -327,6 +342,7 @@ void voice_pair_set_drone_hz(VoicePair *p, float hz);
 void voice_pair_glide_to_hz(VoicePair *p, float hz);
 void voice_pair_drone_to_hz(VoicePair *p, float hz);
 void voice_pair_note_on(VoicePair *p, float hz, float velocity);
+void voice_pair_note_steal(VoicePair *p, float hz, float velocity);
 bool voice_pair_note_sounding(const VoicePair *p);
 const Chain *voice_pair_chain(const VoicePair *p);
 void voice_pair_set_bend_semitones(VoicePair *p, float semitones);

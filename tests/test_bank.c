@@ -117,6 +117,56 @@ static void a_fifth_note_takes_the_oldest(void) {
     voice_bank_free(&b);
 }
 
+static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
+    static VoiceBank b;
+    Patch p = voiced(4, 1, 0.0f);
+    p.glide_seconds = 0.0f;
+    voice_bank_init(&b, SR, p);
+    voice_bank_set_chain_now(&b, notes_chain());
+    int keys[4] = {60, 64, 67, 71};
+    for (int i = 0; i < 4; i++)
+        voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
+
+    Voice *stolen = &b.pairs[0 * UNISON_MAX].voices[0];
+    float from = stolen->freq;
+    float target = midi_hz(74);
+    voice_bank_note_on(&b, 74, target, 0.8f);
+    CHECK(stolen->steal_glide_seconds > 0.0f,
+          "a held note reassignment did not start its safety glide");
+    voice_bank_render_frames(&b, 1, noop_emit, NULL);
+    CHECK(stolen->freq > from && stolen->freq < target,
+          "a held reassignment stepped from %g to %g", (double)from,
+          (double)stolen->freq);
+
+    /* A repeated key is a retrigger, not a replacement of another held key. */
+    Voice *same_key = &b.pairs[3 * UNISON_MAX].voices[0];
+    float same_target = midi_hz(72);
+    voice_bank_note_on(&b, 71, same_target, 0.8f);
+    CHECK(same_key->steal_glide_seconds == 0.0f,
+          "a same-key retrigger acquired a steal glide");
+    voice_bank_render_frames(&b, 1, noop_emit, NULL);
+    CHECK_NEAR(same_key->freq, same_target, 1e-3f,
+               "a same-key retrigger ignored zero player glide");
+
+    /* A released tail is reusable, but no longer a held voice to steal. */
+    Voice *released = &b.pairs[1 * UNISON_MAX].voices[0];
+    voice_bank_note_off(&b, 64);
+    float released_target = midi_hz(75);
+    voice_bank_note_on(&b, 75, released_target, 0.8f);
+    CHECK(released->steal_glide_seconds == 0.0f,
+          "a released tail acquired a held-voice steal glide");
+    voice_bank_render_frames(&b, 1, noop_emit, NULL);
+    CHECK_NEAR(released->freq, released_target, 1e-3f,
+               "a released tail ignored zero player glide");
+
+    /* An anonymous event cannot be a same-key retrigger, so it does steal. */
+    Voice *anonymous = &b.pairs[2 * UNISON_MAX].voices[0];
+    voice_bank_note_on(&b, -1, midi_hz(76), 0.8f);
+    CHECK(anonymous->steal_glide_seconds > 0.0f,
+          "an anonymous held reassignment missed its safety glide");
+    voice_bank_free(&b);
+}
+
 static void a_key_lets_go_of_its_own_note(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
@@ -297,6 +347,7 @@ void test_bank(void) {
     mono_is_the_pair_it_replaced();
     four_notes_sound_together();
     a_fifth_note_takes_the_oldest();
+    only_a_held_poly_reassignment_uses_the_safety_glide();
     a_key_lets_go_of_its_own_note();
     mono_releases_on_any_key();
     the_drone_is_one_voice();

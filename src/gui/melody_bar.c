@@ -1,4 +1,4 @@
-/* The melody bar along the bottom: the sample-and-hold note source, its
+/* The melody page of the bottom strip: the sample-and-hold note source, its
    tuning and scale, and its rate, range and root. */
 #include <math.h>
 #include <stdio.h>
@@ -38,22 +38,19 @@ static void pitch_readout(App *a, Ui *ui, Flow *flow, bool driving) {
     }
 }
 
-void draw_melody_bar(App *a, Ui *ui, Rct r) {
+void draw_melody_page(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     FontId body = ui_font(12.0f);
     MelodyParams *m = &a->shadow_melody;
     bool driving = midi_driving(a);
     bool changed = false, refused = false;
 
-    Rct inner = rct_shrink(r, 6.0f);
+    Rct inner = r;
     Rct top = cut_top(&inner, ROW_H);
     cut_top(&inner, GROUP);
     Rct faders = cut_top(&inner, FADER_H);
 
     Flow flow = flow_in(top, ROW_H, GROUP);
-    inverted_strip(c, flow_next(&flow, text_width(body, "MELODY", 0.0f)
-                                           + 2.0f * GAP),
-                   "MELODY");
     {
         const char *lbl = m->enabled ? "S&H ON" : "S&H OFF";
         Rct br = flow_next(&flow, fmaxf(text_width(body, lbl, 0.0f) + 2.0f * GAP,

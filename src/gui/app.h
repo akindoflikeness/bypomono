@@ -64,7 +64,7 @@ typedef enum {
     EV_SET_LIMITER,
     EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
     EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING,
-    EV_SET_LFO, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC
+    EV_SET_SEQ, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC
 } EventKind;
 
 typedef struct {
@@ -79,28 +79,17 @@ typedef struct {
         float f;
         bool flag;
         struct { float hz, velocity; int key; } note; /* key -1 = none */
-        struct { int slot; LfoParams p; } lfo;
+        struct { int slot; SeqParams p; } seq;
         struct { int slot; ModRoute r; } route;
     } u;
 } Event;
 
-/* what the audio thread's lfos are doing, for drawing. the random shapes
-   have no picture to walk, so their own output is kept and drawn as a scope */
-#define LFO_HIST 256
-#define LFO_HIST_EVERY 8 /* control blocks between samples */
-
+/* where the audio thread's sequences are, for playheads */
 typedef struct {
-    _Atomic uint32_t phase_q16[MOD_LFOS];
-    _Atomic uint32_t value_bits[MOD_LFOS]; /* float bits */
-    _Atomic int32_t hist[MOD_LFOS][LFO_HIST]; /* value * 127 */
-    _Atomic uint32_t hist_head[MOD_LFOS];
-    uint32_t skip;
-} LfoMeter;
-void lfo_meter_store(LfoMeter *m, const Mod *mod);
-float lfo_meter_phase(const LfoMeter *m, int slot);
-float lfo_meter_value(const LfoMeter *m, int slot);
-/* the last n samples, oldest first; returns how many were written */
-int lfo_meter_history(const LfoMeter *m, int slot, float *out, int n);
+    _Atomic uint32_t pos_q16[SEQS]; /* steps, 0..16 */
+} SeqMeter;
+void seq_meter_store(SeqMeter *m, const Mod *mod);
+float seq_meter_pos(const SeqMeter *m, int slot);
 
 typedef struct {
     float ops[NUM_OPS];
@@ -208,6 +197,7 @@ CcTarget cc_target_from_name(const char *s);
 enum { TAB_SHELL, TAB_SCOPE, TAB_ENV, TAB_PRE, TAB_INFO, DISPLAY_TABS };
 /* the space column's pages */
 enum { TAB_ROOM, TAB_CHANDAS, SPACE_TABS };
+enum { TAB_MELODY, TAB_SEQS, STRIP_TABS };
 
 #define LOG_LINES 64
 #define LOG_LINE_LEN 256
@@ -251,7 +241,7 @@ typedef struct App {
     _Atomic uint32_t env_clock, env_level_q16;
     CcState cc;
     AudioMeter meter;
-    LfoMeter lfo_meter;
+    SeqMeter seq_meter;
     _Atomic bool rec_on;
     float sample_rate;
     int channels;
@@ -313,7 +303,10 @@ typedef struct App {
 
     /* panes */
     bool info_open, show_fps;
-    int space_tab, display_tab;
+    int space_tab, display_tab, strip_tab;
+    int seq_selected;  /* the sequence the strip edits */
+    bool seq_painting; /* a drag across the step cells is under way */
+    P2 seq_paint_prev;
     int display_back; /* the tab the presets page returns to */
 
     /* recording */
@@ -330,8 +323,13 @@ typedef struct App {
 
 /* push onto the UI->audio ring, logging on overflow */
 void app_send(App *a, Event ev);
-/* every lfo and route slot, after a preset or state replaced a->mods */
+/* every sequence and route slot, after a preset or state replaced a->mods */
 void app_send_mods(App *a);
+/* sequence edits (cmd_mod.c): commit sends only what changed */
+void mods_commit(App *a, const ModBank *next);
+bool mods_route_set(ModBank *b, int seq, ModTarget t, float depth, bool snap);
+void mods_seq_remove(ModBank *b, int seq);
+void seq_rate_text(const SeqParams *p, char *out, size_t cap);
 void push_log(App *a, const char *fmt, ...);
 /* every line of a view, strips kept as snapshots */
 void push_log_view(App *a, const View *v);
@@ -464,7 +462,9 @@ void draw_fm_column(App *a, Ui *ui, Rct r);      /* fm.c */
 void draw_display_column(App *a, Ui *ui, Rct r); /* display.c */
 void draw_display_tabs(App *a, Ui *ui, Rct bar);
 void draw_space_column(App *a, Ui *ui, Rct r);   /* space.c */
-void draw_melody_bar(App *a, Ui *ui, Rct r);     /* melody_bar.c */
+void draw_melody_page(App *a, Ui *ui, Rct r);    /* melody_bar.c */
+/* sequences.c: the strip along the bottom, melody or sequences */
+void draw_bottom_strip(App *a, Ui *ui, Rct r);
 
 /* shell.c */
 void draw_stage(App *a, Ui *ui, Rct r);    /* starfield + shell */

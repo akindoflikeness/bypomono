@@ -338,7 +338,7 @@ static void apply_gui_event(Plug *p, Event ev) {
                        voice_bank_compiled(&p->voice));
         mirror_patch_vals(p, &ev.u.patch);
         break;
-    case EV_SET_LFO: mod_set_lfo(&p->mod, ev.u.lfo.slot, ev.u.lfo.p); break;
+    case EV_SET_SEQ: mod_set_seq(&p->mod, ev.u.seq.slot, ev.u.seq.p); break;
     case EV_SET_ROUTE:
         mod_set_route(&p->mod, ev.u.route.slot, ev.u.route.r);
         break;
@@ -452,7 +452,6 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     Plug *p = e->p;
     Stereo w = verb_process(&p->verb, frame);
     w = chandas_process(&p->chandas, w);
-    w = tape_process(&p->tape, w);
     bool notes_live = voice_bank_chain(&p->voice)->amp.kind == AMP_ENVELOPE;
     float g = engage_gate_next(&p->gate, p->engaged || notes_live);
     Stereo limited = limiter_process(&p->limiter, (Stereo){w.l * g, w.r * g});
@@ -496,6 +495,12 @@ static void mod_tick(Plug *p, size_t samples) {
     if (g & MOD_G_BEND) voice_bank_set_bend_semitones(&p->voice, out.bend);
 }
 
+static bool host_holding(const Plug *p) {
+    for (int k = 0; k < 128; k++)
+        if (p->host_held[k]) return true;
+    return false;
+}
+
 static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
                         uint32_t count) {
     uint32_t done = 0;
@@ -513,10 +518,12 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
         if (p->transport_running
             && melody_samples_until_fire(&p->melody, &until) && until < run)
             run = (uint32_t)until;
-        bool modulating = mod_any_lfo(&p->mod) || p->mod.groups_prev;
+        bool modulating = mod_any_seq(&p->mod) || p->mod.groups_prev;
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(p, run);
+        if (mod_take_retrigger(&p->mod, p->melody.params.enabled || host_holding(p)))
+            seq_retrigger(&p->voice, &p->chandas);
         Emit e = {p, gapp, l, r, base + done};
         voice_bank_render_frames(&p->voice, run, emit_frame, &e);
         if (p->transport_running) melody_advance(&p->melody, run);
@@ -544,6 +551,7 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
         if (ev->key < 0 || ev->key > 127) break;
         voice_bank_note_on(&p->voice, ev->key, midi_to_hz((uint8_t)ev->key),
                            (float)ev->velocity);
+        p->host_held[ev->key] = true;
         chandas_note_pulse(&p->chandas);
         mod_note_on(&p->mod);
         break;
@@ -553,6 +561,8 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
         /* key -1 is the CLAP wildcard: every note */
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
         voice_bank_note_off(&p->voice, ev->key < 0 ? -1 : ev->key);
+        if (ev->key < 0) memset(p->host_held, 0, sizeof p->host_held);
+        else if (ev->key < 128) p->host_held[ev->key] = false;
         break;
     }
     case CLAP_EVENT_PARAM_VALUE: {
@@ -571,10 +581,12 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
             voice_bank_note_on(&p->voice, ev->data[1] & 0x7f,
                                midi_to_hz(ev->data[1] & 0x7f),
                                (float)ev->data[2] / 127.0f);
+            p->host_held[ev->data[1] & 0x7f] = true;
             chandas_note_pulse(&p->chandas);
             mod_note_on(&p->mod);
         } else if (status == 0x80 || status == 0x90) {
             voice_bank_note_off(&p->voice, ev->data[1] & 0x7f);
+            p->host_held[ev->data[1] & 0x7f] = false;
         } else if (status == 0xE0) {
             int raw = ((ev->data[2] & 0x7f) << 7) | (ev->data[1] & 0x7f);
             p->base.bend = (float)(raw - 8192) / 8192.0f * BEND_SEMITONES;
@@ -631,7 +643,7 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
     while (idx < n_ev) handle_event(p, in->get(in, idx++));
     if (gapp) {
         voices_store(gapp, &p->voice);
-        lfo_meter_store(&gapp->lfo_meter, &p->mod);
+        seq_meter_store(&gapp->seq_meter, &p->mod);
     }
     return CLAP_PROCESS_CONTINUE;
 }
@@ -829,9 +841,9 @@ static bool state_load(const clap_plugin_t *pl, const clap_istream_t *stream) {
     if (!ok) return false;
     vals_of_session(p, &s);
     p->mods_main = s.mods;
-    for (int i = 0; i < MOD_LFOS; i++)
+    for (int i = 0; i < SEQS; i++)
         EventRing_push(&p->mod_ev,
-                       (Event){.kind = EV_SET_LFO, .u.lfo = {i, s.mods.lfo[i]}});
+                       (Event){.kind = EV_SET_SEQ, .u.seq = {i, s.mods.seq[i]}});
     for (int i = 0; i < MOD_ROUTES; i++)
         EventRing_push(&p->mod_ev, (Event){.kind = EV_SET_ROUTE,
                                            .u.route = {i, s.mods.route[i]}});

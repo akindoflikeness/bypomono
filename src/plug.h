@@ -57,7 +57,7 @@ typedef struct Plug {
     bool engaged;
     bool transport_running;
     float applied_drone_hz;
-    /* main thread: the lfos and routes host state saves; state_load hands
+    /* main thread: the sequences and routes host state saves; state_load hands
        them to the audio thread through mod_ev */
     ModBank mods_main;
     EventRing mod_ev;
@@ -68,6 +68,7 @@ typedef struct Plug {
     float peak_acc[2];
     _Atomic bool host_touched; /* host moved params; editor shadows stale */
     void *gui_state;           /* owned by plug_gui.c */
+    bool host_held[128]; /* keys the host holds; gates must not cut them */
 } Plug;
 
 double plug_getv(const Plug *p, int id);

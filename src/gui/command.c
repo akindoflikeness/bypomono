@@ -110,8 +110,6 @@ static bool parse_bend(Command *c, char *err, size_t n);
 static bool run_bend(App *a, const Command *c, char *err, size_t n);
 static bool parse_mod(Command *c, char *err, size_t n);
 static bool run_mod(App *a, const Command *c, char *err, size_t n);
-static bool view_mod(App *a, const Command *c, View *out);
-static bool preview_mod(App *a, const Command *c, View *out);
 static int complete_mod(char *const words[], int nwords, const char *prefix,
                         char out[][CAND_LEN], int max);
 static bool view_ls(App *a, const Command *c, View *out);
@@ -263,13 +261,23 @@ static const Verb VERBS[] = {
     {.name = "set", .group = G_SOUND,
      .about = "set any parameter through its canonical command", .run = run_set,
      .parse = parse_set, .form = "<parameter> <value>"},
+    {.name = "seq", .group = G_MODULATION,
+     .about = "paint sixteen steps and point them at controls",
+     .run = seq_run, .parse = seq_parse, .view = seq_view,
+     .preview = seq_preview, .complete = seq_complete,
+     .form = "[<n> [fill <shape>] [set <16 values>] [step <k> <v>] "
+             "[gate <k> on|off] [loop|once] [smooth|steps] [rate <1/16|2.5s>] "
+             "[to <target> <depth|off> [snap]]... | <n> rm]",
+     .extra = "values go 0 to 1; 0.5 leaves the control where it is\n"
+              "seq 1 fill sine to index 0.4 makes a sequence and routes it\n"
+              "seq 2 steps to pitch 1 snap plays notes on 12-tet; gates "
+              "restart the note\n"
+              "seq alone lists them; -v pins the view"},
     {.name = "mod", .group = G_MODULATION,
-     .about = "make and route a modulation source", .run = run_mod,
-     .parse = parse_mod, .view = view_mod, .preview = preview_mod,
-     .complete = complete_mod,
-     .form = "<lfo ...|cc <cc|all> <control|off>>",
-     .extra = "mod lfo uses the lfo grammar; mod cc 7 index binds; "
-              "mod cc 7 off unbinds"},
+     .about = "bind a midi controller to a control", .run = run_mod,
+     .parse = parse_mod, .complete = complete_mod,
+     .form = "cc <cc|all> <control|off>",
+     .extra = "mod cc 7 index binds; mod cc 7 off unbinds"},
     {.name = "clock", .group = G_SOUND,
      .about = "show or set the tempo source", .run = run_clock,
      .parse = parse_clock, .complete = complete_clock,
@@ -725,10 +733,7 @@ bool command_run(App *a, const Command *c, char *err, size_t err_len) {
         /* A pin keeps the source it names, rather than the whole edit line. */
         char pin[LOG_LINE_LEN];
         snprintf(pin, sizeof pin, "%s", c->verb->name);
-        if (strcmp(c->verb->name, "mod") == 0 && c->nwords > 1
-            && strcasecmp(c->words[0], "lfo") == 0)
-            scat(pin, sizeof pin, " lfo %s", c->words[1]);
-        else if (strcmp(c->verb->name, "ls") == 0 && c->argc > 0
+        if (strcmp(c->verb->name, "ls") == 0 && c->argc > 0
                  && strcasecmp(c->arg[0], "mod") == 0)
             scat(pin, sizeof pin, " mod");
         else if (c->nwords > 0 && isdigit((unsigned char)c->words[0][0]))
@@ -1224,26 +1229,10 @@ bool command_view(App *a, const char *line, View *out) {
 
 /* ---------- modulation namespace ---------- */
 
-static void mod_lfo_inner(const Command *outer, Command *inner) {
-    *inner = *outer;
-    inner->nwords = outer->nwords - 1;
-    for (int i = 0; i < inner->nwords; i++)
-        snprintf(inner->words[i], sizeof inner->words[i], "%s",
-                 outer->words[i + 1]);
-}
-
 static bool parse_mod(Command *c, char *err, size_t n) {
-    if (c->nwords == 0)
-        return reason(err, n, "mod wants a source: lfo or cc");
-    if (strcasecmp(c->words[0], "lfo") == 0) {
-        Command inner;
-        mod_lfo_inner(c, &inner);
-        if (!mod_parse_lfo(&inner, err, n)) return false;
-        c->mod = inner.mod;
-        return true;
-    }
-    if (strcasecmp(c->words[0], "cc") != 0)
-        return reason(err, n, "no modulation source called %s", c->words[0]);
+    if (c->nwords == 0 || strcasecmp(c->words[0], "cc") != 0)
+        return reason(err, n, "mod binds a controller: mod cc 7 index; "
+                              "sequences are seq");
     if (c->nwords != 3)
         return reason(err, n, "mod cc wants a controller and a control or off");
     if (strcasecmp(c->words[1], "all") == 0) {
@@ -1273,12 +1262,8 @@ static bool parse_mod(Command *c, char *err, size_t n) {
 }
 
 static bool run_mod(App *a, const Command *c, char *err, size_t n) {
-    if (strcasecmp(c->words[0], "lfo") == 0) {
-        Command inner;
-        mod_lfo_inner(c, &inner);
-        inner.mod = c->mod;
-        return mod_run_lfo(a, &inner, err, n);
-    }
+    (void)err;
+    (void)n;
     if (c->cc_all || c->target == CC_NONE)
         gui_run_unbind(a, c->cc_all ? -1 : c->cc);
     else
@@ -1286,31 +1271,10 @@ static bool run_mod(App *a, const Command *c, char *err, size_t n) {
     return true;
 }
 
-static bool view_mod(App *a, const Command *c, View *out) {
-    if (c->nwords == 0 || strcasecmp(c->words[0], "lfo") != 0) return false;
-    Command inner;
-    mod_lfo_inner(c, &inner);
-    inner.mod = c->mod;
-    return mod_view_lfo(a, &inner, out);
-}
-
-static bool preview_mod(App *a, const Command *c, View *out) {
-    if (c->nwords == 0 || strcasecmp(c->words[0], "lfo") != 0) return false;
-    Command inner;
-    mod_lfo_inner(c, &inner);
-    inner.mod = c->mod;
-    return mod_preview_lfo(a, &inner, out);
-}
-
 static int complete_mod(char *const words[], int nwords, const char *prefix,
                         char out[][CAND_LEN], int max) {
     int n = 0;
-    if (nwords == 0) {
-        n = add_cand(out, n, max, prefix, "lfo");
-        return add_cand(out, n, max, prefix, "cc");
-    }
-    if (strcasecmp(words[0], "lfo") == 0)
-        return mod_complete_lfo(words + 1, nwords - 1, prefix, out, max);
+    if (nwords == 0) return add_cand(out, n, max, prefix, "cc");
     if (strcasecmp(words[0], "cc") != 0) return 0;
     if (nwords == 1) return add_cand(out, n, max, prefix, "all");
     if (nwords == 2) {
@@ -1325,8 +1289,9 @@ static int complete_mod(char *const words[], int nwords, const char *prefix,
 
 static bool view_ls(App *a, const Command *c, View *out) {
     if (c->argc != 1 || strcasecmp(c->arg[0], "mod") != 0) return false;
-    Command mods = {0};
-    return mod_view_mods(a, &mods, out);
+    Command all = {0};
+    all.seq.slot = -1;
+    return seq_view(a, &all, out);
 }
 
 /* ---------- presets on disk ---------- */
@@ -1698,8 +1663,9 @@ static bool run_cd(App *a, const Command *c, char *err, size_t n) {
 
 static bool run_ls(App *a, const Command *c, char *err, size_t n) {
     if (c->argc > 0 && strcasecmp(c->arg[0], "mod") == 0) {
-        Command mods = {.view = c->view};
-        return mod_run_mods(a, &mods, err, n);
+        Command all = {.view = c->view};
+        all.seq.slot = -1;
+        return seq_run(a, &all, err, n);
     }
     PresetFilter filter = a->preset_filter;
     if (c->argc > 0) {

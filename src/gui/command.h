@@ -8,24 +8,28 @@
 
 typedef enum { CMD_NOP, CMD_HELP, CMD_RUN } CommandKind;
 
-#define MOD_CMD_ROUTES 8
+#define SEQ_CMD_ROUTES 8
 
-/* mod lfo <n> [shape] [rate] [phase] [mode] [bi|uni] [to <target> <depth|off>]... */
+/* seq <n> [fill <shape>] [set v1..v16] [step k v] [gate k on|off] [loop|once]
+   [smooth|steps] [rate <1/16|2.5s>] [to <target> <depth|off> [snap]]... | rm */
 typedef struct {
-    int slot; /* 0-based; -1 = every lfo */
+    int slot; /* 0-based; -1 = every sequence */
     bool rm;
-    bool set_shape, set_rate, set_phase, set_mode, set_pol;
-    uint8_t shape, mode;
-    bool unipolar;
-    int8_t division; /* -1 = rate_hz */
-    float rate_hz, phase;
-    int nroutes;
+    bool set_mode, set_smooth, set_rate, set_fill, set_values;
+    uint8_t mode, fill;
+    bool smooth;
+    int8_t division; /* -1 = length_s */
+    float length_s;
+    float values[SEQ_STEPS];
+    int nsteps, ngates, nroutes;
+    struct { uint8_t step; float v; } steps[SEQ_STEPS];
+    struct { uint8_t step; bool on; } gates[SEQ_STEPS];
     struct {
         uint8_t target;
         float depth;
-        bool off;
-    } route[MOD_CMD_ROUTES];
-} ModCmd;
+        bool off, snap;
+    } route[SEQ_CMD_ROUTES];
+} SeqCmd;
 
 #define CMD_WORDS 32
 
@@ -45,7 +49,7 @@ typedef struct Command {
     bool view;                  /* -v: pin the line's view above the log */
     char words[CMD_WORDS][64];  /* raw verbs: the words after the verb */
     int nwords;
-    ModCmd mod;
+    SeqCmd seq;
     char text[1024]; /* CMD_HELP: lines joined with '\n' */
 } Command;
 
@@ -96,15 +100,12 @@ typedef struct Verb {
 } Verb;
 
 /* cmd_mod.c */
-bool mod_parse_lfo(Command *c, char *err, size_t err_len);
-bool mod_run_lfo(App *a, const Command *c, char *err, size_t err_len);
-bool mod_view_lfo(App *a, const Command *c, View *out);
-bool mod_preview_lfo(App *a, const Command *c, View *out);
-int mod_complete_lfo(char *const words[], int nwords, const char *prefix,
-                     char out[][CAND_LEN], int max);
-bool mod_parse_mods(Command *c, char *err, size_t err_len);
-bool mod_run_mods(App *a, const Command *c, char *err, size_t err_len);
-bool mod_view_mods(App *a, const Command *c, View *out);
+bool seq_parse(Command *c, char *err, size_t err_len);
+bool seq_run(App *a, const Command *c, char *err, size_t err_len);
+bool seq_view(App *a, const Command *c, View *out);
+bool seq_preview(App *a, const Command *c, View *out);
+int seq_complete(char *const words[], int nwords, const char *prefix,
+                 char out[][CAND_LEN], int max);
 
 /* cmd_controls.c */
 bool control_parse(Command *c, char *err, size_t err_len);

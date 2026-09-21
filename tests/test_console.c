@@ -163,7 +163,12 @@ static void every_verb_parses_its_forms(void) {
             parses("mod cc 7 index", CMD_RUN);
             parses("mod cc cc7 off", CMD_RUN);
             parses("mod cc all off", CMD_RUN);
-            parses("mod lfo 1 tri", CMD_RUN);
+            continue;
+        }
+        if (strcmp(v->name, "seq") == 0) {
+            parses("seq", CMD_RUN);
+            parses("seq 1 fill sine to index 0.4", CMD_RUN);
+            parses("seq 2 steps to pitch 1 snap gate 1 on", CMD_RUN);
             continue;
         }
         if (strcmp(v->name, "tempo") == 0) {

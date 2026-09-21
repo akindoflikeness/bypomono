@@ -82,7 +82,7 @@ void app_frame(App *a, Ui *ui) {
     struct { Rct r; void (*draw)(App *, Ui *, Rct); } panels[] = {
         {s.sound, draw_sound_column},     {s.fm, draw_fm_column},
         {s.display, draw_display_column}, {s.space, draw_space_column},
-        {s.melody, draw_melody_bar},
+        {s.strip, draw_bottom_strip},
     };
     Rct saved = canvas_clip(c);
     for (size_t i = 0; i < sizeof panels / sizeof panels[0]; i++) {

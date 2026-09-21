@@ -4,7 +4,7 @@
 
 #include "app.h"
 
-#define PENTAGRAM_H 150.0f
+#define PENTAGRAM_H 110.0f
 
 static void dotted_circle(Canvas *c, P2 center, float radius, uint8_t ink) {
     int n = (int)(TAU_F * radius / 4.0f);

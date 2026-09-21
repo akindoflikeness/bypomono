@@ -111,7 +111,7 @@ Screen screen_layout(Rct full, float footer_h) {
     s.footer = cut_bottom(&r, footer_h);
     s.header = cut_top(&r, HEADER_H);
     cut_top(&r, PANEL_GAP);
-    s.melody = cut_bottom(&r, MELODY_H);
+    s.strip = cut_bottom(&r, BOTTOM_STRIP_H);
     cut_bottom(&r, PANEL_GAP);
     s.sound = cut_left(&r, SOUND_W);
     cut_left(&r, PANEL_GAP);

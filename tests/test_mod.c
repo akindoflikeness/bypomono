@@ -1,3 +1,5 @@
+#include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -6,10 +8,10 @@
 
 #define SR 48000.0f
 
-static LfoParams lfo(LfoShape shape, float hz) {
-    LfoParams p = lfo_params_default();
-    p.shape = shape;
-    p.rate_hz = hz;
+static SeqParams seq_of(SeqFill fill, bool smooth) {
+    SeqParams p = seq_params_default();
+    seq_fill(&p, fill, 1u);
+    p.smooth = smooth;
     return p;
 }
 
@@ -24,78 +26,73 @@ static ModBase base_of(const Session *s) {
     return b;
 }
 
-static void shapes_stay_in_their_polarity(void) {
-    for (int sh = 0; sh < LFO_SHAPE_COUNT; sh++) {
-        LfoParams p = lfo((LfoShape)sh, 1.0f);
-        for (int uni = 0; uni < 2; uni++) {
-            p.unipolar = uni;
-            float lo = uni ? 0.0f : -1.0f;
-            for (int i = 0; i <= 400; i++) {
-                float v = lfo_shape_at(&p, (float)i / 100.0f, 7u);
-                CHECK(v >= lo - 1e-5f && v <= 1.0f + 1e-5f,
-                      "%s uni=%d gave %g", lfo_shape_name((LfoShape)sh), uni, v);
+/* ---------- the curve ---------- */
+
+static void held_steps_hit_their_values(void) {
+    SeqParams p = seq_of(SEQ_FILL_RANDOM, false);
+    for (int k = 0; k < SEQ_STEPS; k++) {
+        CHECK(seq_value_at(&p, (float)k + 0.01f) == p.value[k], "step %d start", k);
+        CHECK(seq_value_at(&p, (float)k + 0.99f) == p.value[k], "step %d end", k);
+    }
+}
+
+static void smooth_passes_through_every_value_without_overshoot(void) {
+    for (int mode = 0; mode < SEQ_MODE_COUNT; mode++) {
+        SeqParams p = seq_of(SEQ_FILL_RANDOM, true);
+        p.mode = (uint8_t)mode;
+        for (int k = 0; k < SEQ_STEPS; k++)
+            CHECK_NEAR(seq_value_at(&p, (float)k + 0.5f), p.value[k], 1e-5f,
+                       "mode %d step %d centre", mode, k);
+        for (int k = 0; k + 1 < SEQ_STEPS; k++) {
+            float lo = fminf(p.value[k], p.value[k + 1]);
+            float hi = fmaxf(p.value[k], p.value[k + 1]);
+            for (int i = 1; i < 20; i++) {
+                float v = seq_value_at(&p, (float)k + 0.5f + (float)i / 20.0f);
+                CHECK(v >= lo - 1e-5f && v <= hi + 1e-5f,
+                      "mode %d between %d and %d: %g outside %g..%g", mode, k,
+                      k + 1, v, lo, hi);
             }
         }
     }
 }
 
-static void sine_starts_at_its_phase(void) {
-    LfoParams p = lfo(LFO_SINE, 1.0f);
-    p.phase = 0.25f;
-    Mod m;
-    mod_init(&m, SR);
-    mod_set_lfo(&m, 0, p);
-    mod_advance(&m, 0, 120.0f);
-    CHECK_NEAR(m.st[0].value, 1.0f, 1e-4f, "value %g at a quarter cycle",
-               m.st[0].value);
+static void a_loop_joins_its_ends(void) {
+    SeqParams p = seq_of(SEQ_FILL_SINE, true);
+    float before = seq_value_at(&p, 15.999f), after = seq_value_at(&p, 0.0f);
+    CHECK_NEAR(before, after, 1e-3f, "loop jumps at the join: %g then %g", before,
+               after);
 }
 
-static void one_hertz_completes_a_cycle_in_a_second(void) {
+static void once_holds_its_last_value(void) {
     Mod m;
     mod_init(&m, SR);
-    mod_set_lfo(&m, 0, lfo(LFO_RAMP, 1.0f));
-    for (int i = 0; i < 1500; i++) mod_advance(&m, MOD_BLOCK, 120.0f);
-    CHECK_NEAR(m.st[0].phase, 0.0f, 1e-3f, "phase %g after 48000 samples",
-               m.st[0].phase);
-}
-
-static void synced_rate_follows_tempo(void) {
-    LfoParams p = lfo(LFO_SINE, 1.0f);
-    for (int d = 0; d < CHANDAS_DIVISIONS_LEN; d++)
-        if (strcmp(CHANDAS_DIVISIONS[d].name, "1/4") == 0) p.division = (int8_t)d;
-    CHECK_NEAR(lfo_effective_hz(&p, 120.0f), 2.0f, 1e-4f, "1/4 at 120 bpm");
-    CHECK_NEAR(lfo_effective_hz(&p, 60.0f), 1.0f, 1e-4f, "1/4 at 60 bpm");
-}
-
-static void retrig_resets_and_free_does_not(void) {
-    Mod m;
-    mod_init(&m, SR);
-    LfoParams free_ = lfo(LFO_RAMP, 3.0f);
-    LfoParams retrig = lfo(LFO_RAMP, 3.0f);
-    retrig.mode = LFO_RETRIG;
-    mod_set_lfo(&m, 0, free_);
-    mod_set_lfo(&m, 1, retrig);
-    mod_advance(&m, 10000, 120.0f);
-    float free_before = m.st[0].phase;
-    mod_note_on(&m);
-    CHECK(m.st[0].phase == free_before, "free lfo moved on a note");
-    CHECK(m.st[1].phase == 0.0f, "retrig lfo at %g after a note", m.st[1].phase);
-}
-
-static void once_runs_one_cycle_and_holds(void) {
-    Mod m;
-    mod_init(&m, SR);
-    LfoParams p = lfo(LFO_RAMP, 10.0f);
-    p.mode = LFO_ONCE;
-    mod_set_lfo(&m, 0, p);
-    mod_note_on(&m);
-    mod_advance(&m, (size_t)SR, 120.0f);
-    CHECK(m.st[0].done, "once never finished");
+    SeqParams p = seq_of(SEQ_FILL_RAMP, true);
+    p.mode = SEQ_ONCE;
+    p.division = -1;
+    p.length_s = 1.0f;
+    mod_set_seq(&m, 0, p);
+    mod_advance(&m, (size_t)(SR * 1.5f), 120.0f);
+    CHECK(m.st[0].done, "once did not finish");
     float held = m.st[0].value;
+    CHECK_NEAR(held, 2.0f * p.value[SEQ_STEPS - 1] - 1.0f, 1e-4f, "held %g", held);
     mod_advance(&m, (size_t)SR, 120.0f);
     CHECK(m.st[0].value == held, "once moved after finishing");
-    CHECK_NEAR(held, 1.0f, 1e-3f, "ramp held at %g, wants its end", held);
+    mod_note_on(&m);
+    CHECK(!m.st[0].done && m.st[0].pos == 0.0f, "a note did not restart it");
 }
+
+static void a_synced_step_follows_tempo(void) {
+    SeqParams p = seq_params_default(); /* 1/16 */
+    CHECK_NEAR(seq_step_seconds(&p, 120.0f), 0.125f, 1e-6f, "1/16 at 120");
+    Mod m;
+    mod_init(&m, SR);
+    mod_set_seq(&m, 0, p);
+    mod_advance(&m, (size_t)(SR * 0.5f), 120.0f);
+    CHECK_NEAR(m.st[0].pos, 4.0f, 1e-2f, "half a second is 4 steps, got %g",
+               m.st[0].pos);
+}
+
+/* ---------- routes ---------- */
 
 static void routes_add_depth_times_span_and_clamp(void) {
     Session s = session_default();
@@ -103,10 +100,11 @@ static void routes_add_depth_times_span_and_clamp(void) {
     s.verb.decay = 4.0f;
     Mod m;
     mod_init(&m, SR);
-    LfoParams p = lfo(LFO_SQUARE, 1.0f);
-    mod_set_lfo(&m, 0, p);
-    mod_set_route(&m, 0, (ModRoute){0, MT_INDEX, 0.25f});
-    mod_set_route(&m, 1, (ModRoute){0, MT_DECAY, 1.0f});
+    SeqParams p = seq_params_default();
+    for (int k = 0; k < SEQ_STEPS; k++) p.value[k] = 1.0f;
+    mod_set_seq(&m, 0, p);
+    mod_set_route(&m, 0, (ModRoute){0, MT_INDEX, 0.25f, false});
+    mod_set_route(&m, 1, (ModRoute){0, MT_DECAY, 1.0f, false});
     mod_advance(&m, 0, 120.0f);
     ModBase base = base_of(&s), out;
     int g = mod_apply(&m, &base, &out);
@@ -118,27 +116,44 @@ static void routes_add_depth_times_span_and_clamp(void) {
     CHECK(base.patch.index == 0.5f, "base was changed");
 }
 
-static void pitch_depth_one_is_an_octave(void) {
+static void a_middle_value_changes_nothing(void) {
     Session s = session_default();
     Mod m;
     mod_init(&m, SR);
-    mod_set_lfo(&m, 0, lfo(LFO_SQUARE, 1.0f));
-    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f});
+    mod_set_seq(&m, 0, seq_params_default());
+    mod_set_route(&m, 0, (ModRoute){0, MT_INDEX, 1.0f, false});
+    mod_advance(&m, 64, 120.0f);
+    ModBase base = base_of(&s), out;
+    mod_apply(&m, &base, &out);
+    CHECK_NEAR(out.patch.index, base.patch.index, 1e-6f, "flat moved index");
+}
+
+static void snap_rounds_pitch_to_semitones(void) {
+    Session s = session_default();
+    Mod m;
+    mod_init(&m, SR);
+    SeqParams p = seq_params_default();
+    for (int k = 0; k < SEQ_STEPS; k++) p.value[k] = 0.5f + 0.37f * 0.5f;
+    mod_set_seq(&m, 0, p);
+    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, false});
     mod_advance(&m, 0, 120.0f);
     ModBase base = base_of(&s), out;
     mod_apply(&m, &base, &out);
-    CHECK_NEAR(out.bend, 12.0f, 1e-4f, "bend %g", out.bend);
+    CHECK_NEAR(out.bend, 0.37f * 12.0f, 1e-3f, "free bend %g", out.bend);
+    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
+    mod_apply(&m, &base, &out);
+    CHECK(out.bend == roundf(0.37f * 12.0f), "snapped bend %g", out.bend);
 }
 
 static void a_removed_route_writes_its_group_once_more(void) {
     Session s = session_default();
     Mod m;
     mod_init(&m, SR);
-    mod_set_lfo(&m, 0, lfo(LFO_SINE, 1.0f));
-    mod_set_route(&m, 0, (ModRoute){0, MT_GHOST, 0.5f});
+    mod_set_seq(&m, 0, seq_of(SEQ_FILL_SINE, true));
+    mod_set_route(&m, 0, (ModRoute){0, MT_GHOST, 0.5f, false});
     ModBase base = base_of(&s), out;
     CHECK(mod_apply(&m, &base, &out) & MOD_G_VERB, "ghost not written");
-    mod_set_route(&m, 0, (ModRoute){0, MT_NONE, 0.0f});
+    mod_set_route(&m, 0, (ModRoute){0, MT_NONE, 0.0f, false});
     CHECK(mod_apply(&m, &base, &out) & MOD_G_VERB,
           "ghost not put back after the route went");
     CHECK(out.verb.ghost == base.verb.ghost, "ghost %g, base %g",
@@ -146,57 +161,126 @@ static void a_removed_route_writes_its_group_once_more(void) {
     CHECK(mod_apply(&m, &base, &out) == 0, "still writing with no routes");
 }
 
-static void sanitize_drops_routes_to_empty_lfos(void) {
-    ModBank b = mod_bank_default();
-    b.route[0] = (ModRoute){3, MT_INDEX, 0.5f};
-    b.route[1] = (ModRoute){0, 200, 0.5f};
-    b.lfo[0] = lfo(LFO_SINE, 999.0f);
-    b.route[2] = (ModRoute){0, MT_MIX, 7.0f};
-    b = mod_bank_sanitize(b);
-    CHECK(b.route[0].target == MT_NONE, "route to an empty lfo survived");
-    CHECK(b.route[1].target == MT_NONE, "route to a bad target survived");
-    CHECK(b.lfo[0].rate_hz == LFO_RATE_MAX_HZ, "rate %g", b.lfo[0].rate_hz);
-    CHECK(b.route[2].depth == 1.0f, "depth %g", b.route[2].depth);
+static void gates_retrigger_only_pitch_sequences_and_not_under_the_melody(void) {
+    Mod m;
+    mod_init(&m, SR);
+    SeqParams p = seq_params_default();
+    p.division = -1;
+    p.length_s = 1.6f; /* 0.1 s a step */
+    p.gate[1] = true;
+    mod_set_seq(&m, 0, p);
+    mod_advance(&m, (size_t)(SR * 0.15f), 120.0f);
+    CHECK(!mod_take_retrigger(&m, false), "a gate fired with no pitch route");
+    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
+    mod_init(&m, SR);
+    mod_set_seq(&m, 0, p);
+    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
+    mod_advance(&m, (size_t)(SR * 0.05f), 120.0f);
+    CHECK(!mod_take_retrigger(&m, false), "fired before reaching the gate");
+    mod_advance(&m, (size_t)(SR * 0.1f), 120.0f);
+    CHECK(mod_take_retrigger(&m, false), "crossing the gate did not fire");
+    CHECK(!mod_take_retrigger(&m, false), "one gate fired twice");
+    mod_init(&m, SR);
+    mod_set_seq(&m, 0, p);
+    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
+    mod_advance(&m, (size_t)(SR * 0.15f), 120.0f);
+    CHECK(!mod_take_retrigger(&m, true), "fired while the melody plays");
 }
 
-static void presets_carry_lfos_and_routes(void) {
+static void sanitize_drops_routes_to_empty_sequences(void) {
+    ModBank b = mod_bank_default();
+    b.route[0] = (ModRoute){0, MT_INDEX, 0.5f, false};
+    b.seq[1] = seq_params_default();
+    b.seq[1].length_s = 1e9f;
+    b.seq[1].value[3] = 7.0f;
+    b.route[1] = (ModRoute){1, MT_COUNT + 3, 0.5f, false};
+    b.route[2] = (ModRoute){1, MT_MIX, 9.0f, true};
+    b = mod_bank_sanitize(b);
+    CHECK(b.route[0].target == MT_NONE, "route to an empty sequence survived");
+    CHECK(b.route[1].target == MT_NONE, "route to a bad target survived");
+    CHECK(b.route[2].depth == 1.0f && !b.route[2].snap, "depth %g snap %d",
+          b.route[2].depth, b.route[2].snap);
+    CHECK(b.seq[1].length_s == SEQ_LENGTH_MAX_S, "length %g", b.seq[1].length_s);
+    CHECK(b.seq[1].value[3] == 1.0f, "value %g", b.seq[1].value[3]);
+}
+
+/* ---------- presets ---------- */
+
+static void presets_carry_sequences_and_routes(void) {
     Session s = session_default();
-    LfoParams p = lfo(LFO_DRIFT, 0.25f);
-    p.mode = LFO_ONCE;
-    p.unipolar = true;
-    p.phase = 0.5f;
-    s.mods.lfo[2] = p;
-    LfoParams q = lfo(LFO_SQUARE, 1.0f);
-    q.division = 15;
-    s.mods.lfo[0] = q;
-    s.mods.route[0] = (ModRoute){2, MT_CH_WARP, -0.3f};
-    s.mods.route[1] = (ModRoute){0, MT_PITCH, 0.05f};
+    SeqParams p = seq_of(SEQ_FILL_TRI, false);
+    p.mode = SEQ_ONCE;
+    p.division = -1;
+    p.length_s = 3.5f;
+    p.gate[0] = p.gate[9] = true;
+    s.mods.seq[2] = p;
+    s.mods.seq[0] = seq_of(SEQ_FILL_SINE, true);
+    s.mods.route[0] = (ModRoute){2, MT_CH_WARP, -0.3f, false};
+    s.mods.route[1] = (ModRoute){0, MT_PITCH, 0.5f, true};
     char *json = session_to_json(&s);
     CHECK(json != NULL, "no json");
     Session back;
     CHECK(session_from_json(json, &back), "json did not parse:\n%s", json);
+    CHECK(json && strstr(json, "\"lfo") == NULL, "old format written");
     free(json);
-    CHECK(back.mods.lfo[2].used && back.mods.lfo[2].shape == LFO_DRIFT,
-          "lfo 3 shape lost");
-    CHECK(back.mods.lfo[2].mode == LFO_ONCE && back.mods.lfo[2].unipolar,
-          "lfo 3 mode or polarity lost");
-    CHECK(back.mods.lfo[2].phase == 0.5f && back.mods.lfo[2].rate_hz == 0.25f,
-          "lfo 3 phase %g rate %g", back.mods.lfo[2].phase,
-          back.mods.lfo[2].rate_hz);
-    CHECK(back.mods.lfo[0].division == 15, "lfo 1 division %d",
-          back.mods.lfo[0].division);
-    CHECK(!back.mods.lfo[1].used, "lfo 2 appeared from nowhere");
-    CHECK(mod_bank_find_route(&back.mods, 2, MT_CH_WARP) >= 0,
-          "chandas warp route lost");
+    const SeqParams *q = &back.mods.seq[2];
+    CHECK(q->used && q->mode == SEQ_ONCE && !q->smooth, "seq 3 mode lost");
+    CHECK(q->division == -1 && q->length_s == 3.5f, "seq 3 length %g",
+          q->length_s);
+    CHECK(q->gate[0] && q->gate[9] && !q->gate[1], "gates lost");
+    for (int k = 0; k < SEQ_STEPS; k++)
+        CHECK_NEAR(q->value[k], p.value[k], 1e-6f, "value %d", k);
+    CHECK(back.mods.seq[0].division == SEQ_DEFAULT_DIVISION, "seq 1 division");
+    CHECK(!back.mods.seq[1].used, "seq 2 appeared from nowhere");
+    CHECK(mod_bank_find_route(&back.mods, 2, MT_CH_WARP) >= 0, "warp route lost");
     int pr = mod_bank_find_route(&back.mods, 0, MT_PITCH);
-    CHECK(pr >= 0 && back.mods.route[pr].depth == 0.05f, "pitch route lost");
+    CHECK(pr >= 0 && back.mods.route[pr].snap, "pitch snap lost");
+}
+
+static void an_old_lfo_preset_becomes_sequences(void) {
+    const char *doc =
+        "{\"tempo_bpm\": 120, \"mods\": {\"lfos\": ["
+        "{\"slot\": 3, \"shape\": \"sine\", \"mode\": \"free\", "
+        "\"unipolar\": false, \"rate_hz\": 0.5, \"phase\": 0},"
+        "{\"slot\": 9, \"shape\": \"square\", \"mode\": \"once\", "
+        "\"unipolar\": false, \"rate_hz\": 1, \"division\": \"1/1\", "
+        "\"phase\": 0}],"
+        "\"routes\": [{\"lfo\": 3, \"target\": \"index\", \"depth\": 0.4},"
+        "{\"lfo\": 9, \"target\": \"pitch\", \"depth\": 0.1}]}}";
+    Session s;
+    CHECK(session_from_json(doc, &s), "old preset did not load");
+    const SeqParams *sine = &s.mods.seq[0];
+    CHECK(sine->used && sine->smooth && sine->mode == SEQ_LOOP, "sine seq");
+    for (int k = 0; k < SEQ_STEPS; k++) {
+        float want = 0.5f + 0.5f * sinf(TAU_F * ((float)k + 0.5f) / 16.0f);
+        CHECK(fabsf(sine->value[k] - want) < 0.05f, "sine step %d: %g, want %g",
+              k, sine->value[k], want);
+    }
+    CHECK(sine->division == -1 && sine->length_s == 2.0f, "0.5 hz is 2 s, got %g",
+          sine->length_s);
+    const SeqParams *sq = &s.mods.seq[1];
+    CHECK(sq->used && !sq->smooth && sq->mode == SEQ_ONCE, "square seq");
+    CHECK(sq->division == SEQ_DEFAULT_DIVISION, "a bar cycle is 1/16 steps: %d",
+          sq->division);
+    int r = mod_bank_find_route(&s.mods, 0, MT_INDEX);
+    CHECK(r >= 0 && s.mods.route[r].depth == 0.4f, "index route lost");
+    CHECK(mod_bank_find_route(&s.mods, 1, MT_PITCH) >= 0, "pitch route lost");
+
+    char *json = session_to_json(&s);
+    Session back;
+    CHECK(json && session_from_json(json, &back), "converted preset round trip");
+    CHECK(json && strstr(json, "\"seqs\"") && !strstr(json, "\"lfos\""),
+          "converted preset not written as sequences");
+    free(json);
+    CHECK(memcmp(&back.mods.seq[0], &s.mods.seq[0], sizeof back.mods.seq[0]) == 0,
+          "sequence changed on the way round");
 }
 
 static void a_preset_without_mods_has_none(void) {
     Session s;
-    CHECK(session_from_json("{\"warmth\": 0.2}", &s), "minimal preset");
-    for (int i = 0; i < MOD_LFOS; i++)
-        CHECK(!s.mods.lfo[i].used, "lfo %d used in a preset without mods", i);
+    CHECK(session_from_json("{\"tempo_bpm\": 100}", &s), "minimal preset");
+    for (int i = 0; i < SEQS; i++)
+        CHECK(!s.mods.seq[i].used, "seq %d used in a preset without mods", i);
     Session d = session_default();
     char *json = session_to_json(&d);
     CHECK(json && !strstr(json, "\"mods\""), "empty mods were written");
@@ -205,41 +289,45 @@ static void a_preset_without_mods_has_none(void) {
 
 static void hostile_mods_never_escape_their_ranges(void) {
     const char *docs[] = {
-        "{\"mods\": {\"lfos\": [{\"slot\": 99, \"shape\": \"sine\"}]}}",
-        "{\"mods\": {\"lfos\": [{\"slot\": 0}]}}",
+        "{\"mods\": {\"seqs\": [{\"slot\": 99}]}}",
+        "{\"mods\": {\"seqs\": [{\"slot\": 0}]}}",
+        "{\"mods\": {\"seqs\": [{\"slot\": 1, \"length_s\": 1e30, "
+        "\"values\": [9, -9, 1e30], \"gates\": [0, 17, 3], \"mode\": \"x\"}], "
+        "\"routes\": [{\"seq\": 1, \"target\": \"index\", \"depth\": 1e9, "
+        "\"snap\": true}, {\"seq\": 8, \"target\": \"mix\", \"depth\": 0.5}]}}",
         "{\"mods\": {\"lfos\": [{\"slot\": 1, \"rate_hz\": 1e30, "
-        "\"phase\": -5, \"shape\": \"nope\"}], \"routes\": "
-        "[{\"lfo\": 1, \"target\": \"index\", \"depth\": 1e9}, "
-        "{\"lfo\": 16, \"target\": \"mix\", \"depth\": 0.5}]}}",
-        "{\"mods\": {\"routes\": [{\"lfo\": 1, \"target\": \"index\"}]}}",
-        "{\"mods\": {\"lfos\": {}}}",
+        "\"shape\": \"nope\"}], \"routes\": [{\"lfo\": 1, \"target\": "
+        "\"index\", \"depth\": 1e9}]}}",
+        "{\"mods\": {\"seqs\": {}}}",
         "{\"mods\": [1,2,3]}",
     };
     for (size_t i = 0; i < sizeof docs / sizeof docs[0]; i++) {
         Session s;
         if (!session_from_json(docs[i], &s)) continue;
-        for (int k = 0; k < MOD_LFOS; k++) {
-            const LfoParams *p = &s.mods.lfo[k];
-            CHECK(p->rate_hz >= LFO_RATE_MIN_HZ && p->rate_hz <= LFO_RATE_MAX_HZ,
-                  "doc %zu lfo %d rate %g", i, k, p->rate_hz);
-            CHECK(p->phase >= 0.0f && p->phase <= 1.0f, "doc %zu phase %g", i,
-                  p->phase);
-            CHECK(p->shape < LFO_SHAPE_COUNT, "doc %zu shape %d", i, p->shape);
+        for (int k = 0; k < SEQS; k++) {
+            const SeqParams *p = &s.mods.seq[k];
+            CHECK(p->length_s >= SEQ_LENGTH_MIN_S && p->length_s <= SEQ_LENGTH_MAX_S,
+                  "doc %zu seq %d length %g", i, k, p->length_s);
+            CHECK(p->mode < SEQ_MODE_COUNT, "doc %zu mode %d", i, p->mode);
+            for (int v = 0; v < SEQ_STEPS; v++)
+                CHECK(p->value[v] >= 0.0f && p->value[v] <= 1.0f,
+                      "doc %zu value %g", i, p->value[v]);
         }
         for (int k = 0; k < MOD_ROUTES; k++) {
             const ModRoute *r = &s.mods.route[k];
             if (r->target == MT_NONE) continue;
-            CHECK(s.mods.lfo[r->lfo].used, "doc %zu route to empty lfo", i);
+            CHECK(s.mods.seq[r->seq].used, "doc %zu route to empty seq", i);
             CHECK(r->depth >= -1.0f && r->depth <= 1.0f, "doc %zu depth %g", i,
                   r->depth);
+            CHECK(!r->snap || r->target == MT_PITCH, "doc %zu snap off pitch", i);
         }
     }
 }
 
 static void nowhere(void *ud, size_t n, const Frame *f) { (void)ud; (void)n; (void)f; }
 
-/* an lfo writes fb every control block, so it glides to its target instead
-   of arriving on the first sample (rip is smoothed on main) */
+/* a sequence writes fb every control block, so it glides to its target
+   instead of arriving on the first sample */
 static void fb_glides(void) {
     Patch patch = patch_init(ALGORITHMS[0], RATIO_HARMONIC);
     patch.feedback = 0.0f;
@@ -257,80 +345,11 @@ static void fb_glides(void) {
     voice_free(&v);
 }
 
-/* the random shapes are drawn from what they did, so the readout has to
-   carry their spread */
-static void random_shapes_fill_their_history(void) {
-    static LfoMeter meter;
-    memset(&meter, 0, sizeof meter);
-    Mod m;
-    mod_init(&m, SR);
-    LfoParams p = lfo(LFO_SH, 6.0f);
-    mod_set_lfo(&m, 0, p);
-    for (int i = 0; i < 3000; i++) {
-        mod_advance(&m, MOD_BLOCK, 120.0f);
-        lfo_meter_store(&meter, &m);
-    }
-    float hist[LFO_HIST];
-    int n = lfo_meter_history(&meter, 0, hist, LFO_HIST);
-    CHECK(n == LFO_HIST, "history holds %d of %d", n, LFO_HIST);
-    float lo = 1.0f, hi = -1.0f, steps = 0.0f;
-    for (int i = 0; i < n; i++) {
-        if (hist[i] < lo) lo = hist[i];
-        if (hist[i] > hi) hi = hist[i];
-        if (i && fabsf(hist[i] - hist[i - 1]) > 0.01f) steps += 1.0f;
-    }
-    CHECK(hi - lo > 0.5f, "sample-hold spread is only %g", hi - lo);
-    CHECK(steps > 2.0f, "only %g steps in the window", steps);
-}
-
-/* ---------- the lfo and mods verbs ---------- */
+/* ---------- the seq verb ---------- */
 
 #include "../src/gui/command.h"
 
 static App mod_app;
-
-static bool parses(const char *line, Command *c, char *err, size_t cap) {
-    return parse_line(line, c, err, cap);
-}
-
-static void lfo_line_reads_every_word(void) {
-    Command c;
-    char err[512];
-    CHECK(parses("mod lfo 2 tri rate 2hz phase 90 retrig uni to index 0.4 "
-                 "to chandas warp -0.5 -v",
-                 &c, err, sizeof err),
-          "did not parse: %s", err);
-    const ModCmd *m = &c.mod;
-    CHECK(c.view, "-v lost");
-    CHECK(m->slot == 1, "slot %d", m->slot);
-    CHECK(m->set_shape && m->shape == LFO_TRIANGLE, "shape");
-    CHECK(m->set_rate && m->division == -1 && m->rate_hz == 2.0f, "rate");
-    CHECK(m->set_phase && fabsf(m->phase - 0.25f) < 1e-6f, "phase %g", m->phase);
-    CHECK(m->set_mode && m->mode == LFO_RETRIG, "mode");
-    CHECK(m->set_pol && m->unipolar, "polarity");
-    CHECK(m->nroutes == 2, "routes %d", m->nroutes);
-    CHECK(m->route[1].target == MT_CH_WARP && m->route[1].depth == -0.5f,
-          "two-word target");
-    CHECK(parses("mod lfo 1 1/8T", &c, err, sizeof err), "bare division: %s", err);
-    CHECK(c.mod.set_rate && c.mod.division >= 0, "division not read");
-}
-
-static void lfo_errors_name_the_word_and_what_it_wants(void) {
-    Command c;
-    char err[512];
-    CHECK(!parses("mod lfo 3 sqare", &c, err, sizeof err), "typo parsed");
-    CHECK(strstr(err, "did you mean square") != NULL, "no suggestion: %s", err);
-    CHECK(strchr(err, '\n') != NULL, "error lacks the usage line: %s", err);
-    CHECK(!parses("mod lfo 0", &c, err, sizeof err), "lfo 0 parsed");
-    CHECK(strstr(err, "1 to 16") != NULL, "range missing: %s", err);
-    CHECK(!parses("mod lfo 1 to indx 0.3", &c, err, sizeof err), "bad target");
-    CHECK(strstr(err, "did you mean index") != NULL, "target hint: %s", err);
-    CHECK(!parses("mod lfo 1 to index 3", &c, err, sizeof err), "depth 3 parsed");
-    CHECK(strstr(err, "-1 to 1") != NULL, "depth range missing: %s", err);
-    CHECK(!parses("mod lfo 1 rate 99", &c, err, sizeof err), "rate 99 parsed");
-    CHECK(!parses("mod lfo 1 rm shape tri", &c, err, sizeof err), "rm with words");
-    CHECK(!parses("ls mod 3", &c, err, sizeof err), "ls mod took a word");
-}
 
 static bool run(const char *line, char *err, size_t cap) {
     Command c;
@@ -338,85 +357,127 @@ static bool run(const char *line, char *err, size_t cap) {
     return command_run(&mod_app, &c, err, cap);
 }
 
-static void lfo_runs_make_point_and_remove(void) {
-    App *a = &mod_app;
-    memset(a, 0, sizeof *a);
-    a->mods = mod_bank_default();
+static void fresh_app(void) {
+    memset(&mod_app, 0, sizeof mod_app);
+    mod_app.mods = mod_bank_default();
+}
+
+static void seq_line_reads_every_word(void) {
+    Command c;
     char err[512];
-    CHECK(!run("mod lfo 5", err, sizeof err), "query of a missing lfo ran");
-    CHECK(run("mod lfo 5 saw to mix 0.2 to pitch -0.1", err, sizeof err), "%s", err);
-    CHECK(a->mods.lfo[4].used && a->mods.lfo[4].shape == LFO_SAW, "lfo 5 not made");
-    CHECK(mod_bank_find_route(&a->mods, 4, MT_MIX) >= 0, "mix route missing");
-    CHECK(run("mod lfo 5 to mix 0.6", err, sizeof err), "%s", err);
-    int r = mod_bank_find_route(&a->mods, 4, MT_MIX);
-    CHECK(r >= 0 && a->mods.route[r].depth == 0.6f, "depth not replaced");
-    int count = 0;
-    for (int i = 0; i < MOD_ROUTES; i++) count += a->mods.route[i].target != MT_NONE;
-    CHECK(count == 2, "replacing a depth made a new route: %d", count);
-    CHECK(!run("mod lfo 5 to ghost off", err, sizeof err), "removed a missing route");
-    CHECK(run("mod lfo 5 to mix off", err, sizeof err), "%s", err);
-    CHECK(mod_bank_find_route(&a->mods, 4, MT_MIX) < 0, "mix route stayed");
-    CHECK(run("mod lfo 5 rm", err, sizeof err), "%s", err);
-    CHECK(!a->mods.lfo[4].used, "lfo 5 stayed");
-    CHECK(mod_bank_find_route(&a->mods, 4, MT_PITCH) < 0, "orphan route stayed");
+    CHECK(parse_line("seq 2 fill tri steps once rate 2.5s step 3 0.9 gate 4 on "
+                     "to pitch 0.5 snap to chandas warp -0.5 -v",
+                     &c, err, sizeof err),
+          "did not parse: %s", err);
+    const SeqCmd *m = &c.seq;
+    CHECK(c.view, "-v lost");
+    CHECK(m->slot == 1, "slot %d", m->slot);
+    CHECK(m->set_fill && m->fill == SEQ_FILL_TRI, "fill");
+    CHECK(m->set_smooth && !m->smooth, "steps");
+    CHECK(m->set_mode && m->mode == SEQ_ONCE, "once");
+    CHECK(m->set_rate && m->division == -1 && m->length_s == 2.5f, "rate");
+    CHECK(m->nsteps == 1 && m->steps[0].step == 2 && m->steps[0].v == 0.9f,
+          "step");
+    CHECK(m->ngates == 1 && m->gates[0].step == 3 && m->gates[0].on, "gate");
+    CHECK(m->nroutes == 2 && m->route[0].snap, "pitch snap route");
+    CHECK(m->route[1].target == MT_CH_WARP && m->route[1].depth == -0.5f,
+          "two-word target");
+    CHECK(parse_line("seq 1 rate 1/8T", &c, err, sizeof err), "division: %s", err);
+    CHECK(c.seq.set_rate && c.seq.division >= 0, "division not read");
+}
+
+static void seq_errors_say_what_they_want(void) {
+    Command c;
+    char err[512];
+    CHECK(!parse_line("seq 0", &c, err, sizeof err), "seq 0 parsed");
+    CHECK(strstr(err, "1 to 8") != NULL, "range missing: %s", err);
+    CHECK(!parse_line("seq 1 fill sqare", &c, err, sizeof err), "bad fill");
+    CHECK(!parse_line("seq 1 to index 3", &c, err, sizeof err), "depth 3 parsed");
+    CHECK(strstr(err, "-1 to 1") != NULL, "depth range missing: %s", err);
+    CHECK(!parse_line("seq 1 to index 0.5 snap", &c, err, sizeof err),
+          "snap off pitch parsed");
+    CHECK(!parse_line("seq 1 rate 99", &c, err, sizeof err), "rate 99 parsed");
+    CHECK(!parse_line("seq 1 set 0.1 0.2", &c, err, sizeof err), "short set");
+    CHECK(!parse_line("seq 1 rm fill sine", &c, err, sizeof err), "rm with words");
+    CHECK(!parse_line("mod lfo 1 tri", &c, err, sizeof err), "mod lfo still parses");
+}
+
+static void seq_runs_make_point_and_remove(void) {
+    fresh_app();
+    ModBank *b = &mod_app.mods;
+    char err[512];
+    CHECK(!run("seq 5", err, sizeof err), "query of a missing sequence ran");
+    CHECK(run("seq 5 fill saw to mix 0.2 to pitch -0.1", err, sizeof err), "%s", err);
+    CHECK(b->seq[4].used && b->seq[4].value[0] > b->seq[4].value[15],
+          "seq 5 not made as a saw");
+    CHECK(run("seq 5 set 0 .1 .2 .3 .4 .5 .6 .7 .8 .9 1 1 1 1 1 1", err, sizeof err),
+          "%s", err);
+    CHECK(b->seq[4].value[3] == 0.3f, "set did not land");
+    CHECK(run("seq 5 to mix 0.6", err, sizeof err), "%s", err);
+    int r = mod_bank_find_route(b, 4, MT_MIX);
+    CHECK(r >= 0 && b->route[r].depth == 0.6f, "depth not replaced");
+    CHECK(!run("seq 5 to ghost off", err, sizeof err), "removed a missing route");
+    CHECK(run("seq 5 to mix off", err, sizeof err), "%s", err);
+    CHECK(mod_bank_find_route(b, 4, MT_MIX) < 0, "mix route stayed");
+    CHECK(run("seq 5 rm", err, sizeof err), "%s", err);
+    CHECK(!b->seq[4].used, "seq 5 stayed");
+    CHECK(mod_bank_find_route(b, 4, MT_PITCH) < 0, "orphan route stayed");
 }
 
 static void a_failed_line_changes_nothing(void) {
-    App *a = &mod_app;
-    memset(a, 0, sizeof *a);
-    a->mods = mod_bank_default();
+    fresh_app();
     char err[512];
     for (int i = 0; i < MOD_ROUTES; i++) {
-        char line[64];
-        snprintf(line, sizeof line, "mod lfo %d to %s 0.1", i % MOD_LFOS + 1,
+        char line[96];
+        snprintf(line, sizeof line, "seq %d to %s 0.1", i % SEQS + 1,
                  MOD_TARGETS[MT_INDEX + i % (MT_COUNT - 1)].name);
         run(line, err, sizeof err);
     }
-    ModBank before = a->mods;
-    CHECK(!run("mod lfo 16 tri to ghost 0.5 to mix 0.5", err, sizeof err),
+    ModBank before = mod_app.mods;
+    CHECK(!run("seq 8 fill tri to ghost 0.5 to damp 0.5", err, sizeof err),
           "ran with every route taken");
-    CHECK(memcmp(&before, &a->mods, sizeof before) == 0,
+    CHECK(memcmp(&before, &mod_app.mods, sizeof before) == 0,
           "a refused line still changed the bank");
 }
 
-static void minus_v_toggles_a_pin(void) {
+static void pins_hold_a_sequence_and_the_list(void) {
+    fresh_app();
     App *a = &mod_app;
-    memset(a, 0, sizeof *a);
-    a->mods = mod_bank_default();
     char err[512];
-    CHECK(run("mod lfo 1 tri -v", err, sizeof err), "%s", err);
-    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "mod lfo 1") == 0,
+    CHECK(run("seq 1 fill sine -v", err, sizeof err), "%s", err);
+    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "seq 1") == 0,
           "pin '%s' count %d", a->pins[0], a->pin_count);
     View v;
     CHECK(command_view(a, a->pins[0], &v) && v.n == 1
               && v.line[0].place == GRAPH_BELOW,
           "pinned view");
-    CHECK(run("ls mod -v", err, sizeof err), "%s", err);
-    CHECK(run("mod lfo 1 rate 3 -v", err, sizeof err), "%s", err);
-    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "ls mod") == 0,
-          "second -v did not let lfo 1 go");
-    CHECK(a->mods.lfo[0].rate_hz == 3.0f, "the unpinning line did not apply");
+    CHECK(run("seq -v", err, sizeof err), "%s", err);
+    CHECK(a->pin_count == 2 && strcmp(a->pins[1], "seq") == 0, "seq list pin");
+    CHECK(command_view(a, a->pins[1], &v), "the list pin is gone");
+    CHECK(run("seq 1 rm", err, sizeof err), "%s", err);
+    CHECK(command_view(a, a->pins[0], &v), "a pin to a removed sequence is gone");
 }
 
 void test_mod(void) {
-    fb_glides();
-    random_shapes_fill_their_history();
-    lfo_line_reads_every_word();
-    lfo_errors_name_the_word_and_what_it_wants();
-    lfo_runs_make_point_and_remove();
-    a_failed_line_changes_nothing();
-    minus_v_toggles_a_pin();
-    presets_carry_lfos_and_routes();
+    held_steps_hit_their_values();
+    smooth_passes_through_every_value_without_overshoot();
+    a_loop_joins_its_ends();
+    once_holds_its_last_value();
+    a_synced_step_follows_tempo();
+    routes_add_depth_times_span_and_clamp();
+    a_middle_value_changes_nothing();
+    snap_rounds_pitch_to_semitones();
+    a_removed_route_writes_its_group_once_more();
+    gates_retrigger_only_pitch_sequences_and_not_under_the_melody();
+    sanitize_drops_routes_to_empty_sequences();
+    presets_carry_sequences_and_routes();
+    an_old_lfo_preset_becomes_sequences();
     a_preset_without_mods_has_none();
     hostile_mods_never_escape_their_ranges();
-    shapes_stay_in_their_polarity();
-    sine_starts_at_its_phase();
-    one_hertz_completes_a_cycle_in_a_second();
-    synced_rate_follows_tempo();
-    retrig_resets_and_free_does_not();
-    once_runs_one_cycle_and_holds();
-    routes_add_depth_times_span_and_clamp();
-    pitch_depth_one_is_an_octave();
-    a_removed_route_writes_its_group_once_more();
-    sanitize_drops_routes_to_empty_lfos();
+    fb_glides();
+    seq_line_reads_every_word();
+    seq_errors_say_what_they_want();
+    seq_runs_make_point_and_remove();
+    a_failed_line_changes_nothing();
+    pins_hold_a_sequence_and_the_list();
 }

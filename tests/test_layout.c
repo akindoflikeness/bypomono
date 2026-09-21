@@ -14,10 +14,10 @@ static float area(Rct r) { return rct_w(r) * rct_h(r); }
 static void screen_tiles(void) {
     Rct full = rct(0, 0, DESIGN_W, DESIGN_H);
     Screen s = screen_layout(full, FOOTER_LINE_H);
-    Rct parts[] = {s.header, s.sound, s.fm, s.display, s.space, s.melody,
+    Rct parts[] = {s.header, s.sound, s.fm, s.display, s.space, s.strip,
                    s.footer};
     const char *names[] = {"header", "sound", "fm", "display", "space",
-                           "melody", "footer"};
+                           "strip", "footer"};
     const int n = (int)(sizeof parts / sizeof parts[0]);
     float covered = 0.0f;
     for (int i = 0; i < n; i++) {
@@ -95,8 +95,17 @@ static void params_round_trip(void) {
     }
 }
 
+/* the sequence cells get what is left of the strip under its tab row; below
+   about 120 px the sixteen sliders stop being paintable */
+static void strip_leaves_room_for_the_cells(void) {
+    Screen s = screen_layout(rct(0, 0, DESIGN_W, DESIGN_H), FOOTER_LINE_H);
+    float cells = rct_h(s.strip) - 2.0f * 6.0f - ROW_H - GAP;
+    CHECK(cells >= 120.0f, "sequence cells only get %g px", cells);
+}
+
 void test_layout(void) {
     screen_tiles();
+    strip_leaves_room_for_the_cells();
     helpers();
     params_round_trip();
 }

@@ -783,31 +783,30 @@ void chandas_reset(Chandas *h);
 float chandas_base_seconds(const Chandas *h);
 Stereo chandas_process(Chandas *h, Stereo dry);
 
-/* ---------- modulation ---------- */
+/* ---------- modulation: sequences ---------- */
 
-#define MOD_LFOS 16
+#define SEQS 8
+#define SEQ_STEPS 16
 #define MOD_ROUTES 32
 #define MOD_BLOCK 32 /* samples between control-rate updates */
-#define LFO_RATE_MIN_HZ 0.01f
-#define LFO_RATE_MAX_HZ 40.0f
+#define SEQ_LENGTH_MIN_S 0.05f /* all 16 steps, when free */
+#define SEQ_LENGTH_MAX_S 120.0f
+#define SEQ_DEFAULT_DIVISION 21 /* 1/16: sixteen steps make a bar */
 #define MOD_PITCH_SEMITONES 12.0f /* depth 1 on pitch */
 
-typedef enum {
-    LFO_SINE = 0, LFO_TRIANGLE, LFO_SAW, LFO_RAMP, LFO_SQUARE, LFO_EXP,
-    LFO_SH, LFO_DRIFT, LFO_SHAPE_COUNT
-} LfoShape;
+typedef enum { SEQ_LOOP = 0, SEQ_ONCE, SEQ_MODE_COUNT } SeqMode;
 
-typedef enum { LFO_FREE = 0, LFO_RETRIG, LFO_ONCE, LFO_MODE_COUNT } LfoMode;
-
+/* Sixteen values played in time. Pointed at pitch they are a melody; pointed
+   anywhere else they move that control. */
 typedef struct {
     bool used;
-    uint8_t shape;    /* LfoShape */
-    uint8_t mode;     /* LfoMode */
-    bool unipolar;
-    int8_t division;  /* index into CHANDAS_DIVISIONS, or -1 for rate_hz */
-    float rate_hz;
-    float phase;      /* start phase, 0..1 */
-} LfoParams;
+    uint8_t mode;    /* SeqMode; ONCE restarts on every note */
+    bool smooth;     /* a curve through the values, or each value held */
+    int8_t division; /* one step's length: CHANDAS_DIVISIONS index, or -1 */
+    float length_s;  /* all sixteen steps, when division is -1 */
+    float value[SEQ_STEPS]; /* 0..1; 0.5 leaves the target where it is */
+    bool gate[SEQ_STEPS];   /* retrigger the note on this step (pitch only) */
+} SeqParams;
 
 typedef enum {
     MT_NONE = 0,
@@ -823,38 +822,46 @@ typedef struct {
     float min, max; /* depth 1 spans the whole range; pitch is in semitones */
 } ModTargetSpec;
 extern const ModTargetSpec MOD_TARGETS[MT_COUNT];
-const char *lfo_shape_name(LfoShape s);
-const char *lfo_mode_name(LfoMode m);
+const char *seq_mode_name(SeqMode m);
 
 typedef struct {
-    uint8_t lfo;    /* 0-based slot */
+    uint8_t seq;    /* 0-based */
     uint8_t target; /* ModTarget; MT_NONE = empty */
     float depth;    /* -1..1 */
+    bool snap;      /* pitch only: round to whole semitones */
 } ModRoute;
 
 typedef struct {
-    LfoParams lfo[MOD_LFOS];
+    SeqParams seq[SEQS];
     ModRoute route[MOD_ROUTES];
 } ModBank;
 
 ModBank mod_bank_default(void); /* empty */
-LfoParams lfo_params_default(void);
+SeqParams seq_params_default(void); /* used, flat, looping a bar of 1/16 */
 ModBank mod_bank_sanitize(ModBank b);
-/* the route index for lfo -> target, or -1 */
-int mod_bank_find_route(const ModBank *b, int lfo, ModTarget t);
-/* rate in hz after tempo sync */
-float lfo_effective_hz(const LfoParams *p, float bpm);
-/* the waveform at a phase, -1..1 bipolar or 0..1 unipolar; random shapes
-   use seed so a drawing of them is stable */
-float lfo_shape_at(const LfoParams *p, float phase, uint32_t seed);
+/* the route index for seq -> target, or -1 */
+int mod_bank_find_route(const ModBank *b, int seq, ModTarget t);
+bool seq_has_pitch_route(const ModBank *b, int seq);
+/* seconds one step lasts */
+float seq_step_seconds(const SeqParams *p, float bpm);
+/* the value (0..1) at pos steps in, 0..16. Held gives each step's value;
+   smooth is a monotone curve through the step centres, so it never passes a
+   value on either side of it. LOOP wraps round, ONCE holds its ends. */
+float seq_value_at(const SeqParams *p, float pos);
+
+typedef enum {
+    SEQ_FILL_FLAT, SEQ_FILL_SINE, SEQ_FILL_SAW, SEQ_FILL_RAMP, SEQ_FILL_TRI,
+    SEQ_FILL_SQUARE, SEQ_FILL_RANDOM, SEQ_FILL_COUNT
+} SeqFill;
+const char *seq_fill_name(SeqFill f);
+/* paints the values; random uses seed so the same seed paints the same */
+void seq_fill(SeqParams *p, SeqFill f, uint32_t seed);
 
 typedef struct {
-    float phase;
-    float value;
-    float from, to; /* random shapes: the held value and the next one */
-    uint32_t rng;
-    bool done;      /* LFO_ONCE finished its cycle */
-} LfoState;
+    float pos;   /* steps, 0..16 */
+    float value; /* the output, -1..1 */
+    bool done;   /* ONCE reached its end */
+} SeqState;
 
 /* the values a modulated engine reads, before and after modulation */
 typedef struct {
@@ -871,22 +878,30 @@ enum { MOD_G_PATCH = 1, MOD_G_VERB = 2, MOD_G_CHANDAS = 4, MOD_G_MELODY = 8,
 
 typedef struct {
     ModBank bank;
-    LfoState st[MOD_LFOS];
+    SeqState st[SEQS];
     float sample_rate;
     int groups;      /* MOD_G_* touched by live routes */
     int groups_prev; /* touched on the previous tick */
+    bool retrigger;  /* a gated step on a pitch sequence was just reached */
 } Mod;
 
 void mod_init(Mod *m, float sample_rate);
-void mod_set_lfo(Mod *m, int slot, LfoParams p);
+void mod_set_seq(Mod *m, int slot, SeqParams p);
 void mod_set_route(Mod *m, int slot, ModRoute r);
+/* restarts every ONCE sequence */
 void mod_note_on(Mod *m);
-bool mod_any_lfo(const Mod *m);
-/* advances every lfo by samples */
+bool mod_any_seq(const Mod *m);
+/* advances every sequence by samples; sets retrigger when a gate is crossed */
 void mod_advance(Mod *m, size_t samples, float bpm);
 /* base plus every route; returns the groups that need writing to the engine,
    including groups a route just left so they go back to base */
 int mod_apply(Mod *m, const ModBase *base, ModBase *out);
+/* true once for each gate crossed, unless something else is playing the
+   notes (the melody or midi) */
+bool mod_take_retrigger(Mod *m, bool notes_elsewhere);
+/* a gated step: the note starts again at the pitch it has now. It leaves the
+   sequences alone, so a ONCE sequence is not restarted by its own gate. */
+void seq_retrigger(VoiceBank *v, Chandas *h);
 
 /* ---------- session ---------- */
 

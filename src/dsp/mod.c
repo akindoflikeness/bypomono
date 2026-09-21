@@ -26,74 +26,117 @@ const ModTargetSpec MOD_TARGETS[MT_COUNT] = {
     [MT_MEL_RATE] = {"mel rate", 0.1f, 8.0f},
 };
 
-static const char *const SHAPE_NAMES[LFO_SHAPE_COUNT] = {
-    "sine", "tri", "saw", "ramp", "square", "exp", "sh", "drift"};
-static const char *const MODE_NAMES[LFO_MODE_COUNT] = {"free", "retrig",
-                                                       "once"};
+static const char *const MODE_NAMES[SEQ_MODE_COUNT] = {"loop", "once"};
+static const char *const FILL_NAMES[SEQ_FILL_COUNT] = {
+    "flat", "sine", "saw", "ramp", "tri", "square", "random"};
 
-const char *lfo_shape_name(LfoShape s) {
-    return (unsigned)s < LFO_SHAPE_COUNT ? SHAPE_NAMES[s] : SHAPE_NAMES[0];
+const char *seq_mode_name(SeqMode m) {
+    return (unsigned)m < SEQ_MODE_COUNT ? MODE_NAMES[m] : MODE_NAMES[0];
 }
 
-const char *lfo_mode_name(LfoMode m) {
-    return (unsigned)m < LFO_MODE_COUNT ? MODE_NAMES[m] : MODE_NAMES[0];
+const char *seq_fill_name(SeqFill f) {
+    return (unsigned)f < SEQ_FILL_COUNT ? FILL_NAMES[f] : FILL_NAMES[0];
 }
 
-LfoParams lfo_params_default(void) {
-    LfoParams p;
+SeqParams seq_params_default(void) {
+    SeqParams p;
     memset(&p, 0, sizeof p);
     p.used = true;
-    p.shape = LFO_SINE;
-    p.mode = LFO_FREE;
-    p.division = -1;
-    p.rate_hz = 1.0f;
+    p.mode = SEQ_LOOP;
+    p.smooth = true;
+    p.division = SEQ_DEFAULT_DIVISION;
+    p.length_s = 2.0f;
+    for (int k = 0; k < SEQ_STEPS; k++) p.value[k] = 0.5f;
     return p;
 }
 
 ModBank mod_bank_default(void) {
     ModBank b;
     memset(&b, 0, sizeof b);
-    for (int i = 0; i < MOD_LFOS; i++) {
-        b.lfo[i] = lfo_params_default();
-        b.lfo[i].used = false;
+    for (int i = 0; i < SEQS; i++) {
+        b.seq[i] = seq_params_default();
+        b.seq[i].used = false;
     }
     return b;
 }
 
 ModBank mod_bank_sanitize(ModBank b) {
-    for (int i = 0; i < MOD_LFOS; i++) {
-        LfoParams *p = &b.lfo[i];
-        if (p->shape >= LFO_SHAPE_COUNT) p->shape = LFO_SINE;
-        if (p->mode >= LFO_MODE_COUNT) p->mode = LFO_FREE;
+    for (int i = 0; i < SEQS; i++) {
+        SeqParams *p = &b.seq[i];
+        if (p->mode >= SEQ_MODE_COUNT) p->mode = SEQ_LOOP;
         if (p->division < -1 || p->division >= CHANDAS_DIVISIONS_LEN)
             p->division = -1;
-        p->rate_hz = clampf(p->rate_hz, LFO_RATE_MIN_HZ, LFO_RATE_MAX_HZ);
-        p->phase = clampf(p->phase, 0.0f, 1.0f);
+        p->length_s = clampf(p->length_s, SEQ_LENGTH_MIN_S, SEQ_LENGTH_MAX_S);
+        for (int k = 0; k < SEQ_STEPS; k++)
+            p->value[k] = clampf(p->value[k], 0.0f, 1.0f);
     }
     for (int i = 0; i < MOD_ROUTES; i++) {
         ModRoute *r = &b.route[i];
-        if (r->target >= MT_COUNT || r->lfo >= MOD_LFOS
-            || !b.lfo[r->lfo].used) {
+        if (r->target >= MT_COUNT || r->seq >= SEQS || !b.seq[r->seq].used) {
             memset(r, 0, sizeof *r);
             continue;
         }
         r->depth = clampf(r->depth, -1.0f, 1.0f);
+        if (r->target != MT_PITCH) r->snap = false;
     }
     return b;
 }
 
-int mod_bank_find_route(const ModBank *b, int lfo, ModTarget t) {
+int mod_bank_find_route(const ModBank *b, int seq, ModTarget t) {
     for (int i = 0; i < MOD_ROUTES; i++)
-        if (b->route[i].target == t && b->route[i].lfo == lfo) return i;
+        if (b->route[i].target == t && b->route[i].seq == seq) return i;
     return -1;
 }
 
-float lfo_effective_hz(const LfoParams *p, float bpm) {
-    if (p->division >= 0 && p->division < CHANDAS_DIVISIONS_LEN) {
-        float beats = CHANDAS_DIVISIONS[p->division].beats;
-        return clampf(bpm, CHANDAS_MIN_BPM, CHANDAS_MAX_BPM) / 60.0f / beats;
+bool seq_has_pitch_route(const ModBank *b, int seq) {
+    return mod_bank_find_route(b, seq, MT_PITCH) >= 0;
+}
+
+float seq_step_seconds(const SeqParams *p, float bpm) {
+    if (p->division >= 0 && p->division < CHANDAS_DIVISIONS_LEN)
+        return CHANDAS_DIVISIONS[p->division].beats * 60.0f
+               / clampf(bpm, CHANDAS_MIN_BPM, CHANDAS_MAX_BPM);
+    return clampf(p->length_s, SEQ_LENGTH_MIN_S, SEQ_LENGTH_MAX_S)
+           / (float)SEQ_STEPS;
+}
+
+/* ---------- the curve ---------- */
+
+static float step_value(const SeqParams *p, int k) {
+    if (p->mode == SEQ_LOOP) k = ((k % SEQ_STEPS) + SEQ_STEPS) % SEQ_STEPS;
+    else k = k < 0 ? 0 : (k >= SEQ_STEPS ? SEQ_STEPS - 1 : k);
+    return p->value[k];
+}
+
+/* Fritsch-Butland slope: zero at a peak or a valley, otherwise the harmonic
+   mean of the two neighbouring slopes, which keeps each span monotone */
+static float slope_at(const SeqParams *p, int k) {
+    if (p->mode == SEQ_ONCE && (k <= 0 || k >= SEQ_STEPS - 1)) return 0.0f;
+    float d0 = step_value(p, k) - step_value(p, k - 1);
+    float d1 = step_value(p, k + 1) - step_value(p, k);
+    if (d0 * d1 <= 0.0f) return 0.0f;
+    return 2.0f * d0 * d1 / (d0 + d1);
+}
+
+float seq_value_at(const SeqParams *p, float pos) {
+    if (!p->smooth) {
+        int k = (int)floorf(pos);
+        if (p->mode == SEQ_ONCE && pos >= (float)SEQ_STEPS) k = SEQ_STEPS - 1;
+        return step_value(p, k);
     }
-    return clampf(p->rate_hz, LFO_RATE_MIN_HZ, LFO_RATE_MAX_HZ);
+    /* the values sit at step centres */
+    float x = pos - 0.5f;
+    if (p->mode == SEQ_ONCE) {
+        if (x <= 0.0f) return p->value[0];
+        if (x >= (float)(SEQ_STEPS - 1)) return p->value[SEQ_STEPS - 1];
+    }
+    int k = (int)floorf(x);
+    float t = x - (float)k;
+    float y0 = step_value(p, k), y1 = step_value(p, k + 1);
+    float m0 = slope_at(p, k), m1 = slope_at(p, k + 1);
+    float t2 = t * t, t3 = t2 * t;
+    return (2.0f * t3 - 3.0f * t2 + 1.0f) * y0 + (t3 - 2.0f * t2 + t) * m0
+           + (-2.0f * t3 + 3.0f * t2) * y1 + (t3 - t2) * m1;
 }
 
 static uint32_t xorshift(uint32_t *s) {
@@ -105,116 +148,82 @@ static uint32_t xorshift(uint32_t *s) {
     return x;
 }
 
-static float rand_bipolar(uint32_t *s) {
-    return (float)(xorshift(s) >> 8) / 8388607.5f - 1.0f;
-}
-
-/* bipolar value of the deterministic shapes */
-static float shape_bipolar(LfoShape shape, float ph) {
-    switch (shape) {
-    case LFO_SINE: return sinf(2.0f * (float)M_PI * ph);
-    case LFO_TRIANGLE:
-        return ph < 0.25f ? 4.0f * ph
-               : ph < 0.75f ? 2.0f - 4.0f * ph
-                            : 4.0f * ph - 4.0f;
-    case LFO_SAW: return 1.0f - 2.0f * ph;
-    case LFO_RAMP: return 2.0f * ph - 1.0f;
-    case LFO_SQUARE: return ph < 0.5f ? 1.0f : -1.0f;
-    case LFO_EXP: return 2.0f * expf(-5.0f * ph) - 1.0f;
-    default: return 0.0f;
+static float fill_at(SeqFill f, float ph, uint32_t *rng) {
+    switch (f) {
+    case SEQ_FILL_SINE: return 0.5f + 0.5f * sinf(TAU_F * ph);
+    case SEQ_FILL_SAW: return 1.0f - ph;
+    case SEQ_FILL_RAMP: return ph;
+    case SEQ_FILL_TRI: return ph < 0.5f ? 2.0f * ph : 2.0f - 2.0f * ph;
+    case SEQ_FILL_SQUARE: return ph < 0.5f ? 1.0f : 0.0f;
+    case SEQ_FILL_RANDOM: return (float)(xorshift(rng) >> 8) / 16777215.0f;
+    default: return 0.5f;
     }
 }
 
-static float polarise(const LfoParams *p, float bipolar) {
-    return p->unipolar ? 0.5f * (bipolar + 1.0f) : bipolar;
+void seq_fill(SeqParams *p, SeqFill f, uint32_t seed) {
+    uint32_t rng = seed * 2654435761u + 1u;
+    for (int k = 0; k < SEQ_STEPS; k++)
+        p->value[k] = fill_at(f, (float)k / (float)SEQ_STEPS, &rng);
 }
 
-float lfo_shape_at(const LfoParams *p, float phase, uint32_t seed) {
-    float ph = fract_pos(phase);
-    if (p->shape == LFO_SH || p->shape == LFO_DRIFT) {
-        /* four cycles of held values, the same four every drawing */
-        uint32_t cycle = (uint32_t)floorf(phase);
-        uint32_t s = seed * 2654435761u + cycle * 40503u + 1u;
-        float a = rand_bipolar(&s);
-        if (p->shape == LFO_SH) return polarise(p, a);
-        uint32_t s2 = seed * 2654435761u + (cycle + 1u) * 40503u + 1u;
-        float b = rand_bipolar(&s2);
-        float t = 0.5f - 0.5f * cosf((float)M_PI * ph);
-        return polarise(p, a + (b - a) * t);
-    }
-    return polarise(p, shape_bipolar((LfoShape)p->shape, ph));
-}
+/* ---------- running ---------- */
 
 void mod_init(Mod *m, float sample_rate) {
     memset(m, 0, sizeof *m);
     m->bank = mod_bank_default();
     m->sample_rate = sample_rate > 0.0f ? sample_rate : 48000.0f;
-    for (int i = 0; i < MOD_LFOS; i++) m->st[i].rng = 0x51ED270Bu + (uint32_t)i;
 }
 
-static void lfo_restart(const LfoParams *p, LfoState *s) {
-    s->phase = p->phase;
+static void seq_restart(SeqState *s) {
+    s->pos = 0.0f;
     s->done = false;
-    s->from = s->to;
-    s->to = rand_bipolar(&s->rng);
 }
 
-void mod_set_lfo(Mod *m, int slot, LfoParams p) {
-    if (slot < 0 || slot >= MOD_LFOS) return;
-    bool was = m->bank.lfo[slot].used;
-    m->bank.lfo[slot] = p;
-    if (p.used && !was) lfo_restart(&p, &m->st[slot]);
+void mod_set_seq(Mod *m, int slot, SeqParams p) {
+    if (slot < 0 || slot >= SEQS) return;
+    bool was = m->bank.seq[slot].used;
+    m->bank.seq[slot] = p;
+    if (p.used && !was) seq_restart(&m->st[slot]);
 }
 
 void mod_set_route(Mod *m, int slot, ModRoute r) {
     if (slot < 0 || slot >= MOD_ROUTES) return;
-    if (r.target >= MT_COUNT || r.lfo >= MOD_LFOS) r.target = MT_NONE;
+    if (r.target >= MT_COUNT || r.seq >= SEQS) r.target = MT_NONE;
     m->bank.route[slot] = r;
 }
 
 void mod_note_on(Mod *m) {
-    for (int i = 0; i < MOD_LFOS; i++) {
-        const LfoParams *p = &m->bank.lfo[i];
-        if (p->used && p->mode != LFO_FREE) lfo_restart(p, &m->st[i]);
-    }
+    for (int i = 0; i < SEQS; i++)
+        if (m->bank.seq[i].used && m->bank.seq[i].mode == SEQ_ONCE)
+            seq_restart(&m->st[i]);
 }
 
-bool mod_any_lfo(const Mod *m) {
-    for (int i = 0; i < MOD_LFOS; i++)
-        if (m->bank.lfo[i].used) return true;
+bool mod_any_seq(const Mod *m) {
+    for (int i = 0; i < SEQS; i++)
+        if (m->bank.seq[i].used) return true;
     return false;
 }
 
 void mod_advance(Mod *m, size_t samples, float bpm) {
     float dt = (float)samples / m->sample_rate;
-    for (int i = 0; i < MOD_LFOS; i++) {
-        const LfoParams *p = &m->bank.lfo[i];
-        LfoState *s = &m->st[i];
+    for (int i = 0; i < SEQS; i++) {
+        const SeqParams *p = &m->bank.seq[i];
+        SeqState *s = &m->st[i];
         if (!p->used) continue;
         if (!s->done) {
-            float next = s->phase + lfo_effective_hz(p, bpm) * dt;
-            if (p->mode == LFO_ONCE && next >= p->phase + 1.0f) {
-                next = p->phase + 1.0f;
+            float next = s->pos + dt / seq_step_seconds(p, bpm);
+            if (p->mode == SEQ_ONCE && next >= (float)SEQ_STEPS) {
+                next = (float)SEQ_STEPS;
                 s->done = true;
             }
-            if (floorf(next) != floorf(s->phase)) {
-                s->from = s->to;
-                s->to = rand_bipolar(&s->rng);
-            }
-            s->phase = p->mode == LFO_ONCE ? next : fract_pos(next);
+            int from = (int)floorf(s->pos), to = (int)floorf(next);
+            if (to != from && !s->done && p->gate[to % SEQ_STEPS]
+                && seq_has_pitch_route(&m->bank, i))
+                m->retrigger = true;
+            if (p->mode == SEQ_LOOP) next = fmodf(next, (float)SEQ_STEPS);
+            s->pos = next;
         }
-        float ph = fract_pos(s->phase);
-        if (s->done) ph = 1.0f - 1e-6f;
-        float bi;
-        if (p->shape == LFO_SH) {
-            bi = s->from;
-        } else if (p->shape == LFO_DRIFT) {
-            float t = 0.5f - 0.5f * cosf((float)M_PI * ph);
-            bi = s->from + (s->to - s->from) * t;
-        } else {
-            bi = shape_bipolar((LfoShape)p->shape, ph);
-        }
-        s->value = polarise(p, bi);
+        s->value = 2.0f * seq_value_at(p, s->pos) - 1.0f;
     }
 }
 
@@ -264,13 +273,15 @@ int mod_apply(Mod *m, const ModBase *base, ModBase *out) {
     for (int i = 0; i < MOD_ROUTES; i++) {
         const ModRoute *r = &m->bank.route[i];
         if (r->target == MT_NONE || r->target >= MT_COUNT) continue;
-        if (!m->bank.lfo[r->lfo].used) continue;
-        const ModTargetSpec *spec = &MOD_TARGETS[r->target];
+        if (!m->bank.seq[r->seq].used) continue;
         float *slot = target_slot(out, (ModTarget)r->target);
         if (!slot) continue;
+        const ModTargetSpec *spec = &MOD_TARGETS[r->target];
         float span = r->target == MT_PITCH ? MOD_PITCH_SEMITONES
                                            : spec->max - spec->min;
-        *slot += r->depth * m->st[r->lfo].value * span;
+        float add = r->depth * m->st[r->seq].value * span;
+        if (r->snap && r->target == MT_PITCH) add = roundf(add);
+        *slot += add;
         groups |= target_group((ModTarget)r->target);
     }
     for (int t = MT_INDEX; t < MT_COUNT; t++) {
@@ -282,4 +293,17 @@ int mod_apply(Mod *m, const ModBase *base, ModBase *out) {
     m->groups_prev = groups;
     m->groups = groups;
     return write;
+}
+
+bool mod_take_retrigger(Mod *m, bool notes_elsewhere) {
+    bool fire = m->retrigger && !notes_elsewhere;
+    m->retrigger = false;
+    return fire;
+}
+
+void seq_retrigger(VoiceBank *v, Chandas *h) {
+    float hz = voice_bank_target_hz(v);
+    voice_bank_note_off_all(v);
+    voice_bank_note_on(v, -1, hz, 1.0f);
+    chandas_note_pulse(h);
 }

@@ -138,7 +138,7 @@ static float pole_k(float step_seconds, float tau_seconds) {
 
 /* writes base plus modulation into the engine for the groups that need it */
 static void mod_tick(AudioState *s, size_t samples) {
-    if (!mod_any_lfo(&s->mod) && s->mod.groups_prev == 0) return;
+    if (!mod_any_seq(&s->mod) && s->mod.groups_prev == 0) return;
     mod_advance(&s->mod, samples, chandas_tempo(&s->chandas));
     ModBase out;
     int g = mod_apply(&s->mod, &s->base, &out);
@@ -180,7 +180,7 @@ static void engine_apply(AudioState *s, Event ev) {
     case EV_SET_LIMITER:
         limiter_set(&s->limiter, ev.u.limiter.enabled, ev.u.limiter.ceiling_db);
         break;
-    case EV_SET_LFO: mod_set_lfo(&s->mod, ev.u.lfo.slot, ev.u.lfo.p); break;
+    case EV_SET_SEQ: mod_set_seq(&s->mod, ev.u.seq.slot, ev.u.seq.p); break;
     case EV_SET_ROUTE:
         mod_set_route(&s->mod, ev.u.route.slot, ev.u.route.r);
         break;
@@ -305,17 +305,20 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         if (s->transport_running
             && melody_samples_until_fire(&s->melody, &until) && until < run)
             run = until;
-        bool modulating = mod_any_lfo(&s->mod) || s->mod.groups_prev;
+        bool modulating = mod_any_seq(&s->mod) || s->mod.groups_prev;
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(s, run);
+        if (mod_take_retrigger(&s->mod,
+                               s->melody.params.enabled || s->midi_driving))
+            seq_retrigger(&s->voice, &s->chandas);
         RenderCtx ctx = {s, data, done, channels, rec_armed,
                          voice_bank_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
         voice_bank_render_frames(&s->voice, run, emit_frame, &ctx);
         if (s->transport_running) melody_advance(&s->melody, run);
         done += run;
     }
-    lfo_meter_store(&a->lfo_meter, &s->mod);
+    seq_meter_store(&a->seq_meter, &s->mod);
 
     float budget = (float)frames / a->sample_rate;
     if (budget > 0.0f) {
@@ -462,9 +465,8 @@ void app_send(App *a, Event ev) {
 }
 
 void app_send_mods(App *a) {
-    for (int i = 0; i < MOD_LFOS; i++)
-        app_send(a, (Event){.kind = EV_SET_LFO,
-                            .u.lfo = {i, a->mods.lfo[i]}});
+    for (int i = 0; i < SEQS; i++)
+        app_send(a, (Event){.kind = EV_SET_SEQ, .u.seq = {i, a->mods.seq[i]}});
     for (int i = 0; i < MOD_ROUTES; i++)
         app_send(a, (Event){.kind = EV_SET_ROUTE,
                             .u.route = {i, a->mods.route[i]}});

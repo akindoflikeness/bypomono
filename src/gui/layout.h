@@ -43,14 +43,14 @@ const char *layout_overflow_first(float *px);
 /* ---------- the screen ---------- */
 
 #define HEADER_H 30.0f
-#define MELODY_H 72.0f
+#define BOTTOM_STRIP_H 190.0f
 #define SOUND_W 270.0f
 #define FM_W 330.0f
 #define SPACE_W 222.0f
 #define PANEL_GAP 5.0f
 
 typedef struct {
-    Rct header, sound, fm, display, space, melody, footer;
+    Rct header, sound, fm, display, space, strip, footer;
 } Screen;
 
 /* the fixed arrangement of the window; footer_h is the console bar */

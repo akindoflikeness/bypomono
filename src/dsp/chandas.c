@@ -318,8 +318,8 @@ static void chandas_spawn(Chandas *h, size_t k, float entry) {
 static void chandas_write(Chandas *h, Stereo dry, Stereo wet) {
     float fl = dc_block_process(&h->dc_loop_l, wet.l);
     float fr = dc_block_process(&h->dc_loop_r, wet.r);
-    h->buf_l[h->w] = dry.l + soft_clip(fl * REGEN);
-    h->buf_r[h->w] = dry.r + soft_clip(fr * REGEN);
+    h->buf_l[h->w] = dry.l + fl * REGEN;
+    h->buf_r[h->w] = dry.r + fr * REGEN;
     h->w = (h->w + 1) % h->len;
 }
 

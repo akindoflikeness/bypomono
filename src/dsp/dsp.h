@@ -462,16 +462,13 @@ void delay_clear(Delay *d);
 /* ---------- chamber ---------- */
 
 #define CHAMBER_N 8
-#define CHAMBER_DRIVE 2.08f
 #define CHAMBER_DAMP 0.27f
-#define CHAMBER_ASYM 0.75f
 #define CHAMBER_WIDTH 1.47f
 #define CHAMBER_MOD_CENTS 9.3f
 #define CHAMBER_PREDELAY_MS 130.0f
 #define CHAMBER_HPF_HZ 38.0f
 
 void hadamard8(float s[CHAMBER_N]);
-float chamber_jfet(float x, float asym);
 
 typedef struct {
     float sr;
@@ -588,6 +585,7 @@ typedef struct {
     size_t delay;
     float delay_f, delay_to; /* samples; the read travels between lengths */
     float delay_seconds;
+    float in_ref; /* 1/sqrt(1 - fb^2) at the default decay */
     float fb, fb_target, lp;
     float lfo_phase, lfo_inc;
 } Comb;
@@ -816,7 +814,7 @@ typedef enum {
     MT_INDEX, MT_RIP, MT_FB, MT_FIELD, MT_CURVE, MT_LEVEL, MT_PITCH,
     MT_MIX, MT_GHOST, MT_DECAY, MT_DAMP, MT_HAUNT,
     MT_CH_MIX, MT_CH_RATE, MT_CH_SPREAD, MT_CH_SIZE, MT_CH_WARP, MT_CH_DIM,
-    MT_CH_TAIL, MT_MEL_RATE, MT_WARMTH,
+    MT_CH_TAIL, MT_MEL_RATE,
     MT_COUNT
 } ModTarget;
 

@@ -24,7 +24,6 @@ const ModTargetSpec MOD_TARGETS[MT_COUNT] = {
     [MT_CH_DIM] = {"chandas dim", 0.0f, 1.0f},
     [MT_CH_TAIL] = {"chandas tail", 0.0f, 1.0f},
     [MT_MEL_RATE] = {"mel rate", 0.1f, 8.0f},
-    [MT_WARMTH] = {"warmth", MIN_WARMTH, MAX_WARMTH},
 };
 
 static const char *const SHAPE_NAMES[LFO_SHAPE_COUNT] = {
@@ -229,7 +228,6 @@ static int target_group(ModTarget t) {
     case MT_CH_MIX: case MT_CH_RATE: case MT_CH_SPREAD: case MT_CH_SIZE:
     case MT_CH_WARP: case MT_CH_DIM: case MT_CH_TAIL: return MOD_G_CHANDAS;
     case MT_MEL_RATE: return MOD_G_MELODY;
-    case MT_WARMTH: return MOD_G_WARMTH;
     default: return 0;
     }
 }
@@ -256,7 +254,6 @@ static float *target_slot(ModBase *b, ModTarget t) {
     case MT_CH_DIM: return &b->chandas.dimension;
     case MT_CH_TAIL: return &b->chandas.tail;
     case MT_MEL_RATE: return &b->melody.rate_hz;
-    case MT_WARMTH: return &b->warmth;
     default: return NULL;
     }
 }

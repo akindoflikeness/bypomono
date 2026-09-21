@@ -365,11 +365,16 @@ static bool wave_tab(Ui *ui, UiId id, Rct r, FontId wf, const char *text,
 
 static const float WAVE_SIZES[] = {12.0f * WAVE_SCALE, 12.0f, 11.0f};
 
-/* the largest wave-tab size whose widest label fits a tab w wide */
-static FontId wave_font(float w, const Tab *tabs, int n) {
+static float wave_bar_h(FontId f) {
+    return text_row_height(f) + 2.0f * WAVE_AMP + 2.0f * SNUG;
+}
+
+/* the largest wave-tab size whose widest label fits a tab w wide and whose
+   row fits h tall (h <= 0 means any height) */
+static FontId wave_font(float w, float h, const Tab *tabs, int n) {
     for (size_t k = 0; k < sizeof WAVE_SIZES / sizeof WAVE_SIZES[0]; k++) {
         FontId f = ui_font(WAVE_SIZES[k]);
-        bool fits = true;
+        bool fits = h <= 0.0f || wave_bar_h(f) <= h;
         for (int i = 0; i < n && fits; i++)
             fits = text_width(f, tabs[i].label, WAVE_TRACKING) + 1.0f
                        + 2.0f * SNUG <= w;
@@ -384,13 +389,11 @@ static float tab_w(float available, int n) {
     return w < 0.0f ? 0.0f : w;
 }
 
-void tab_view(App *a, Ui *ui, const char *id, Rct r, const Tab *tabs, int n,
-              int *active) {
+void tab_strip(Ui *ui, const char *id, Rct bar, const Tab *tabs, int n,
+               int *active) {
     if (*active < 0 || *active >= n) *active = 0;
-    float w = tab_w(rct_w(r), n);
-    FontId f = wave_font(w, tabs, n);
-    Rct bar = cut_top(&r, text_row_height(f) + 2.0f * WAVE_AMP + 2.0f * SNUG);
-    cut_top(&r, GAP);
+    float w = tab_w(rct_w(bar), n);
+    FontId f = wave_font(w, rct_h(bar), tabs, n);
     int hit = -1;
     for (int i = 0; i < n; i++) {
         Rct tr = rct_xywh(bar.x0 + (float)i * (w + GAP), bar.y0, w, rct_h(bar));
@@ -398,11 +401,23 @@ void tab_view(App *a, Ui *ui, const char *id, Rct r, const Tab *tabs, int n,
             hit = i;
     }
     if (hit >= 0) *active = hit;
+}
+
+void tab_page(App *a, Ui *ui, Rct r, const Tab *tabs, int n, int active) {
+    if (active < 0 || active >= n) active = 0;
     Canvas *c = ui->canvas;
     Rct saved = canvas_clip(c);
     canvas_set_clip(c, rct_intersect(saved, r));
-    tabs[*active].draw(a, ui, r);
+    tabs[active].draw(a, ui, r);
     canvas_set_clip(c, saved);
+}
+
+void tab_view(App *a, Ui *ui, const char *id, Rct r, const Tab *tabs, int n,
+              int *active) {
+    FontId f = wave_font(tab_w(rct_w(r), n), 0.0f, tabs, n);
+    tab_strip(ui, id, cut_top(&r, wave_bar_h(f)), tabs, n, active);
+    cut_top(&r, GAP);
+    tab_page(a, ui, r, tabs, n, *active);
 }
 
 /* ---------- icons ---------- */

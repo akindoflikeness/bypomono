@@ -33,51 +33,6 @@ static void paint_phase(const App *a, Canvas *c, Rct rect) {
     canvas_set_clip(c, saved);
 }
 
-/* haunt draws chords across it; each point lights with its operator */
-static void paint_pentagram(App *a, Ui *ui, Rct rect) {
-    Canvas *c = ui->canvas;
-    P2 center = rct_center(rect);
-    float radius = fminf(rct_w(rect), rct_h(rect)) * 0.40f;
-    float haunt = a->shadow_verb.haunt;
-    P2 pts[5];
-    for (int i = 0; i < 5; i++) {
-        float ang = -PI_F / 2.0f + TAU_F * (float)i / 5.0f;
-        pts[i] = (P2){center.x + cosf(ang) * radius,
-                      center.y + sinf(ang) * radius};
-    }
-    int chords = (int)(haunt * 21.0f);
-    for (int k = 1; k <= chords; k++) {
-        float ta = (float)k / 21.0f;
-        float tb = (float)(k * 2 % 21) / 21.0f;
-        float aa = -PI_F / 2.0f + TAU_F * ta;
-        float ab = -PI_F / 2.0f + TAU_F * tb;
-        P2 pa = {center.x + cosf(aa) * radius, center.y + sinf(aa) * radius};
-        P2 pb = {center.x + cosf(ab) * radius, center.y + sinf(ab) * radius};
-        draw_line(c, pa, pb, 1.0f, PAPER);
-    }
-    for (int i = 0; i < 5; i++) {
-        P2 from = pts[i], to = pts[(i + 3) % 5];
-        float dx = to.x - from.x, dy = to.y - from.y;
-        float len = sqrtf(dx * dx + dy * dy);
-        if (len <= 0.0f) continue;
-        dx /= len;
-        dy /= len;
-        bubble_chain(c, ui, (P2){from.x + dx * 9.0f, from.y + dy * 9.0f},
-                     (P2){to.x - dx * 9.0f, to.y - dy * 9.0f}, haunt > 0.0f,
-                     a->shadow.index, ui->time);
-    }
-    for (int i = 0; i < 5; i++) {
-        draw_circle_filled(c, pts[i], 7.0f, INK_BLACK);
-        draw_circle_stroke(c, pts[i], 7.0f, 1.0f, PAPER);
-        dither_circle(c, pts[i], 5.5f, fminf(a->env[i] * haunt * 2.0f, 1.0f),
-                      2.0f);
-        char num[8];
-        snprintf(num, sizeof num, "%d", i + 1);
-        text_draw(c, ui_font(10.0f), pts[i], ALIGN_CENTER_CENTER, num, PAPER,
-                  0.0f);
-    }
-}
-
 static void labelled(Canvas *c, Rct *r, const char *text) {
     inverted_strip(c, cut_top(r, text_row_height(ui_font(12.0f)) + 2.0f * SNUG),
                    text);
@@ -87,14 +42,10 @@ static void labelled(Canvas *c, Rct *r, const char *text) {
 static void draw_scope_page(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     r = rct_shrink(r, GAP);
-    Rct top = cut_top(&r, roundf(0.5f * (rct_h(r) - GROUP)));
-    cut_top(&r, GROUP);
-    labelled(c, &top, "PHASE");
-    float side = fminf(rct_w(top), rct_h(top));
-    paint_phase(a, c, rct_xywh(roundf(rct_center(top).x - 0.5f * side), top.y0,
-                               side, side));
-    labelled(c, &r, "PENTAGRAM");
-    paint_pentagram(a, ui, r);
+    labelled(c, &r, "PHASE");
+    float side = fminf(rct_w(r), rct_h(r));
+    paint_phase(a, c, rct_xywh(roundf(rct_center(r).x - 0.5f * side),
+                               roundf(rct_center(r).y - 0.5f * side), side, side));
 }
 
 /* ---------- envelope ---------- */
@@ -258,7 +209,10 @@ static const Tab DISPLAY[DISPLAY_TABS] = {
     [TAB_INFO] = {"I", draw_info_page},
 };
 
+void draw_display_tabs(App *a, Ui *ui, Rct bar) {
+    tab_strip(ui, "display tab", bar, DISPLAY, DISPLAY_TABS, &a->display_tab);
+}
+
 void draw_display_column(App *a, Ui *ui, Rct r) {
-    tab_view(a, ui, "display tab", rct_shrink(r, GAP), DISPLAY, DISPLAY_TABS,
-             &a->display_tab);
+    tab_page(a, ui, rct_shrink(r, GAP), DISPLAY, DISPLAY_TABS, a->display_tab);
 }

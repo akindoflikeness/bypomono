@@ -43,7 +43,6 @@ const char *cc_target_name(CcTarget t) {
     case CC_DECAY: return "decay";
     case CC_DAMP: return "damp";
     case CC_HAUNT: return "haunt";
-    case CC_WARMTH: return "warmth";
     case CC_ATTACK: return "attack";
     case CC_ENVDECAY: return "envdecay";
     case CC_SUSTAIN: return "sustain";

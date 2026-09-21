@@ -4,6 +4,94 @@
 
 #include "app.h"
 
+#define PENTAGRAM_H 150.0f
+
+static void dotted_circle(Canvas *c, P2 center, float radius, uint8_t ink) {
+    int n = (int)(TAU_F * radius / 4.0f);
+    for (int i = 0; i < n; i++) {
+        float ang = TAU_F * (float)i / (float)n;
+        draw_rect_filled(c, rct_xywh(roundf(center.x + cosf(ang) * radius),
+                                     roundf(center.y + sinf(ang) * radius),
+                                     1.0f, 1.0f), ink);
+    }
+}
+
+static void paint_chandas_walk(App *a, Ui *ui, const P2 pts[5]) {
+    const ChandasParams *h = &a->shadow_chandas;
+    if (!h->enabled || h->mix <= 0.0f) return;
+    Canvas *c = ui->canvas;
+    float period = fmaxf(chandas_base_seconds_of(h, a->tempo_bpm), 0.02f);
+    float beats = (float)ui->time / period;
+    long beat = (long)floorf(beats);
+    float t = beats - (float)beat;
+    ui->repaint_soon = true;
+
+    /* the star is drawn point to point+2, so a walk along its lines steps 2 */
+    int at = (int)(((beat * 2) % 5 + 5) % 5);
+    P2 from = pts[at], to = pts[(at + 2) % 5];
+    P2 grain = {from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t};
+    draw_circle_filled(c, grain, 2.5f + 2.0f * h->mix, PAPER);
+
+    float grow = 6.0f + 14.0f * h->size / CHANDAS_MAX_SIZE;
+    int trail = 1 + (int)roundf(h->spread * 3.0f);
+    for (int k = 0; k < trail; k++) {
+        int p = (int)((((beat - k) * 2) % 5 + 5) % 5);
+        float age = ((float)k + t) / (float)trail;
+        float radius = 9.0f + grow * age;
+        if (k == 0) draw_circle_stroke(c, pts[p], radius, 1.0f, PAPER);
+        else dotted_circle(c, pts[p], radius, PAPER);
+    }
+}
+
+/* The room draws haunt's chords and lights each point with its operator.
+   Chandas walks the star: one grain travels along a line per chandas period,
+   leaving a ring at the point it reaches that grows with size, and spread
+   keeps that many earlier rings fading behind it. */
+static void paint_pentagram(App *a, Ui *ui, Rct rect) {
+    Canvas *c = ui->canvas;
+    P2 center = rct_center(rect);
+    float radius = fminf(rct_w(rect), rct_h(rect)) * 0.40f;
+    float haunt = a->shadow_verb.haunt;
+    P2 pts[5];
+    for (int i = 0; i < 5; i++) {
+        float ang = -PI_F / 2.0f + TAU_F * (float)i / 5.0f;
+        pts[i] = (P2){center.x + cosf(ang) * radius,
+                      center.y + sinf(ang) * radius};
+    }
+    int chords = (int)(haunt * 21.0f);
+    for (int k = 1; k <= chords; k++) {
+        float ta = (float)k / 21.0f;
+        float tb = (float)(k * 2 % 21) / 21.0f;
+        float aa = -PI_F / 2.0f + TAU_F * ta;
+        float ab = -PI_F / 2.0f + TAU_F * tb;
+        P2 pa = {center.x + cosf(aa) * radius, center.y + sinf(aa) * radius};
+        P2 pb = {center.x + cosf(ab) * radius, center.y + sinf(ab) * radius};
+        draw_line(c, pa, pb, 1.0f, PAPER);
+    }
+    for (int i = 0; i < 5; i++) {
+        P2 from = pts[i], to = pts[(i + 3) % 5];
+        float dx = to.x - from.x, dy = to.y - from.y;
+        float len = sqrtf(dx * dx + dy * dy);
+        if (len <= 0.0f) continue;
+        dx /= len;
+        dy /= len;
+        bubble_chain(c, ui, (P2){from.x + dx * 9.0f, from.y + dy * 9.0f},
+                     (P2){to.x - dx * 9.0f, to.y - dy * 9.0f}, haunt > 0.0f,
+                     a->shadow.index, ui->time);
+    }
+    for (int i = 0; i < 5; i++) {
+        draw_circle_filled(c, pts[i], 7.0f, INK_BLACK);
+        draw_circle_stroke(c, pts[i], 7.0f, 1.0f, PAPER);
+        dither_circle(c, pts[i], 5.5f, fminf(a->env[i] * haunt * 2.0f, 1.0f),
+                      2.0f);
+        char num[8];
+        snprintf(num, sizeof num, "%d", i + 1);
+        text_draw(c, ui_font(10.0f), pts[i], ALIGN_CENTER_CENTER, num, PAPER,
+                  0.0f);
+    }
+    paint_chandas_walk(a, ui, pts);
+}
+
 static void draw_room_page(App *a, Ui *ui, Rct r) {
     Stack s = stack_in(r, GROUP, "room");
     param_fader(a, ui, stack_row(&s, FADER_H), PARAM_MIX);
@@ -82,8 +170,8 @@ void draw_space_column(App *a, Ui *ui, Rct r) {
         params_send(a, PG_LIMITER);
     }
     cut_bottom(&r, SECTION);
-    param_fader(a, ui, cut_bottom(&r, FADER_H), PARAM_WARMTH);
-    cut_bottom(&r, SECTION);
 
+    paint_pentagram(a, ui, cut_top(&r, PENTAGRAM_H));
+    cut_top(&r, GROUP);
     tab_view(a, ui, "space tab", r, SPACE, SPACE_TABS, &a->space_tab);
 }

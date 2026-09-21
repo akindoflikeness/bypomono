@@ -244,7 +244,6 @@ static const Verb VERBS[] = {
     CONTROL("reverb_decay", "<0.05-8s>", "set room decay in seconds"),
     CONTROL("damp", "<0-0.99>", "set room damping"),
     CONTROL("haunt", "<0-1>", "set phase-inverting cross-feed"),
-    CONTROL("warmth", "<0-1>", "set tape warmth"),
     CONTROL("limiter", "<0|1>", "toggle the final true-peak safety limiter"),
     CONTROL("ceiling", "<-12 to -0.1 dBTP>", "set the safety limiter ceiling"),
     CONTROL("level", "<0-1>", "set master output level"),

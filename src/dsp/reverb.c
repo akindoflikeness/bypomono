@@ -8,8 +8,6 @@
 #define COMB_INPUT_GAIN 0.06f
 #define WET_MAKEUP_GAIN 25.0f
 #define MAX_FB 0.985f
-#define WET_HEADROOM (PHI * PHI)
-#define LOOP_DRIVE PHI
 #define PARAM_SMOOTH 0.0014f
 #define FIELD_TO_DAMP 0.5f
 #define FIELD_TO_MIX 0.1f
@@ -44,14 +42,6 @@ VerbParams verb_params_default(void) {
     return p;
 }
 
-static float loop_sat(float v) {
-    float d = LOOP_DRIVE;
-    if (d <= 0.0f) {
-        return v;
-    }
-    return tanhf(v * d) / d;
-}
-
 static void comb_new(Comb *c, size_t len, float lfo_inc, float lfo_phase) {
     c->buf = (float *)calloc(len, sizeof(float));
     c->len = len;
@@ -60,6 +50,7 @@ static void comb_new(Comb *c, size_t len, float lfo_inc, float lfo_phase) {
     c->delay_f = 0.0f;
     c->delay_to = 1.0f;
     c->delay_seconds = 0.0f;
+    c->in_ref = 1.0f;
     c->fb = 0.0f;
     c->fb_target = 0.0f;
     c->lp = 0.0f;
@@ -67,16 +58,22 @@ static void comb_new(Comb *c, size_t len, float lfo_inc, float lfo_phase) {
     c->lfo_inc = lfo_inc;
 }
 
+static float comb_fb_for(float delay_seconds, float decay) {
+    return fminf(powf(0.001f, delay_seconds / fmaxf(decay, 0.05f)), MAX_FB);
+}
+
 static void comb_set_delay(Comb *c, float seconds, float sample_rate) {
     size_t d = (size_t)(seconds * sample_rate);
     c->delay_seconds = seconds;
+    float ref = comb_fb_for(seconds, verb_params_default().decay);
+    c->in_ref = 1.0f / sqrtf(1.0f - ref * ref);
     c->delay = d < 1 ? 1 : (d > c->len - 1 ? c->len - 1 : d);
     c->delay_to = (float)c->delay;
     if (c->delay_f <= 0.0f) c->delay_f = c->delay_to; /* born on its length */
 }
 
 static void comb_set_decay(Comb *c, float decay) {
-    c->fb_target = fminf(powf(0.001f, c->delay_seconds / fmaxf(decay, 0.05f)), MAX_FB);
+    c->fb_target = comb_fb_for(c->delay_seconds, decay);
 }
 
 static float comb_process(Comb *c, float x, float damp, float glide) {
@@ -95,7 +92,11 @@ static float comb_process(Comb *c, float x, float damp, float glide) {
     size_t i1 = (c->write + len - di - 1) % len;
     float y = c->buf[i0] * (1.0f - frac) + c->buf[i1] * frac;
     c->lp = y + damp * (c->lp - y);
-    c->buf[c->write] = x + loop_sat(c->lp * c->fb);
+    /* input scaled by sqrt(1 - fb^2) holds the loop's energy gain constant, so
+       a longer decay rings longer instead of louder; in_ref pins that constant
+       to the level the default decay has always had */
+    float in = sqrtf(1.0f - c->fb * c->fb) * c->in_ref;
+    c->buf[c->write] = x * in + c->lp * c->fb;
     c->write = (c->write + 1) % c->len;
     return y;
 }
@@ -314,8 +315,8 @@ Stereo verb_process(StereoVerb *v, const Frame *frame) {
     wet_l = svf_process(&v->svf_l[1], wet_l, g, 2.0f);
     wet_r = svf_process(&v->svf_r[0], wet_r, g, k1);
     wet_r = svf_process(&v->svf_r[1], wet_r, g, 2.0f);
-    wet_l = dc_block_process(&v->wet_dc_l, soft_clip_to(wet_l, WET_HEADROOM));
-    wet_r = dc_block_process(&v->wet_dc_r, soft_clip_to(wet_r, WET_HEADROOM));
+    wet_l = dc_block_process(&v->wet_dc_l, wet_l);
+    wet_r = dc_block_process(&v->wet_dc_r, wet_r);
     if (fabsf(frame->base_hz - v->room_hp_for_hz) > v->room_hp_for_hz * 1e-4f) {
         v->room_hp_for_hz = frame->base_hz;
         v->room_hp_g = tanf(PI_F * verb_room_hp_hz(frame->base_hz) / v->sample_rate);

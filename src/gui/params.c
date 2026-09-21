@@ -47,8 +47,6 @@ const Control PARAMS[PARAM_COUNT] = {
                        "%.2f", NULL, NULL, PG_ENV},
     [PARAM_RELEASE] = {"release", "release", ENV_RELEASE_MIN, ENV_TIME_MAX,
                        CURVE_ENV_TIME, 1, false, NULL, "s", "seconds", PG_ENV},
-    [PARAM_WARMTH] = {"warmth", "warmth", MIN_WARMTH, MAX_WARMTH, CURVE_LINEAR,
-                      1, false, "%.2f", NULL, NULL, PG_WARMTH},
     [PARAM_CEILING] = {"ceiling", "ceiling", LIMITER_CEILING_DB_MIN,
                        LIMITER_CEILING_DB_MAX, CURVE_LINEAR, 1, false,
                        "%.1f dBTP", "dbtp", NULL, PG_LIMITER},
@@ -103,7 +101,6 @@ float param_get(const App *a, ParamId id) {
     case PARAM_ENV_DECAY: return a->shadow_decay_s;
     case PARAM_SUSTAIN: return a->shadow_sustain;
     case PARAM_RELEASE: return a->shadow_release_s;
-    case PARAM_WARMTH: return a->shadow_warmth;
     case PARAM_CEILING: return a->shadow_limiter_ceiling_db;
     case PARAM_MEL_RATE: return a->shadow_melody.rate_hz;
     case PARAM_MEL_RANGE: return (float)a->shadow_melody.range_degrees;
@@ -144,7 +141,6 @@ void param_set(App *a, ParamId id, float v) {
     case PARAM_ENV_DECAY: a->shadow_decay_s = v; break;
     case PARAM_SUSTAIN: a->shadow_sustain = v; break;
     case PARAM_RELEASE: a->shadow_release_s = v; break;
-    case PARAM_WARMTH: a->shadow_warmth = v; break;
     case PARAM_CEILING: a->shadow_limiter_ceiling_db = v; break;
     case PARAM_MEL_RATE: a->shadow_melody.rate_hz = v; break;
     case PARAM_MEL_RANGE: a->shadow_melody.range_degrees = (uint8_t)v; break;
@@ -190,7 +186,6 @@ float param_default(const App *a, ParamId id) {
     case PARAM_ENV_DECAY: return e.decay_s;
     case PARAM_SUSTAIN: return e.sustain;
     case PARAM_RELEASE: return e.release_s;
-    case PARAM_WARMTH: return session_default().warmth;
     case PARAM_CEILING: return LIMITER_CEILING_DB_DEFAULT;
     case PARAM_MEL_RATE: return m.rate_hz;
     case PARAM_MEL_RANGE: return (float)m.range_degrees;

@@ -307,16 +307,27 @@ static void draw_preset_bar(App *a, Ui *ui, Rct r) {
     }
 }
 
-void draw_header(App *a, Ui *ui, Rct r) {
+void draw_header(App *a, Ui *ui, const Screen *s) {
     Canvas *c = ui->canvas;
-    draw_rect_filled(c, cut_bottom(&r, 2.0f), PAPER);
-    r = rct_shrink(r, TIGHT);
+    Rct h = s->header;
+    Rct left = rct(h.x0, h.y0, s->fm.x1, h.y1);
+    Rct right = rct(s->space.x0, h.y0, h.x1, h.y1);
+    draw_rect_filled(c, cut_bottom(&left, 2.0f), PAPER);
+    draw_rect_filled(c, cut_bottom(&right, 2.0f), PAPER);
+    /* the tabs hang down through the gap onto the display's top edge, so the
+       rule stops either side of them */
+    draw_display_tabs(a, ui, rct(s->display.x0, h.y0 + TIGHT, s->display.x1,
+                                 s->display.y0));
+
+    Rct r = rct_shrink(left, TIGHT);
     FontId mark = ui_font(16.0f);
+    const char *title = "BLOW YOUR PHASE OFF";
     text_draw(c, mark, (P2){r.x0 + GAP, rct_center(r).y}, ALIGN_LEFT_CENTER,
-              "BLOW YOUR PHASE OFF", PAPER, 1.0f);
+              title, PAPER, 1.0f);
+    cut_left(&r, GAP + text_width(mark, title, 1.0f) + SECTION);
     draw_preset_bar(a, ui, r);
 
-    Rct right = r;
+    r = rct_shrink(right, TIGHT);
     cut_right(&right, GAP);
     Rct drone = cut_right(&right, 90.0f);
     drone = rct(drone.x0, rct_center(r).y - 0.5f * ROW_H, drone.x1,

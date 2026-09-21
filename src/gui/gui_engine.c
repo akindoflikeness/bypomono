@@ -92,7 +92,6 @@ const char *cc_target_name(CcTarget t) {
     case CC_DECAY: return "decay";
     case CC_DAMP: return "damp";
     case CC_HAUNT: return "haunt";
-    case CC_WARMTH: return "warmth";
     case CC_ATTACK: return "attack";
     case CC_ENVDECAY: return "envdecay";
     case CC_SUSTAIN: return "sustain";
@@ -235,7 +234,6 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     App *a = s->app;
     Stereo w = verb_process(&s->verb, frame);
     w = chandas_process(&s->chandas, w);
-    w = tape_process(&s->tape, w);
     float g = engage_gate_next(&s->gate, s->engaged || ctx->notes_live);
     Stereo limited = limiter_process(&s->limiter, (Stereo){w.l * g, w.r * g});
     float l = limited.l, r = limited.r;
@@ -256,14 +254,14 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     }
     size_t at = (ctx->base + n) * (size_t)ctx->channels;
     if (ctx->channels == 1) {
-        float m = soft_clip(0.5f * (l + r));
+        float m = 0.5f * (l + r);
         ctx->data[at] = m;
         if (ctx->rec_armed) {
             RecRing_push(&a->rec, m);
             RecRing_push(&a->rec, m);
         }
     } else {
-        float cl = soft_clip(l), cr = soft_clip(r);
+        float cl = l, cr = r;
         ctx->data[at] = cl;
         ctx->data[at + 1] = cr;
         for (int c = 2; c < ctx->channels; c++) ctx->data[at + c] = 0.0f;
@@ -529,7 +527,7 @@ static const ParamId CC_PARAM[CC_LAST + 1] = {
     [CC_GLIDE] = PARAM_GLIDE,       [CC_DRONEHZ] = PARAM_DRONE_HZ,
     [CC_MIX] = PARAM_MIX,           [CC_GHOST] = PARAM_GHOST,
     [CC_DECAY] = PARAM_VERB_DECAY,  [CC_DAMP] = PARAM_DAMP,
-    [CC_HAUNT] = PARAM_HAUNT,       [CC_WARMTH] = PARAM_WARMTH,
+    [CC_HAUNT] = PARAM_HAUNT,
     [CC_ATTACK] = PARAM_ATTACK,     [CC_ENVDECAY] = PARAM_ENV_DECAY,
     [CC_SUSTAIN] = PARAM_SUSTAIN,
 };

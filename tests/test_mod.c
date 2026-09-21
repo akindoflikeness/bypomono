@@ -135,14 +135,14 @@ static void a_removed_route_writes_its_group_once_more(void) {
     Mod m;
     mod_init(&m, SR);
     mod_set_lfo(&m, 0, lfo(LFO_SINE, 1.0f));
-    mod_set_route(&m, 0, (ModRoute){0, MT_WARMTH, 0.5f});
+    mod_set_route(&m, 0, (ModRoute){0, MT_GHOST, 0.5f});
     ModBase base = base_of(&s), out;
-    CHECK(mod_apply(&m, &base, &out) & MOD_G_WARMTH, "warmth not written");
+    CHECK(mod_apply(&m, &base, &out) & MOD_G_VERB, "ghost not written");
     mod_set_route(&m, 0, (ModRoute){0, MT_NONE, 0.0f});
-    CHECK(mod_apply(&m, &base, &out) & MOD_G_WARMTH,
-          "warmth not put back after the route went");
-    CHECK(out.warmth == base.warmth, "warmth %g, base %g", out.warmth,
-          base.warmth);
+    CHECK(mod_apply(&m, &base, &out) & MOD_G_VERB,
+          "ghost not put back after the route went");
+    CHECK(out.verb.ghost == base.verb.ghost, "ghost %g, base %g",
+          out.verb.ghost, base.verb.ghost);
     CHECK(mod_apply(&m, &base, &out) == 0, "still writing with no routes");
 }
 
@@ -353,7 +353,7 @@ static void lfo_runs_make_point_and_remove(void) {
     int count = 0;
     for (int i = 0; i < MOD_ROUTES; i++) count += a->mods.route[i].target != MT_NONE;
     CHECK(count == 2, "replacing a depth made a new route: %d", count);
-    CHECK(!run("mod lfo 5 to warmth off", err, sizeof err), "removed a missing route");
+    CHECK(!run("mod lfo 5 to ghost off", err, sizeof err), "removed a missing route");
     CHECK(run("mod lfo 5 to mix off", err, sizeof err), "%s", err);
     CHECK(mod_bank_find_route(&a->mods, 4, MT_MIX) < 0, "mix route stayed");
     CHECK(run("mod lfo 5 rm", err, sizeof err), "%s", err);
@@ -373,7 +373,7 @@ static void a_failed_line_changes_nothing(void) {
         run(line, err, sizeof err);
     }
     ModBank before = a->mods;
-    CHECK(!run("mod lfo 16 tri to warmth 0.5 to mix 0.5", err, sizeof err),
+    CHECK(!run("mod lfo 16 tri to ghost 0.5 to mix 0.5", err, sizeof err),
           "ran with every route taken");
     CHECK(memcmp(&before, &a->mods, sizeof before) == 0,
           "a refused line still changed the bank");

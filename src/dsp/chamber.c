@@ -19,14 +19,6 @@ static const size_t AP_LEN[4] = {211, 337, 449, 601};
 #define CHAMBER_DC_HZ 12.0f
 #define MAX_PREDELAY_MS 250.0f
 
-float chamber_jfet(float x, float asym) {
-    if (x >= 0.0f) {
-        return tanhf(x);
-    }
-    float k = 1.0f - 0.28f * clampf(asym, 0.0f, 1.0f);
-    return k * tanhf(x / k);
-}
-
 void hadamard8(float s[CHAMBER_N]) {
     size_t step = 1;
     while (step < CHAMBER_N) {
@@ -152,7 +144,6 @@ Stereo chamber_process(Chamber *c, Stereo dry) {
         delay_write(&c->ap[k], x + AP_G * y);
         x = y;
     }
-    float inv_drive = 1.0f / CHAMBER_DRIVE;
     float s[CHAMBER_N];
     for (int i = 0; i < CHAMBER_N; i++) {
         c->mod_ph[i] += TAU_F * (0.15f + 0.025f * (float)i) / c->sr;
@@ -165,15 +156,16 @@ Stereo chamber_process(Chamber *c, Stereo dry) {
         float v = delay_read_frac(&c->lines[i], fmaxf(c->len[i] + wob, 2.0f));
         c->lp[i] = v * (1.0f - c->damp_a) + c->lp[i] * c->damp_a;
         float fb = c->lp[i] * c->g[i];
-        float sat = chamber_jfet(fb * CHAMBER_DRIVE, CHAMBER_ASYM) * inv_drive;
-        float y = sat - c->dc_x1[i] + c->dc_r * c->dc_y1[i];
-        c->dc_x1[i] = sat;
+        float y = fb - c->dc_x1[i] + c->dc_r * c->dc_y1[i];
+        c->dc_x1[i] = fb;
         c->dc_y1[i] = y;
         s[i] = y;
     }
     hadamard8(s);
     for (int i = 0; i < CHAMBER_N; i++) {
-        delay_write(&c->lines[i], s[i] + x);
+        /* same energy normalisation as the room's combs: a longer tail rings
+           longer, not louder */
+        delay_write(&c->lines[i], s[i] + x * sqrtf(1.0f - c->g[i] * c->g[i]));
     }
     float mid = 0.0f;
     for (int i = 0; i < CHAMBER_N; i++) {

@@ -76,7 +76,7 @@ void app_frame(App *a, Ui *ui) {
 
     Screen s = screen_layout(rct(0, 0, DESIGN_W, DESIGN_H),
                              fminf(FOOTER_LINE_H, DESIGN_H));
-    draw_header(a, ui, s.header);
+    draw_header(a, ui, &s);
     draw_footer(a, ui, s.footer);
 
     struct { Rct r; void (*draw)(App *, Ui *, Rct); } panels[] = {

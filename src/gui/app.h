@@ -198,7 +198,7 @@ typedef enum { DREAD_NORMAL, DREAD_LOW, DREAD_CRITICAL } Dread;
 typedef enum {
     CC_NONE = 0, CC_INDEX, CC_RIP, CC_FB, CC_FIELD, CC_CURVE, CC_RELEASE,
     CC_GLIDE, CC_DRONEHZ, CC_MIX, CC_GHOST, CC_DECAY, CC_DAMP, CC_HAUNT,
-    CC_WARMTH, CC_ATTACK, CC_ENVDECAY, CC_SUSTAIN
+    CC_ATTACK, CC_ENVDECAY, CC_SUSTAIN
 } CcTarget;
 #define CC_LAST CC_SUSTAIN
 const char *cc_target_name(CcTarget t);
@@ -388,6 +388,10 @@ typedef struct {
 /* a row of wave tabs across the top of r and the active page below it */
 void tab_view(App *a, Ui *ui, const char *id, Rct r, const Tab *tabs, int n,
               int *active);
+/* the two halves of tab_view, for when the tabs sit away from their page */
+void tab_strip(Ui *ui, const char *id, Rct bar, const Tab *tabs, int n,
+               int *active);
+void tab_page(App *a, Ui *ui, Rct r, const Tab *tabs, int n, int active);
 void draw_graticule(Canvas *c, Rct r, int cols, int rows);
 void beam_segment(Canvas *c, P2 a, P2 b, int k, bool decayed);
 void dotted_rect(Canvas *c, Rct r, uint8_t ink);
@@ -447,7 +451,9 @@ void presets_show(App *a, bool on);
 /* panes.c */
 /* Tab walks search -> list -> buttons, Left/Right pick a bar button */
 void presets_walk_keys(App *a, Ui *ui);
-void draw_header(App *a, Ui *ui, Rct r);
+/* the header row lines up with the columns: presets over sound and fm, the
+   display tabs over the display, info and drone over space */
+void draw_header(App *a, Ui *ui, const Screen *s);
 void draw_presets_pane(App *a, Ui *ui, Rct r);
 void draw_info_pane(App *a, Ui *ui);
 void draw_fps_counter(App *a, Ui *ui, float footer_h);
@@ -456,6 +462,7 @@ void draw_fps_counter(App *a, Ui *ui, float footer_h);
 void draw_sound_column(App *a, Ui *ui, Rct r);   /* sound.c */
 void draw_fm_column(App *a, Ui *ui, Rct r);      /* fm.c */
 void draw_display_column(App *a, Ui *ui, Rct r); /* display.c */
+void draw_display_tabs(App *a, Ui *ui, Rct bar);
 void draw_space_column(App *a, Ui *ui, Rct r);   /* space.c */
 void draw_melody_bar(App *a, Ui *ui, Rct r);     /* melody_bar.c */
 

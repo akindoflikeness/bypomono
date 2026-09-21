@@ -41,7 +41,6 @@ static const ControlSpec SPECS[] = {
     {"release", CT_PARAM, PARAM_RELEASE, 0, 0, false},
     {"hz", CT_PARAM, PARAM_DRONE_HZ, 0, 0, false},
     {"note", CT_NOTE, 0, 0, 127, true},
-    {"warmth", CT_PARAM, PARAM_WARMTH, 0, 0, false},
     {"limiter", CT_LIMITER, 0, 0, 1, true},
     {"ceiling", CT_PARAM, PARAM_CEILING, 0, 0, false},
 };

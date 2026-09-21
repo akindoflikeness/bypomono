@@ -280,6 +280,9 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     float field_target = clampf(v->patch.field, 0.0f, 1.0f);
     float curve_target = clampf(v->patch.curve, 0.0f, 1.0f);
     float param_k = glide_k(PARAM_GLIDE_S, v->sample_rate);
+    /* RIP is a feedback input, so keep its drive independent of how many
+       carriers an algorithm exposes. The audible bus below is deliberately
+       not normalized: enabling another carrier adds that operator's level. */
     float inv_carriers = 1.0f / (float)v->compiled.carrier_count;
     float rip_target = clampf(v->patch.rip, 0.0f, 1.0f);
     float fb_target = clampf(v->patch.feedback, 0.0f, 1.0f);
@@ -386,7 +389,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         v->field_amount = field.amount;
         Frame frame;
         for (int i = 0; i < NUM_OPS; i++) frame.ops[i] = v->out[i];
-        frame.mix = mix * inv_carriers * field.gain;
+        frame.mix = mix * field.gain;
         frame.master = field.gain;
         frame.field = field.amount;
         frame.base_hz = v->freq;

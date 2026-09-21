@@ -909,20 +909,62 @@ static void draw_operator_view(App *a, Ui *ui, Rct r) {
     canvas_set_clip(c, saved);
 }
 
+/* This is deliberately short enough to live in the instrument. Full licence
+   text remains beside the binary in THIRD-PARTY-LICENSES.txt. */
+static void draw_info_view(App *a, Ui *ui, Rct r) {
+    (void)a;
+    Canvas *c = ui->canvas;
+    FontId heading = ui_font(12.0f);
+    FontId body = ui_font(11.0f);
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, r);
+    Rct content = rct_shrink(r, 6.0f);
+    float y = content.y0;
+
+    text_draw(c, heading, (P2){content.x0, y}, ALIGN_LEFT_TOP,
+              "BYPO MONO C", PAPER, 0.0f);
+    y += text_row_height(heading) + TIGHT;
+    text_draw(c, body, (P2){content.x0, y}, ALIGN_LEFT_TOP,
+              "design + audio architecture  AKOL", PAPER, 0.0f);
+    y += text_row_height(body) + SECTION;
+
+    text_draw(c, heading, (P2){content.x0, y}, ALIGN_LEFT_TOP, "CREDITS", PAPER,
+              0.0f);
+    y += text_row_height(heading) + TIGHT;
+    static const char *const LINES[] = {
+        "Pixeloid Mono  GGBotNet  SIL OFL 1.1",
+        "European Teletext  Jayvee Enaguas  CC0 1.0",
+        "Unifont Ex Mono  stgiga / GNU Unifont  SIL OFL 1.1",
+        "SDL2  zlib License     FreeType  FTL",
+        "",
+        "BYPO source: MIT License",
+        "full notices: THIRD-PARTY-LICENSES.txt",
+    };
+    for (size_t i = 0; i < sizeof LINES / sizeof LINES[0]; i++) {
+        if (y + text_row_height(body) > content.y1) break;
+        text_draw(c, body, (P2){content.x0, y}, ALIGN_LEFT_TOP, LINES[i], PAPER,
+                  0.0f);
+        y += text_row_height(body) + TIGHT;
+    }
+    canvas_set_clip(c, saved);
+}
+
 void draw_display_cell(App *a, Ui *ui, Rct r) {
-    static const char *const TABS[2] = {"OPERATORS", "ENVELOPE"};
+    static const char *const TABS[3] = {"OPERATORS", "ENVELOPE", "I"};
     float tab_h = text_row_height(ui_font(12.0f * 1.3f)) + 2.0f * 2.0f
                   + 2.0f * SNUG;
     int hit = wave_tabs(ui, ui_id("display.tabs"),
-                        rct_xywh(r.x0, r.y0, rct_w(r), tab_h), TABS, 2,
+                        rct_xywh(r.x0, r.y0, rct_w(r), tab_h), TABS, 3,
                         a->display_tab);
     if (hit >= 0) a->display_tab = hit;
 
     Rct page = rct(r.x0, r.y0 + tab_h + CELL_GUTTER, r.x1, r.y1);
     if (a->display_tab == 0)
         draw_operator_view(a, ui, page);
-    else
+    else if (a->display_tab == 1)
         draw_envelope_view(a, ui, page);
+    else
+        draw_info_view(a, ui, page);
 }
 
 /* ---------- the controls house ---------- */

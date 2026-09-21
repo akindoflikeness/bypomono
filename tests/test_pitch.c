@@ -37,6 +37,29 @@ static void additive_carriers_keep_their_own_frequencies(void) {
     voice_free(&v);
 }
 
+/* Carrier level is a literal gain into the audible mix. Topology must not
+   quietly divide that gain away merely because it exposes more carriers. */
+static void additive_carriers_are_summed_at_the_output(void) {
+    Patch patch = patch_init(ALGORITHMS[4], RATIO_HARMONIC); /* PPPP */
+    patch.index = 0.0f;
+    patch.feedback = 0.0f;
+    patch.rip = 0.0f;
+    patch.field = 0.0f;
+    Voice v;
+    voice_init(&v, SR, patch);
+    voice_set_freq_hz(&v, NOTE_HZ);
+
+    Frame frame;
+    voice_render_frames(&v, 257, copy_frame, &frame);
+    float carriers = 0.0f;
+    for (int op = 0; op < NUM_OPS; op++) carriers += frame.ops[op];
+    CHECK_NEAR(frame.mix, carriers * frame.master, 1e-5f,
+               "mix %g is not the carrier sum %g", (double)frame.mix,
+               (double)(carriers * frame.master));
+    voice_free(&v);
+}
+
 void test_pitch(void) {
     additive_carriers_keep_their_own_frequencies();
+    additive_carriers_are_summed_at_the_output();
 }

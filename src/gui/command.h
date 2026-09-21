@@ -40,6 +40,8 @@ typedef struct Command {
     bool cc_all;
     bool recursive;
     CcTarget target;
+    float value;                /* direct control value in its real unit */
+    int choice;                 /* parsed enum or integer direct control */
     bool view;                  /* -v: pin the line's view above the log */
     char words[CMD_WORDS][64];  /* raw verbs: the words after the verb */
     int nwords;
@@ -103,6 +105,22 @@ int mod_complete_lfo(char *const words[], int nwords, const char *prefix,
 bool mod_parse_mods(Command *c, char *err, size_t err_len);
 bool mod_run_mods(App *a, const Command *c, char *err, size_t err_len);
 bool mod_view_mods(App *a, const Command *c, View *out);
+
+/* cmd_controls.c */
+bool control_parse(Command *c, char *err, size_t err_len);
+bool control_run(App *a, const Command *c, char *err, size_t err_len);
+int control_complete(char *const words[], int nwords, const char *prefix,
+                     char out[][CAND_LEN], int max);
+bool control_parse_mel(Command *c, char *err, size_t err_len);
+bool control_run_mel(App *a, const Command *c, char *err, size_t err_len);
+int control_complete_mel(char *const words[], int nwords, const char *prefix,
+                         char out[][CAND_LEN], int max);
+bool control_parse_chandas(Command *c, char *err, size_t err_len);
+bool control_run_chandas(App *a, const Command *c, char *err, size_t err_len);
+int control_complete_chandas(char *const words[], int nwords,
+                             const char *prefix, char out[][CAND_LEN], int max);
+bool control_get(App *a, char *const words[], int nwords, char *err, size_t n);
+bool control_status(App *a, const char *section, char *err, size_t n);
 
 /* ---------- the line being typed ---------- */
 

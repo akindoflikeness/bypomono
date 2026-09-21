@@ -252,9 +252,6 @@ static void chandas_section(App *a, Ui *ui, float x, float w, float *py) {
     ChandasParams h = a->shadow_chandas;
     ChandasParams hd = chandas_params_default();
     bool changed = false;
-    bool was_enabled = h.enabled;
-    h.enabled = h.mix > 0.0f;
-    changed |= h.enabled != was_enabled;
     (void)c;
 
     {
@@ -289,9 +286,11 @@ static void chandas_section(App *a, Ui *ui, float x, float w, float *py) {
     y += FADER_ROW_EXTRA;
 
     char val[32];
+    float mix_before = h.mix;
     snprintf(val, sizeof val, "%.2f", h.mix);
     changed |= fad_lin(ui, ui_id("chandas.mix"), rct_xywh(x, y, w, FADER_H),
                        "mix", &h.mix, 0.0f, 1.0f, hd.mix, val);
+    if (h.mix != mix_before) h.enabled = h.mix > 0.0f;
     y += FADER_H + GROUP;
     snprintf(val, sizeof val, "%.2f", h.spread);
     changed |= fad_lin(ui, ui_id("chandas.spread"), rct_xywh(x, y, w, FADER_H),

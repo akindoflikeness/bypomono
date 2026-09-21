@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,6 +92,11 @@ static bool run_undo(App *a, const Command *c, char *err, size_t n);
 static bool run_bind(App *a, const Command *c, char *err, size_t n);
 static bool run_unbind(App *a, const Command *c, char *err, size_t n);
 static bool run_help(App *a, const Command *c, char *err, size_t n);
+static bool parse_set(Command *c, char *err, size_t n);
+static bool parse_meta(Command *c, char *err, size_t n);
+static bool run_set(App *a, const Command *c, char *err, size_t n);
+static bool run_get(App *a, const Command *c, char *err, size_t n);
+static bool run_status(App *a, const Command *c, char *err, size_t n);
 static bool parse_switch(Command *c, char *err, size_t n);
 static bool run_switch(App *a, const Command *c, char *err, size_t n);
 static bool parse_op(Command *c, char *err, size_t n);
@@ -113,6 +119,10 @@ static const Flag REC_FLAGS[] = {
 static const Flag RM_FLAGS[] = {
     {"r", NULL, "move a folder and everything in it to the trash"},
 };
+
+#define CONTROL(NAME, FORM, ABOUT)                                           \
+    {.name = NAME, .group = G_SOUND, .about = ABOUT, .run = control_run,     \
+     .parse = control_parse, .form = FORM}
 
 static const Verb VERBS[] = {
     {"ls", {NULL}, G_PRESETS, {"path or mod", NULL}, 1, 0, true, NULL, 0,
@@ -154,19 +164,66 @@ static const Verb VERBS[] = {
      .form = "[on|off]"},
     {.name = "mel",
      .group = G_SOUND,
-     .about = "show or set whether the melody sequencer is running",
-     .run = run_switch,
-     .parse = parse_switch,
-     .complete = switch_complete,
-     .form = "[on|off]"},
+     .about = "show or shape the melody sequencer",
+     .run = control_run_mel,
+     .parse = control_parse_mel,
+     .complete = control_complete_mel,
+     .form = "[on|off|src|tuning|scale|root|range|rate ...]"},
     {.name = "op",
      .group = G_SOUND,
      .about = "show an operator, or set its power",
      .run = run_op,
      .parse = parse_op,
      .complete = op_complete,
-     .form = "<1-5> [on|off]",
-     .extra = "with no state word, prints power, ratio, detune in cents and level"},
+     .form = "<1-5> [on|off|ratio|detune|level [value]]",
+     .extra = "ratio 0.01 to 64; detune is cents; level 0 to 1"},
+    {.name = "poly", .group = G_SOUND,
+     .about = "show or set four-note polyphony", .run = run_switch,
+     .parse = parse_switch, .complete = switch_complete, .form = "[on|off]"},
+    {.name = "unison", .group = G_SOUND,
+     .about = "show or set the two-voice unison stack", .run = run_switch,
+     .parse = parse_switch, .complete = switch_complete, .form = "[on|off]"},
+    CONTROL("alg", "<1-8>", "set one of the eight named algorithms"),
+    {.name = "mode", .group = G_SOUND,
+     .about = "load a named ratio palette into all five operators",
+     .run = control_run, .parse = control_parse, .complete = control_complete,
+     .form = "<harmonic|fibonacci|golden|mirror|plastic>"},
+    CONTROL("index", "<0-1>", "set the FM index macro"),
+    CONTROL("rip", "<0-1>", "set inverted-past modulation depth"),
+    CONTROL("fb", "<0-1>", "set feedback at the feedback operator"),
+    CONTROL("glide", "<0-2s>", "set portamento time in seconds"),
+    CONTROL("detune", "<0-50 cents>", "set unison detune in cents"),
+    CONTROL("hz", "<27.5-440hz>", "glide the drone to a frequency"),
+    CONTROL("note", "<0-127>", "glide the drone to a MIDI note"),
+    CONTROL("attack", "<0.002-8s>", "set envelope attack in seconds"),
+    CONTROL("env_decay", "<0-8s>", "set envelope decay in seconds"),
+    CONTROL("sustain", "<0-1>", "set envelope sustain level"),
+    CONTROL("release", "<0.05-8s>", "set envelope release in seconds"),
+    CONTROL("field", "<0-1>", "set breath depth"),
+    CONTROL("curve", "<0-1>", "set breath and envelope curve"),
+    CONTROL("mix", "<0-1>", "set room wet/dry mix"),
+    CONTROL("ghost", "<0-1>", "set modulator bleed into the room"),
+    CONTROL("reverb_decay", "<0.05-8s>", "set room decay in seconds"),
+    CONTROL("damp", "<0-0.99>", "set room damping"),
+    CONTROL("haunt", "<0-1>", "set phase-inverting cross-feed"),
+    CONTROL("warmth", "<0-1>", "set tape warmth"),
+    CONTROL("level", "<0-1>", "set master output level"),
+    {.name = "chandas", .group = G_SOUND,
+     .about = "show or shape the Chandas granular delay",
+     .run = control_run_chandas, .parse = control_parse_chandas,
+     .complete = control_complete_chandas,
+     .form = "[bypass|sync|time|rate|mix|spread|size|warp|dim|tail ...]"},
+    {.name = "status", .aliases = {"show", NULL}, .group = G_SOUND,
+     .about = "show current values, together or by section", .run = run_status,
+     .parse = parse_meta,
+     .form = "[sound|operators|envelope|room|chandas|melody]"},
+    {.name = "get", .group = G_SOUND,
+     .about = "show one parameter's value, range and default", .run = run_get,
+     .parse = parse_meta,
+     .form = "<parameter>"},
+    {.name = "set", .group = G_SOUND,
+     .about = "set any parameter through its canonical command", .run = run_set,
+     .parse = parse_set, .form = "<parameter> <value>"},
     {"bind", {NULL}, G_MIDI, {"cc", "control"}, 2, 2, true, NULL, 0,
      "point a controller at a control", run_bind, NULL, NULL, NULL,
      NULL, NULL, NULL},
@@ -212,6 +269,7 @@ static const Verb VERBS[] = {
      .form = "[-v]",
      .extra = "-v      pin the table above the log, live; -v again lets it go"},
 };
+#undef CONTROL
 #define NVERBS ((int)(sizeof VERBS / sizeof VERBS[0]))
 
 static const char *const GROUP_TITLES[G_COUNT] = {
@@ -814,41 +872,58 @@ static bool parse_switch(Command *c, char *err, size_t n) {
 static bool run_switch(App *a, const Command *c, char *err, size_t n) {
     (void)err;
     (void)n;
-    bool *state;
+    bool *state = NULL;
+    bool current;
     Event ev;
     if (strcmp(c->verb->name, "drone") == 0) {
         state = &a->engaged;
+        current = *state;
         ev.kind = EV_ENGAGE;
-    } else {
+    } else if (strcmp(c->verb->name, "mel") == 0) {
         state = &a->shadow_melody.enabled;
+        current = *state;
         ev.kind = EV_SET_MELODY;
+    } else if (strcmp(c->verb->name, "poly") == 0) {
+        current = a->shadow.voices > 1;
+        ev.kind = EV_SET_PATCH;
+    } else {
+        current = a->shadow.unison > 1;
+        ev.kind = EV_SET_PATCH;
     }
     if (c->nwords == 0) {
         if (strcmp(c->verb->name, "drone") == 0)
-            push_log(a, "drone %s at %.1f hz", *state ? "on" : "off",
+            push_log(a, "drone %s at %.1f hz", current ? "on" : "off",
                      (double)a->drone_hz);
-        else
-            push_log(a, "mel %s at %.3g hz", *state ? "on" : "off",
+        else if (strcmp(c->verb->name, "mel") == 0)
+            push_log(a, "mel %s at %.3g hz", current ? "on" : "off",
                      (double)a->shadow_melody.rate_hz);
+        else
+            push_log(a, "%s %s", c->verb->name, current ? "on" : "off");
         return true;
     }
     bool on;
     switch_word(c->words[0], &on);
-    *state = on;
     if (strcmp(c->verb->name, "drone") == 0) {
+        *state = on;
         ev.u.flag = on;
-    } else {
+    } else if (strcmp(c->verb->name, "mel") == 0) {
+        *state = on;
         ev.u.melody = a->shadow_melody;
+    } else {
+        if (strcmp(c->verb->name, "poly") == 0)
+            a->shadow.voices = on ? POLY_MAX : 1;
+        else
+            a->shadow.unison = on ? UNISON_MAX : 1;
+        ev.u.patch = a->shadow;
     }
     app_send(a, ev);
-    push_log(a, "%s %s", c->verb->name, on ? "on" : "off");
     return true;
 }
 
 static bool parse_op(Command *c, char *err, size_t n) {
     if (c->nwords == 0)
         return reason(err, n, "op wants its number first, 1 to %d", NUM_OPS);
-    if (c->nwords > 2) return reason(err, n, "op takes a number and a state");
+    if (c->nwords > 3) return reason(err, n, "op takes a number, control and value");
     char *end = NULL;
     long op = strtol(c->words[0], &end, 10);
     if (!end || *end || op < 1 || op > NUM_OPS)
@@ -856,8 +931,22 @@ static bool parse_op(Command *c, char *err, size_t n) {
                       NUM_OPS, c->words[0]);
     if (c->nwords == 2) {
         bool on;
-        if (!switch_word(c->words[1], &on))
-            return reason(err, n, "op wants on or off, not '%s'", c->words[1]);
+        if (switch_word(c->words[1], &on)) return true;
+        if (!strcasecmp(c->words[1], "ratio") || !strcasecmp(c->words[1], "detune")
+            || !strcasecmp(c->words[1], "level")) return true;
+        return reason(err, n, "op has no control called '%s'", c->words[1]);
+    }
+    if (c->nwords == 3) {
+        char *end = NULL;
+        float value = strtof(c->words[2], &end);
+        float lo, hi;
+        if (!strcasecmp(c->words[1], "ratio")) lo = OP_RATIO_MIN, hi = OP_RATIO_MAX;
+        else if (!strcasecmp(c->words[1], "detune")) lo = -100, hi = 100;
+        else if (!strcasecmp(c->words[1], "level")) lo = 0, hi = 1;
+        else return reason(err, n, "op has no control called '%s'", c->words[1]);
+        if (end == c->words[2] || *end || !isfinite(value) || value < lo || value > hi)
+            return reason(err, n, "op %s wants %g to %g, not '%s'", c->words[1],
+                          (double)lo, (double)hi, c->words[2]);
     }
     return true;
 }
@@ -874,10 +963,22 @@ static bool run_op(App *a, const Command *c, char *err, size_t n) {
         return true;
     }
     bool on;
-    switch_word(c->words[1], &on);
-    op->enabled = on;
+    if (switch_word(c->words[1], &on)) {
+        op->enabled = on;
+    } else if (c->nwords == 2) {
+        float value = !strcasecmp(c->words[1], "ratio") ? op->ratio
+                      : !strcasecmp(c->words[1], "detune") ? op->detune_cents
+                                                            : op->level;
+        const char *unit = !strcasecmp(c->words[1], "detune") ? " cents" : "";
+        push_log(a, "op %d %s %g%s", at + 1, c->words[1], (double)value, unit);
+        return true;
+    } else {
+        float value = strtof(c->words[2], NULL);
+        if (!strcasecmp(c->words[1], "ratio")) op->ratio = value;
+        else if (!strcasecmp(c->words[1], "detune")) op->detune_cents = value;
+        else op->level = value;
+    }
     app_send(a, (Event){.kind = EV_SET_PATCH, .u.patch = a->shadow});
-    push_log(a, "op %d %s", at + 1, on ? "on" : "off");
     return true;
 }
 
@@ -900,8 +1001,61 @@ static int op_complete(char *const words[], int nwords, const char *prefix,
         }
         return n;
     }
-    if (nwords == 1) return switch_complete(words, 0, prefix, out, max);
+    if (nwords == 1) {
+        n = switch_complete(words, 0, prefix, out, max);
+        n = add_cand(out, n, max, prefix, "ratio");
+        n = add_cand(out, n, max, prefix, "detune");
+        return add_cand(out, n, max, prefix, "level");
+    }
     return 0;
+}
+
+static void words_line(const Command *c, char *out, size_t cap) {
+    out[0] = 0;
+    for (int i = 0; i < c->nwords; i++)
+        scat(out, cap, "%s%s", i ? " " : "", c->words[i]);
+}
+
+static bool parse_set(Command *c, char *err, size_t n) {
+    if (c->nwords < 2) return reason(err, n, "set wants a parameter and value");
+    char line[LOG_LINE_LEN], inner_err[768];
+    words_line(c, line, sizeof line);
+    Command inner;
+    if (!parse_line(line, &inner, inner_err, sizeof inner_err)) {
+        char *nl = strchr(inner_err, '\n');
+        if (nl) *nl = 0;
+        return reason(err, n, "%s", inner_err);
+    }
+    if (!inner.verb || inner.verb->run == run_set || inner.kind != CMD_RUN)
+        return reason(err, n, "set cannot set %s", c->words[0]);
+    return true;
+}
+
+static bool run_set(App *a, const Command *c, char *err, size_t n) {
+    char line[LOG_LINE_LEN];
+    words_line(c, line, sizeof line);
+    Command inner;
+    if (!parse_line(line, &inner, err, n)) return false;
+    return command_run(a, &inner, err, n);
+}
+
+static bool parse_meta(Command *c, char *err, size_t n) {
+    if (strcmp(c->verb->name, "status") == 0) {
+        if (c->nwords <= 1) return true;
+        return reason(err, n, "status takes at most one section");
+    }
+    if (c->nwords >= 1 && c->nwords <= 2) return true;
+    return reason(err, n, "get wants a parameter name");
+}
+
+static bool run_get(App *a, const Command *c, char *err, size_t n) {
+    char *words[CMD_WORDS];
+    for (int i = 0; i < c->nwords; i++) words[i] = (char *)c->words[i];
+    return control_get(a, words, c->nwords, err, n);
+}
+
+static bool run_status(App *a, const Command *c, char *err, size_t n) {
+    return control_status(a, c->nwords ? c->words[0] : NULL, err, n);
 }
 
 static int complete_paths(const App *a, const char *prefix,

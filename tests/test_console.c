@@ -170,6 +170,27 @@ static void every_verb_parses_its_forms(void) {
             parses("op 5 off", CMD_RUN);
             continue;
         }
+        if (strcmp(v->name, "get") == 0) {
+            parses("get index", CMD_RUN);
+            parses("get op 2", CMD_RUN);
+            continue;
+        }
+        if (strcmp(v->name, "set") == 0) {
+            parses("set index 0.5", CMD_RUN);
+            parses("set chandas warp 0.2", CMD_RUN);
+            continue;
+        }
+        if (v->run == control_run) {
+            char line[128];
+            const char *value = strcmp(v->name, "mode") == 0 ? "golden"
+                                : strcmp(v->name, "hz") == 0 ? "110hz"
+                                : strcmp(v->name, "note") == 0 ? "45"
+                                : strcmp(v->name, "alg") == 0 ? "3"
+                                : "0.5";
+            snprintf(line, sizeof line, "%s %s", v->name, value);
+            parses(line, CMD_RUN);
+            continue;
+        }
         if (v->required == 0) parses(v->name, CMD_RUN);
         if (v->nargs >= 1) {
             snprintf(line, sizeof line, "%s some_name", v->name);
@@ -339,6 +360,12 @@ static void completion_uses_live_preset_state(void) {
     line_state(&app, "op 3 ", &s);
     CHECK(has_candidate(&s, "on") && has_candidate(&s, "off"),
           "op did not complete on/off");
+    line_state(&app, "mel tuning p", &s);
+    CHECK(has_candidate(&s, "phi powers") && has_candidate(&s, "phi walk"),
+          "mel did not complete tuning names");
+    line_state(&app, "chandas time 1/4", &s);
+    CHECK(has_candidate(&s, "1/4") && has_candidate(&s, "1/4T"),
+          "chandas did not complete divisions");
 }
 
 static void switches_query_and_take_explicit_state(void) {
@@ -363,6 +390,16 @@ static void switches_query_and_take_explicit_state(void) {
     CHECK(app.shadow_melody.enabled, "mel on left it off");
     CHECK(run_ok("op 2 off", err, sizeof err), "op off: %s", err);
     CHECK(!app.shadow.ops[1].enabled, "op 2 off left it on");
+    CHECK(run_ok("op 2 ratio 3.5", err, sizeof err), "op ratio: %s", err);
+    CHECK(run_ok("op 2 detune -7", err, sizeof err), "op detune: %s", err);
+    CHECK(run_ok("op 2 level 0.6", err, sizeof err), "op level: %s", err);
+    CHECK(app.shadow.ops[1].ratio == 3.5f
+              && app.shadow.ops[1].detune_cents == -7.0f
+              && app.shadow.ops[1].level == 0.6f,
+          "operator fields did not land");
+    CHECK(run_ok("op 2 ratio", err, sizeof err), "op ratio query: %s", err);
+    CHECK(!run_ok("op 2 ratio 100", err, sizeof err),
+          "op accepted an out-of-range ratio");
 
     Command c;
     CHECK(!parse_line("drone toggle", &c, err, sizeof err)
@@ -371,6 +408,117 @@ static void switches_query_and_take_explicit_state(void) {
     CHECK(!parse_line("op 0 on", &c, err, sizeof err)
               && strstr(err, "1 to 5"),
           "op accepted zero: %s", err);
+}
+
+static void direct_controls_use_real_units(void) {
+    char err[768];
+    app.shadow = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
+    app.shadow_verb = verb_params_default();
+    app.chain = chain_default();
+
+    CHECK(run_ok("alg 4", err, sizeof err), "alg: %s", err);
+    CHECK(app.shadow.algorithm == ALGORITHMS[3], "alg did not set IV");
+    CHECK(run_ok("mode harmonic", err, sizeof err), "mode: %s", err);
+    CHECK(app.shadow.ratio_mode == RATIO_HARMONIC
+              && app.shadow.ops[4].ratio == ratio_mode_ratio(RATIO_HARMONIC, 4),
+          "mode did not load the harmonic ratios");
+    CHECK(run_ok("glide 250ms", err, sizeof err) == false,
+          "glide guessed milliseconds");
+    CHECK(run_ok("glide 0.25s", err, sizeof err), "glide seconds: %s", err);
+    CHECK(app.shadow.glide_seconds == 0.25f, "glide is %g",
+          (double)app.shadow.glide_seconds);
+    CHECK(run_ok("detune 12cents", err, sizeof err), "detune cents: %s", err);
+    CHECK(app.shadow.unison_detune == 12.0f, "detune is %g",
+          (double)app.shadow.unison_detune);
+    CHECK(run_ok("hz 220hz", err, sizeof err), "hz: %s", err);
+    CHECK(app.drone_hz == 220.0f, "drone hz is %g", (double)app.drone_hz);
+    CHECK(run_ok("note 45", err, sizeof err), "note: %s", err);
+    CHECK(app.drone_hz == midi_to_hz(45), "note did not become real hz");
+    CHECK(run_ok("attack 0.008s", err, sizeof err), "attack: %s", err);
+    CHECK(app.shadow_attack_s == 0.008f, "attack is %g",
+          (double)app.shadow_attack_s);
+    CHECK(run_ok("reverb_decay 4seconds", err, sizeof err),
+          "reverb decay: %s", err);
+    CHECK(app.shadow_verb.decay == 4.0f, "room decay is %g",
+          (double)app.shadow_verb.decay);
+    CHECK(run_ok("level 0.8", err, sizeof err), "level: %s", err);
+    CHECK(app.shadow.master_level == 0.8f, "level is %g",
+          (double)app.shadow.master_level);
+    CHECK(!run_ok("damp 1", err, sizeof err) && strstr(err, "0.99"),
+          "damp accepted an out-of-range value: %s", err);
+
+    app.shadow.voices = 1;
+    app.shadow.unison = 1;
+    CHECK(run_ok("poly", err, sizeof err), "poly query: %s", err);
+    CHECK(app.shadow.voices == 1, "poly query changed voices");
+    CHECK(run_ok("poly on", err, sizeof err), "poly on: %s", err);
+    CHECK(app.shadow.voices == POLY_MAX, "poly did not use POLY_MAX");
+    CHECK(run_ok("unison on", err, sizeof err), "unison on: %s", err);
+    CHECK(app.shadow.unison == UNISON_MAX, "unison did not use UNISON_MAX");
+}
+
+static void grouped_controls_query_and_set(void) {
+    char err[768];
+    app.shadow_melody = melody_params_default();
+    app.shadow_chandas = chandas_params_default();
+
+    MelodyParams before_mel = app.shadow_melody;
+    CHECK(run_ok("mel", err, sizeof err), "mel query: %s", err);
+    CHECK(memcmp(&before_mel, &app.shadow_melody, sizeof before_mel) == 0,
+          "mel query changed state");
+    CHECK(run_ok("mel src xorshift", err, sizeof err), "mel src: %s", err);
+    CHECK(app.shadow_melody.source == HOLD_XORSHIFT, "mel src did not land");
+    CHECK(run_ok("mel tuning phi powers", err, sizeof err), "mel tuning: %s", err);
+    CHECK(app.shadow_melody.tuning == TUNING_GOLDEN_POWERS,
+          "mel tuning did not land");
+    CHECK(run_ok("mel scale nat minor", err, sizeof err), "mel scale: %s", err);
+    CHECK(app.shadow_melody.scale == SCALE_NATURAL_MINOR,
+          "mel scale did not land");
+    CHECK(run_ok("mel root 48", err, sizeof err), "mel root: %s", err);
+    CHECK(run_ok("mel range 11", err, sizeof err), "mel range: %s", err);
+    CHECK(run_ok("mel rate 2.5hz", err, sizeof err), "mel rate: %s", err);
+    CHECK(app.shadow_melody.root_midi == 48
+              && app.shadow_melody.range_degrees == 11
+              && app.shadow_melody.rate_hz == 2.5f,
+          "mel numeric controls did not land");
+    CHECK(!run_ok("mel root 48.5", err, sizeof err),
+          "mel accepted a fractional MIDI note");
+
+    ChandasParams before_chandas = app.shadow_chandas;
+    CHECK(run_ok("chandas", err, sizeof err), "chandas query: %s", err);
+    CHECK(memcmp(&before_chandas, &app.shadow_chandas, sizeof before_chandas) == 0,
+          "chandas query changed state");
+    CHECK(run_ok("chandas sync", err, sizeof err), "chandas sync query: %s", err);
+    CHECK(app.shadow_chandas.sync, "sync query changed state");
+    CHECK(run_ok("chandas sync off", err, sizeof err), "chandas sync off: %s", err);
+    CHECK(!app.shadow_chandas.sync, "sync stayed on");
+    CHECK(run_ok("chandas bypass on", err, sizeof err), "chandas bypass: %s", err);
+    CHECK(!app.shadow_chandas.enabled, "bypass left Chandas enabled");
+    CHECK(run_ok("chandas time 1/8T", err, sizeof err), "chandas time: %s", err);
+    CHECK(strcmp(CHANDAS_DIVISIONS[app.shadow_chandas.division].name, "1/8T") == 0,
+          "division did not land");
+    CHECK(run_ok("chandas rate 3hz", err, sizeof err), "chandas rate: %s", err);
+    CHECK(run_ok("chandas size 1.5", err, sizeof err), "chandas size: %s", err);
+    CHECK(run_ok("chandas dim 0.4", err, sizeof err), "chandas dim: %s", err);
+    CHECK(app.shadow_chandas.rate_hz == 3.0f
+              && app.shadow_chandas.size == 1.5f
+              && app.shadow_chandas.dimension == 0.4f,
+          "Chandas numeric controls did not land");
+    CHECK(!run_ok("chandas size 3", err, sizeof err),
+          "Chandas accepted an oversized grain");
+
+    CHECK(run_ok("get index", err, sizeof err), "get index: %s", err);
+    CHECK(run_ok("get op 2", err, sizeof err), "get op: %s", err);
+    CHECK(run_ok("status envelope", err, sizeof err), "status: %s", err);
+    CHECK(run_ok("show room", err, sizeof err), "show alias: %s", err);
+    CHECK(run_ok("set index 0.37", err, sizeof err), "generic set: %s", err);
+    CHECK(app.shadow.index == 0.37f, "generic set index did not land");
+    CHECK(run_ok("set chandas warp 0.6", err, sizeof err),
+          "generic grouped set: %s", err);
+    CHECK(app.shadow_chandas.warp == 0.6f,
+          "generic set chandas warp did not land");
+    CHECK(!run_ok("set damp 2", err, sizeof err) && strstr(err, "0.99"),
+          "generic set bypassed the canonical range: %s", err);
 }
 
 /* ---------- history ---------- */
@@ -550,6 +698,8 @@ void test_console(void) {
     two_line_errors();
     completion_uses_live_preset_state();
     switches_query_and_take_explicit_state();
+    direct_controls_use_real_units();
+    grouped_controls_query_and_set();
     history_records_every_submitted_line();
     trash_and_undo_round_trip();
     /* the temp home is two levels up: <home>/bypo/presets */

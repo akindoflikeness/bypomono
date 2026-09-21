@@ -71,6 +71,7 @@ float snap_scale(float s);
 
 typedef enum {
     EV_SET_PATCH, EV_SET_VERB, EV_SET_MELODY, EV_SET_CHANDAS, EV_SET_WARMTH,
+    EV_SET_LIMITER,
     EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
     EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING,
     EV_SET_LFO, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC
@@ -83,6 +84,7 @@ typedef struct {
         VerbParams verb;
         MelodyParams melody;
         ChandasParams chandas;
+        struct { bool enabled; float ceiling_db; } limiter;
         Chain chain;
         float f;
         bool flag;
@@ -114,6 +116,7 @@ typedef struct {
     float ops[NUM_OPS];
     float l, r;
     float peak[2];
+    float limiter_reduction_db;
 } VizFrame;
 
 RING_DECLARE(EventRing, Event, 256)
@@ -227,6 +230,9 @@ typedef struct App {
     MelodyParams shadow_melody;
     ChandasParams shadow_chandas;
     float shadow_warmth;
+    bool shadow_limiter_enabled;
+    float shadow_limiter_ceiling_db;
+    float limiter_reduction_db;
     float shadow_attack_s, shadow_decay_s, shadow_sustain, shadow_release_s;
     float tempo_bpm;
     enum { TEMPO_INTERNAL, TEMPO_HOST, TEMPO_MIDI, TEMPO_PULSE, TEMPO_LINK }

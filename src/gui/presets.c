@@ -936,6 +936,8 @@ Session app_session(const App *a) {
     s.chandas = a->shadow_chandas;
     s.tempo_bpm = a->tempo_bpm;
     s.warmth = a->shadow_warmth;
+    s.limiter_enabled = a->shadow_limiter_enabled;
+    s.limiter_ceiling_db = a->shadow_limiter_ceiling_db;
     s.attack_s = a->shadow_attack_s;
     s.decay_s = a->shadow_decay_s;
     s.sustain = a->shadow_sustain;
@@ -952,6 +954,8 @@ void app_apply_session(App *a, Session s) {
     a->shadow_chandas = s.chandas;
     a->tempo_bpm = s.tempo_bpm;
     a->shadow_warmth = s.warmth;
+    a->shadow_limiter_enabled = s.limiter_enabled;
+    a->shadow_limiter_ceiling_db = s.limiter_ceiling_db;
     a->drone_hz = s.drone_hz;
     a->shadow_attack_s = s.attack_s;
     a->shadow_decay_s = s.decay_s;
@@ -966,6 +970,9 @@ void app_apply_session(App *a, Session s) {
              (Event){.kind = EV_SET_CHANDAS, .u.chandas = a->shadow_chandas});
     app_send(a, (Event){.kind = EV_SET_TEMPO, .u.f = a->tempo_bpm});
     app_send(a, (Event){.kind = EV_SET_WARMTH, .u.f = a->shadow_warmth});
+    app_send(a, (Event){.kind = EV_SET_LIMITER,
+                         .u.limiter = {a->shadow_limiter_enabled,
+                                       a->shadow_limiter_ceiling_db}});
     app_send(a, (Event){.kind = EV_RESET_CHANDAS});
     app_send(a, (Event){.kind = EV_GLIDE_TO, .u.f = a->drone_hz});
     a->mods = s.mods;

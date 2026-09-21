@@ -10,7 +10,8 @@
 #include <strings.h>
 
 typedef enum {
-    CT_ALG, CT_MODE, CT_PATCH, CT_VERB, CT_ENV, CT_HZ, CT_NOTE, CT_WARMTH
+    CT_ALG, CT_MODE, CT_PATCH, CT_VERB, CT_ENV, CT_HZ, CT_NOTE, CT_WARMTH,
+    CT_LIMITER
 } ControlKind;
 
 typedef enum {
@@ -52,6 +53,9 @@ static const ControlSpec SPECS[] = {
     {"hz", CT_HZ, 0, 27.5f, 440, "hz", NULL, false},
     {"note", CT_NOTE, 0, 0, 127, NULL, NULL, true},
     {"warmth", CT_WARMTH, 0, 0, 1, NULL, NULL, false},
+    {"limiter", CT_LIMITER, 0, 0, 1, NULL, NULL, true},
+    {"ceiling", CT_LIMITER, 1, LIMITER_CEILING_DB_MIN, LIMITER_CEILING_DB_MAX,
+     "dbtp", NULL, false},
 };
 
 static bool reason(char *err, size_t cap, const char *fmt, ...) {
@@ -187,6 +191,13 @@ bool control_run(App *a, const Command *c, char *err, size_t n) {
     case CT_WARMTH:
         a->shadow_warmth = v;
         app_send(a, (Event){.kind = EV_SET_WARMTH, .u.f = v});
+        break;
+    case CT_LIMITER:
+        if (s->slot == 0) a->shadow_limiter_enabled = v > 0.5f;
+        else a->shadow_limiter_ceiling_db = v;
+        app_send(a, (Event){.kind = EV_SET_LIMITER,
+                             .u.limiter = {a->shadow_limiter_enabled,
+                                           a->shadow_limiter_ceiling_db}});
         break;
     }
     if (s->kind == CT_NOTE)
@@ -465,6 +476,9 @@ int control_complete_chandas(char *const words[], int nwords,
 static float scalar_value(const App *a, const ControlSpec *s) {
     if (s->kind == CT_HZ) return a->drone_hz;
     if (s->kind == CT_WARMTH) return a->shadow_warmth;
+    if (s->kind == CT_LIMITER)
+        return s->slot == 0 ? (a->shadow_limiter_enabled ? 1.0f : 0.0f)
+                            : a->shadow_limiter_ceiling_db;
     if (s->kind == CT_PATCH) switch (s->slot) {
     case P_INDEX: return a->shadow.index;
     case P_RIP: return a->shadow.rip;
@@ -500,6 +514,8 @@ static float scalar_default(const ControlSpec *s) {
     EnvParams e = env_params_default();
     if (s->kind == CT_HZ) return START_HZ;
     if (s->kind == CT_WARMTH) return 0.5f;
+    if (s->kind == CT_LIMITER)
+        return s->slot == 0 ? 1.0f : LIMITER_CEILING_DB_DEFAULT;
     if (s->kind == CT_PATCH) switch (s->slot) {
     case P_INDEX: return p.index;
     case P_RIP: return p.rip;

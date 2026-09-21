@@ -84,6 +84,8 @@ static Session marked_session(void) {
     s.chandas.tail = 0.34f;
     s.tempo_bpm = 97.0f;
     s.warmth = 0.66f;
+    s.limiter_enabled = false;
+    s.limiter_ceiling_db = -3.5f;
     s.release_s = 4.4636f;
     s.attack_s = 0.125f;
     s.decay_s = 3.5f;
@@ -149,6 +151,9 @@ static void check_same_session(const Session *a, const Session *b) {
     CHECK(a->chandas.tail == b->chandas.tail, "chandas tail %g", b->chandas.tail);
     CHECK(a->tempo_bpm == b->tempo_bpm, "tempo %g", b->tempo_bpm);
     CHECK(a->warmth == b->warmth, "warmth %g", b->warmth);
+    CHECK(a->limiter_enabled == b->limiter_enabled, "limiter enabled");
+    CHECK(a->limiter_ceiling_db == b->limiter_ceiling_db, "limiter ceiling %g",
+          b->limiter_ceiling_db);
     CHECK(a->release_s == b->release_s, "release_s %g", b->release_s);
     CHECK(a->attack_s == b->attack_s, "attack_s %g", b->attack_s);
     CHECK(a->decay_s == b->decay_s, "decay_s %g", b->decay_s);

@@ -115,6 +115,7 @@ typedef struct {
     Melody melody;
     Chandas chandas;
     Tape tape;
+    Limiter limiter;
     EngageGate gate;
     Mod mod;
     ModBase base; /* what the controls say, before modulation */
@@ -177,6 +178,9 @@ static void engine_apply(AudioState *s, Event ev) {
         s->base.warmth = ev.u.f;
         tape_set(&s->tape, ev.u.f);
         break;
+    case EV_SET_LIMITER:
+        limiter_set(&s->limiter, ev.u.limiter.enabled, ev.u.limiter.ceiling_db);
+        break;
     case EV_SET_LFO: mod_set_lfo(&s->mod, ev.u.lfo.slot, ev.u.lfo.p); break;
     case EV_SET_ROUTE:
         mod_set_route(&s->mod, ev.u.route.slot, ev.u.route.r);
@@ -233,7 +237,8 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     w = chandas_process(&s->chandas, w);
     w = tape_process(&s->tape, w);
     float g = engage_gate_next(&s->gate, s->engaged || ctx->notes_live);
-    float l = w.l * g, r = w.r * g;
+    Stereo limited = limiter_process(&s->limiter, (Stereo){w.l * g, w.r * g});
+    float l = limited.l, r = limited.r;
     s->decim++;
     s->peak_acc[0] = fmaxf(s->peak_acc[0], fabsf(l));
     s->peak_acc[1] = fmaxf(s->peak_acc[1], fabsf(r));
@@ -245,6 +250,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
         vf.r = r;
         vf.peak[0] = s->peak_acc[0];
         vf.peak[1] = s->peak_acc[1];
+        vf.limiter_reduction_db = limiter_reduction_db(&s->limiter);
         VizRing_push(&a->viz, vf);
         s->peak_acc[0] = s->peak_acc[1] = 0.0f;
     }
@@ -351,6 +357,8 @@ int gui_audio_start(App *a) {
     melody_init(&s->melody, a->sample_rate, melody_params_default());
     chandas_init(&s->chandas, a->sample_rate);
     tape_init(&s->tape, a->sample_rate);
+    limiter_init(&s->limiter, a->sample_rate);
+    limiter_set(&s->limiter, a->shadow_limiter_enabled, a->shadow_limiter_ceiling_db);
     mod_init(&s->mod, a->sample_rate);
     s->base.patch = a->shadow;
     s->base.verb = a->shadow_verb;
@@ -368,6 +376,7 @@ int gui_audio_start(App *a) {
 void gui_audio_stop(App *a) {
     audio_out_stop(&a->audio);
     chandas_free(&g_as.chandas);
+    limiter_free(&g_as.limiter);
     verb_free(&g_as.verb);
     voice_bank_free(&g_as.voice);
 }
@@ -472,6 +481,7 @@ void gui_drain_viz(App *a) {
         }
         a->lissa_x[a->lissa_head] = f.l;
         a->lissa_y[a->lissa_head] = f.r;
+        a->limiter_reduction_db = f.limiter_reduction_db;
         a->lissa_head = (a->lissa_head + 1) % 512;
         if (a->lissa_len < 512) a->lissa_len++;
     }

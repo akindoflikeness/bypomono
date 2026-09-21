@@ -1,4 +1,6 @@
 #include "dsp.h"
+#include <stdlib.h>
+#include <string.h>
 
 float powi_f(float base, int n) {
     unsigned e = n < 0 ? (unsigned)(-(long)n) : (unsigned)n;
@@ -65,6 +67,98 @@ float soft_clip(float x) {
 float soft_clip_to(float x, float ceiling) {
     return soft_clip(x / ceiling) * ceiling;
 }
+
+/* ---- output limiter ---- */
+
+/* Cubic Lagrange interpolation at 4x catches the inter-sample overshoots a
+   sample meter misses. The one-ms delay means every sample is attenuated by
+   the largest reconstructed peak in its future look-ahead window. */
+static float interp(float a, float b, float c, float d, float t) {
+    float w0 = -((t - 1.0f) * (t - 2.0f) * (t - 3.0f)) / 6.0f;
+    float w1 =  (t * (t - 2.0f) * (t - 3.0f)) / 2.0f;
+    float w2 = -(t * (t - 1.0f) * (t - 3.0f)) / 2.0f;
+    float w3 =  (t * (t - 1.0f) * (t - 2.0f)) / 6.0f;
+    return a * w0 + b * w1 + c * w2 + d * w3;
+}
+
+static float reconstructed_peak(Limiter *l, Stereo x) {
+    l->history_l[0] = l->history_l[1];
+    l->history_l[1] = l->history_l[2];
+    l->history_l[2] = l->history_l[3];
+    l->history_l[3] = x.l;
+    l->history_r[0] = l->history_r[1];
+    l->history_r[1] = l->history_r[2];
+    l->history_r[2] = l->history_r[3];
+    l->history_r[3] = x.r;
+    float peak = fmaxf(fabsf(x.l), fabsf(x.r));
+    for (int n = 1; n < 4; n++) {
+        float t = 1.0f + 0.25f * (float)n;
+        float a = interp(l->history_l[0], l->history_l[1], l->history_l[2],
+                         l->history_l[3], t);
+        float b = interp(l->history_r[0], l->history_r[1], l->history_r[2],
+                         l->history_r[3], t);
+        peak = fmaxf(peak, fmaxf(fabsf(a), fabsf(b)));
+    }
+    return peak;
+}
+
+void limiter_init(Limiter *l, float sample_rate) {
+    memset(l, 0, sizeof *l);
+    l->len = (size_t)ceilf(fmaxf(sample_rate, 1.0f) * LIMITER_LOOKAHEAD_S) + 4;
+    l->delay = calloc(l->len, sizeof *l->delay);
+    l->peaks = calloc(l->len, sizeof *l->peaks);
+    l->release_k = expf(-1.0f / (LIMITER_RELEASE_S * fmaxf(sample_rate, 1.0f)));
+    limiter_set(l, true, LIMITER_CEILING_DB_DEFAULT);
+    limiter_clear(l);
+}
+
+void limiter_free(Limiter *l) {
+    free(l->delay);
+    free(l->peaks);
+    memset(l, 0, sizeof *l);
+}
+
+void limiter_clear(Limiter *l) {
+    if (l->delay) memset(l->delay, 0, l->len * sizeof *l->delay);
+    if (l->peaks) memset(l->peaks, 0, l->len * sizeof *l->peaks);
+    memset(l->history_l, 0, sizeof l->history_l);
+    memset(l->history_r, 0, sizeof l->history_r);
+    l->write = 0;
+    l->gain = 1.0f;
+    l->reduction_db = 0.0f;
+}
+
+void limiter_set(Limiter *l, bool enabled, float ceiling_db) {
+    l->enabled = enabled;
+    ceiling_db = clampf(ceiling_db, LIMITER_CEILING_DB_MIN, LIMITER_CEILING_DB_MAX);
+    l->ceiling = powf(10.0f, ceiling_db / 20.0f);
+}
+
+Stereo limiter_process(Limiter *l, Stereo x) {
+    if (!l->delay || !l->peaks || l->len == 0) return x;
+    float peak = reconstructed_peak(l, x);
+    l->delay[l->write] = x;
+    l->peaks[l->write] = peak;
+    size_t read = (l->write + 1) % l->len;
+    float window_peak = 0.0f;
+    for (size_t i = 0; i < l->len; i++) window_peak = fmaxf(window_peak, l->peaks[i]);
+    float target = l->enabled && window_peak > l->ceiling
+        ? l->ceiling / window_peak : 1.0f;
+    if (target < l->gain) l->gain = target;
+    else l->gain = target + (l->gain - target) * l->release_k;
+    Stereo y = {l->delay[read].l * l->gain, l->delay[read].r * l->gain};
+    /* Guard float round-off and malformed input; it should never engage for
+       valid limiter state, but preserves the output contract regardless. */
+    if (l->enabled) {
+        y.l = clampf(y.l, -l->ceiling, l->ceiling);
+        y.r = clampf(y.r, -l->ceiling, l->ceiling);
+    }
+    l->reduction_db = -20.0f * log10f(fmaxf(l->gain, 1e-9f));
+    l->write = read;
+    return y;
+}
+
+float limiter_reduction_db(const Limiter *l) { return l->reduction_db; }
 
 /* ---- gate ---- */
 

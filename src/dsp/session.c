@@ -9,6 +9,8 @@ Session session_default(void) {
     s.chandas = chandas_params_default();
     s.tempo_bpm = CHANDAS_DEFAULT_BPM;
     s.warmth = 0.5f;
+    s.limiter_enabled = true;
+    s.limiter_ceiling_db = LIMITER_CEILING_DB_DEFAULT;
     EnvParams env = env_params_default();
     s.attack_s = env.attack_s;
     s.decay_s = env.decay_s;
@@ -77,6 +79,8 @@ Session session_sanitize(Session s) {
     s.chandas.tail = clampf(s.chandas.tail, 0.0f, 1.0f);
     s.tempo_bpm = clampf(s.tempo_bpm, CHANDAS_MIN_BPM, CHANDAS_MAX_BPM);
     s.warmth = clampf(s.warmth, MIN_WARMTH, MAX_WARMTH);
+    s.limiter_ceiling_db = clampf(s.limiter_ceiling_db, LIMITER_CEILING_DB_MIN,
+                                  LIMITER_CEILING_DB_MAX);
     s.attack_s = clampf(s.attack_s, ENV_ATTACK_MIN, ENV_TIME_MAX);
     s.decay_s = clampf(s.decay_s, 0.0f, ENV_TIME_MAX);
     s.sustain = clampf(s.sustain, 0.0f, 1.0f);

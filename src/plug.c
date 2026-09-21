@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <clap/ext/latency.h>
+
 #include "plug.h"
 
 const ParamSpec PLUG_SPEC[P_COUNT] = {
@@ -68,6 +70,10 @@ const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_OP_LEVEL3] = {"op 3 level", "operators", 0, 1, 1.0 / PHI, K_FLOAT},
     [P_OP_LEVEL4] = {"op 4 level", "operators", 0, 1, 1.0 / PHI, K_FLOAT},
     [P_OP_LEVEL5] = {"op 5 level", "operators", 0, 1, 1, K_FLOAT},
+    [P_LIMITER] = {"safe output", "output", 0, 1, 1, K_ONOFF},
+    [P_LIMITER_CEILING] = {"ceiling dbtp", "output", LIMITER_CEILING_DB_MIN,
+                            LIMITER_CEILING_DB_MAX, LIMITER_CEILING_DB_DEFAULT,
+                            K_FLOAT},
 };
 
 double plug_getv(const Plug *p, int id) {
@@ -178,6 +184,8 @@ static void apply_vals(Plug *p) {
     if (was_enabled && !mp.enabled) voice_bank_note_off_all(&p->voice);
     melody_set_params(&p->melody, mp);
     tape_set(&p->tape, (float)getv(p, P_WARMTH));
+    limiter_set(&p->limiter, getv(p, P_LIMITER) > 0.5,
+                (float)getv(p, P_LIMITER_CEILING));
     p->base.patch = *voice_bank_patch(&p->voice);
     p->base.verb = vp;
     p->base.chandas = cp;
@@ -231,6 +239,8 @@ Session plug_session_of_vals(const Plug *p) {
     s.chandas.dimension = (float)getv(p, P_CH_DIM);
     s.chandas.tail = (float)getv(p, P_CH_TAIL);
     s.warmth = (float)getv(p, P_WARMTH);
+    s.limiter_enabled = getv(p, P_LIMITER) > 0.5;
+    s.limiter_ceiling_db = (float)getv(p, P_LIMITER_CEILING);
     s.attack_s = (float)getv(p, P_ATTACK);
     s.decay_s = (float)getv(p, P_ENV_DECAY);
     s.sustain = (float)getv(p, P_SUSTAIN);
@@ -284,6 +294,8 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_SH_RANGE, (double)s->melody.range_degrees);
     setv(p, P_SH_RATE, s->melody.rate_hz);
     setv(p, P_WARMTH, s->warmth);
+    setv(p, P_LIMITER, s->limiter_enabled ? 1 : 0);
+    setv(p, P_LIMITER_CEILING, s->limiter_ceiling_db);
     setv(p, P_ATTACK, s->attack_s);
     setv(p, P_ENV_DECAY, s->decay_s);
     setv(p, P_SUSTAIN, s->sustain);
@@ -371,6 +383,11 @@ static void apply_gui_event(Plug *p, Event ev) {
         tape_set(&p->tape, ev.u.f);
         setv(p, P_WARMTH, ev.u.f);
         break;
+    case EV_SET_LIMITER:
+        limiter_set(&p->limiter, ev.u.limiter.enabled, ev.u.limiter.ceiling_db);
+        setv(p, P_LIMITER, ev.u.limiter.enabled ? 1 : 0);
+        setv(p, P_LIMITER_CEILING, ev.u.limiter.ceiling_db);
+        break;
     case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
     case EV_SET_TEMPO: chandas_set_tempo(&p->chandas, ev.u.f); break;
     case EV_SET_TRANSPORT:
@@ -438,7 +455,8 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     w = tape_process(&p->tape, w);
     bool notes_live = voice_bank_chain(&p->voice)->amp.kind == AMP_ENVELOPE;
     float g = engage_gate_next(&p->gate, p->engaged || notes_live);
-    float l = soft_clip(w.l * g), r = soft_clip(w.r * g);
+    Stereo limited = limiter_process(&p->limiter, (Stereo){w.l * g, w.r * g});
+    float l = limited.l, r = limited.r;
     e->l[e->base + n] = l;
     e->r[e->base + n] = r;
     App *gapp = e->gapp;
@@ -454,6 +472,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
             vf.r = r;
             vf.peak[0] = p->peak_acc[0];
             vf.peak[1] = p->peak_acc[1];
+            vf.limiter_reduction_db = limiter_reduction_db(&p->limiter);
             VizRing_push(&gapp->viz, vf);
             p->peak_acc[0] = p->peak_acc[1] = 0.0f;
         }
@@ -852,6 +871,7 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     p->transport_running = true;
     chandas_init(&p->chandas, (float)sr);
     tape_init(&p->tape, (float)sr);
+    limiter_init(&p->limiter, (float)sr);
     engage_gate_init(&p->gate, (float)sr, false);
     mod_init(&p->mod, (float)sr);
     p->mod.bank = mod_bank_sanitize(p->mods_main);
@@ -868,6 +888,7 @@ static void plug_deactivate(const clap_plugin_t *plugin) {
         chandas_free(&p->chandas);
         verb_free(&p->verb);
         voice_bank_free(&p->voice);
+        limiter_free(&p->limiter);
         p->engine_alive = false;
     }
     p->active = false;
@@ -882,7 +903,18 @@ static void plug_reset(const clap_plugin_t *plugin) {
     voice_bank_note_off_all(&p->voice);
     chandas_reset(&p->chandas);
     tape_clear(&p->tape);
+    limiter_clear(&p->limiter);
 }
+
+/* The limiter always holds one millisecond of audio, including when bypassed,
+   so automation never makes the instrument jump in time. */
+static uint32_t plug_latency_get(const clap_plugin_t *plugin) {
+    const Plug *p = plugin->plugin_data;
+    float sr = p->sr > 0.0 ? (float)p->sr : 48000.0f;
+    return (uint32_t)ceilf(sr * LIMITER_LOOKAHEAD_S) + 3u;
+}
+
+static const clap_plugin_latency_t EXT_LATENCY = {plug_latency_get};
 
 static const void *plug_get_extension(const clap_plugin_t *plugin,
                                       const char *id) {
@@ -890,6 +922,7 @@ static const void *plug_get_extension(const clap_plugin_t *plugin,
     if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &EXT_NOTE_PORTS;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &EXT_PARAMS;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &EXT_STATE;
+    if (strcmp(id, CLAP_EXT_LATENCY) == 0) return &EXT_LATENCY;
     if (strcmp(id, CLAP_EXT_GUI) == 0) return &PLUG_EXT_GUI;
     if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0) return &PLUG_EXT_TIMER;
 #if BYPO_GUI_POSIX_FD

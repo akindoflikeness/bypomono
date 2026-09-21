@@ -37,6 +37,34 @@ void phase_rotator_clear(PhaseRotator *p);
 float soft_clip(float x);
 float soft_clip_to(float x, float ceiling);
 
+/* ---------- output limiter ---------- */
+
+/* The final output guard is deliberately separate from the musical tape and
+   feedback saturators. It looks one millisecond ahead, links left/right gain,
+   and measures four interpolated positions per sample before applying a hard
+   -1 dBTP ceiling. Its fixed delay keeps bypass timing stable. */
+#define LIMITER_CEILING_DB_DEFAULT (-1.0f)
+#define LIMITER_CEILING_DB_MIN (-12.0f)
+#define LIMITER_CEILING_DB_MAX (-0.1f)
+#define LIMITER_LOOKAHEAD_S 0.001f
+#define LIMITER_RELEASE_S 0.080f
+
+typedef struct {
+    Stereo *delay;
+    float *peaks;
+    size_t len, write;
+    float history_l[4], history_r[4];
+    float gain, release_k, ceiling, reduction_db;
+    bool enabled;
+} Limiter;
+
+void limiter_init(Limiter *l, float sample_rate);
+void limiter_free(Limiter *l);
+void limiter_clear(Limiter *l);
+void limiter_set(Limiter *l, bool enabled, float ceiling_db);
+Stereo limiter_process(Limiter *l, Stereo x);
+float limiter_reduction_db(const Limiter *l);
+
 /* ---------- gate ---------- */
 
 /* the house glide: every switch and every coefficient travels over this,
@@ -874,6 +902,8 @@ typedef struct {
     ChandasParams chandas;
     float tempo_bpm;
     float warmth;
+    bool limiter_enabled;
+    float limiter_ceiling_db;
     /* the note envelope (Chain.amp.env), which lives outside Patch; its
        curve is Patch.curve */
     float attack_s, decay_s, sustain, release_s;

@@ -94,6 +94,13 @@ static void send_warmth(App *a) {
     app_send(a, ev);
 }
 
+static void send_limiter(App *a) {
+    Event ev = {.kind = EV_SET_LIMITER};
+    ev.u.limiter.enabled = a->shadow_limiter_enabled;
+    ev.u.limiter.ceiling_db = a->shadow_limiter_ceiling_db;
+    app_send(a, ev);
+}
+
 static int changed_node(int ai, int bi) {
     AlgorithmId A = ALGORITHMS[ai], B = ALGORITHMS[bi];
     if (algorithm_distance(A, B) != 1) return -1;
@@ -242,6 +249,32 @@ static void warmth_fader(App *a, Ui *ui, float x, float w, float *py) {
     }
     *py += FADER_H;
     *py += FADER_ROW_EXTRA;
+}
+
+static void limiter_controls(App *a, Ui *ui, float x, float w, float *py) {
+    *py += GROUP;
+    FontId f = ui_font(12.0f);
+    float bh = chip_h(text_row_height(f));
+    if (chip_button(ui, ui_id("rrail.limiter.on"), rct_xywh(x, *py, w, bh),
+                    "SAFE OUTPUT", a->shadow_limiter_enabled)) {
+        a->shadow_limiter_enabled = !a->shadow_limiter_enabled;
+        send_limiter(a);
+    }
+    *py += bh + GROUP;
+    char meter[32];
+    snprintf(meter, sizeof meter, "GR %.1f dB", a->limiter_reduction_db);
+    text_draw(ui->canvas, f, (P2){x, *py}, ALIGN_LEFT_TOP, meter, PAPER, 0.0f);
+    *py += text_row_height(f) + GROUP;
+    char val[32];
+    snprintf(val, sizeof val, "%.1f dBTP", a->shadow_limiter_ceiling_db);
+    float ceiling = a->shadow_limiter_ceiling_db;
+    if (fad_lin(ui, ui_id("rrail.limiter.ceiling"), rct_xywh(x, *py, w, FADER_H),
+                "ceiling", &ceiling, LIMITER_CEILING_DB_MIN,
+                LIMITER_CEILING_DB_MAX, LIMITER_CEILING_DB_DEFAULT, val)) {
+        a->shadow_limiter_ceiling_db = ceiling;
+        send_limiter(a);
+    }
+    *py += FADER_H + FADER_ROW_EXTRA;
 }
 
 static void chandas_section(App *a, Ui *ui, float x, float w, float *py) {
@@ -610,6 +643,7 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
     if (a->ops_tab != 0) {
         chandas_section(a, ui, x, w, &y);
         warmth_fader(a, ui, x, w, &y);
+        limiter_controls(a, ui, x, w, &y);
         content_h = y - y_start;
         canvas_set_clip(c, prev_clip);
         return;
@@ -651,6 +685,7 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
     if (verb_changed) send_verb(a);
 
     warmth_fader(a, ui, x, w, &y);
+    limiter_controls(a, ui, x, w, &y);
     content_h = y - y_start;
     canvas_set_clip(c, prev_clip);
 }

@@ -364,7 +364,8 @@ static const char *const CHANDAS_KEYS[] = {
 static const char *const SESSION_KEYS[] = {
     "patch",   "verb",    "melody",    "drone_hz",  "chandas",
     "tempo_bpm", "warmth", "harmony",  "release_s", "drone",
-    "attack_s",  "decay_s", "sustain", "mods"};
+    "attack_s",  "decay_s", "sustain", "mods", "limiter_enabled",
+    "limiter_ceiling_db"};
 static const char *const MODS_KEYS[] = {"lfos", "routes"};
 static const char *const LFO_KEYS[] = {"slot",     "shape",    "mode",
                                        "unipolar", "rate_hz",  "division",
@@ -721,7 +722,7 @@ bool session_from_json(const char *json, Session *out) {
     char key[64];
     int r;
     while ((r = js_obj_next(&j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SESSION_KEYS, 14);
+        int k = js_key(key, SESSION_KEYS, 16);
         if (k == 7) k = 4;
         if (k >= 0 && js_dup(&j, &seen, k)) return false;
         switch (k) {
@@ -738,6 +739,8 @@ bool session_from_json(const char *json, Session *out) {
         case 11: s.decay_s = js_f32(&j, s.decay_s); break;
         case 12: s.sustain = js_f32(&j, s.sustain); break;
         case 13: parse_mods(&j, &s.mods); break;
+        case 14: s.limiter_enabled = js_bool(&j, s.limiter_enabled); break;
+        case 15: s.limiter_ceiling_db = js_f32(&j, s.limiter_ceiling_db); break;
         default: js_skip(&j); break;
         }
         if (j.err) return false;
@@ -973,6 +976,8 @@ char *session_to_json(const Session *s) {
 
     sb_key_f(&b, "  ", "tempo_bpm", s->tempo_bpm, true);
     sb_key_f(&b, "  ", "warmth", s->warmth, true);
+    sb_key_b(&b, "  ", "limiter_enabled", s->limiter_enabled, true);
+    sb_key_f(&b, "  ", "limiter_ceiling_db", s->limiter_ceiling_db, true);
     sb_key_f(&b, "  ", "attack_s", s->attack_s, true);
     sb_key_f(&b, "  ", "decay_s", s->decay_s, true);
     sb_key_f(&b, "  ", "sustain", s->sustain, true);

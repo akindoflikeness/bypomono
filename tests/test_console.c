@@ -203,6 +203,8 @@ static void every_verb_parses_its_forms(void) {
                                 : strcmp(v->name, "hz") == 0 ? "110hz"
                                 : strcmp(v->name, "note") == 0 ? "45"
                                 : strcmp(v->name, "alg") == 0 ? "3"
+                                : strcmp(v->name, "limiter") == 0 ? "1"
+                                : strcmp(v->name, "ceiling") == 0 ? "-1dbtp"
                                 : "0.5";
             snprintf(line, sizeof line, "%s %s", v->name, value);
             parses(line, CMD_RUN);

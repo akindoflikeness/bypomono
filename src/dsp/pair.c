@@ -30,7 +30,7 @@ State voice_pair_state(const VoicePair *p) {
     const Voice *v = &p->voices[pair_live(p)];
     State s;
     s.patch = v->patch;
-    s.chain = v->chain;
+    s.adsr = v->adsr;
     return s;
 }
 
@@ -54,7 +54,7 @@ static void pair_cross_to(VoicePair *p, State next, bool audible) {
     } else {
         voice_set_patch(&p->voices[incoming], next.patch);
     }
-    voice_set_chain(&p->voices[incoming], next.chain);
+    voice_set_adsr(&p->voices[incoming], next.adsr);
     p->target = incoming;
     float want = (float)incoming;
     float samples = fmaxf(CROSSFADE_SECONDS * p->sample_rate, 1.0f);
@@ -67,7 +67,7 @@ void voice_pair_set_state(VoicePair *p, State next) {
     if (!state_is_structural_change(&cur, &next)) {
         int live = p->target;
         voice_set_patch(&p->voices[live], next.patch);
-        voice_set_chain(&p->voices[live], next.chain);
+        voice_set_adsr(&p->voices[live], next.adsr);
         int fading = 1 - live;
         if (crossing) {
             /* the outgoing voice is still audible: it takes the levels but
@@ -75,7 +75,7 @@ void voice_pair_set_state(VoicePair *p, State next) {
             voice_take_levels(&p->voices[fading], &next.patch);
         } else {
             voice_set_patch(&p->voices[fading], next.patch);
-            voice_set_chain(&p->voices[fading], next.chain);
+            voice_set_adsr(&p->voices[fading], next.adsr);
         }
         return;
     }
@@ -85,7 +85,7 @@ void voice_pair_set_state(VoicePair *p, State next) {
 void voice_pair_set_patch(VoicePair *p, Patch patch) {
     State s;
     s.patch = patch;
-    s.chain = p->voices[pair_live(p)].chain;
+    s.adsr = p->voices[pair_live(p)].adsr;
     voice_pair_set_state(p, s);
 }
 
@@ -139,8 +139,8 @@ bool voice_pair_note_sounding(const VoicePair *p) {
     return voice_note_sounding(&p->voices[pair_live(p)]);
 }
 
-const Chain *voice_pair_chain(const VoicePair *p) {
-    return &p->voices[pair_live(p)].chain;
+const EnvParams *voice_pair_adsr(const VoicePair *p) {
+    return &p->voices[pair_live(p)].adsr;
 }
 
 void voice_pair_set_bend_semitones(VoicePair *p, float semitones) {
@@ -159,8 +159,8 @@ float voice_pair_target_hz(const VoicePair *p) {
     return voice_target_hz(&p->voices[pair_live(p)]);
 }
 
-void voice_pair_set_chain_now(VoicePair *p, Chain chain) {
-    for (int i = 0; i < 2; i++) voice_set_chain(&p->voices[i], chain);
+void voice_pair_set_adsr_now(VoicePair *p, EnvParams adsr) {
+    for (int i = 0; i < 2; i++) voice_set_adsr(&p->voices[i], adsr);
 }
 
 void voice_pair_set_detune_cents(VoicePair *p, float cents) {
@@ -174,20 +174,14 @@ void voice_pair_wake(VoicePair *p) {
 bool voice_pair_silent(const VoicePair *p) {
     for (int i = 0; i < 2; i++) {
         const Voice *v = &p->voices[i];
-        if (v->chain.amp.kind != AMP_ENVELOPE || envelope_active(&v->env)) return false;
+        if (envelope_active(&v->env)) return false;
     }
     return true;
 }
 
-static bool chain_eq(const Chain *a, const Chain *b) {
-    if (a->amp.kind != b->amp.kind) return false;
-    if (a->amp.kind == AMP_ENVELOPE) {
-        return a->amp.env.attack_s == b->amp.env.attack_s &&
-               a->amp.env.decay_s == b->amp.env.decay_s &&
-               a->amp.env.release_s == b->amp.env.release_s &&
-               a->amp.env.sustain == b->amp.env.sustain;
-    }
-    return true;
+static bool adsr_eq(const EnvParams *a, const EnvParams *b) {
+    return a->attack_s == b->attack_s && a->decay_s == b->decay_s &&
+           a->release_s == b->release_s && a->sustain == b->sustain;
 }
 
 static bool op_params_eq(const OpParams *a, const OpParams *b) {
@@ -267,15 +261,15 @@ void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *
         if (p->step == 0.0f) {
             int t = p->target;
             Patch patch = p->voices[t].patch;
-            Chain chain = p->voices[t].chain;
+            EnvParams adsr = p->voices[t].adsr;
             int idle = 1 - t;
             bool stale = p->voices[idle].patch.ratio_mode != patch.ratio_mode ||
                          p->voices[idle].patch.algorithm != patch.algorithm ||
                          !patch_ops_eq(&p->voices[idle].patch, &patch) ||
-                         !chain_eq(&p->voices[idle].chain, &chain);
+                         !adsr_eq(&p->voices[idle].adsr, &adsr);
             if (stale) {
                 voice_set_patch(&p->voices[idle], patch);
-                voice_set_chain(&p->voices[idle], chain);
+                voice_set_adsr(&p->voices[idle], adsr);
             }
         }
         done += run;

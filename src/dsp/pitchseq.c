@@ -100,15 +100,18 @@ PitchEvent pitch_seq_fire(PitchSeq *s) {
     s->step = (s->step + 1) % s->params.length;
     size_t n = step_samples(s);
     s->until_step = n;
-    if (!s->params.gate[s->step]) return e;
+    float midi = (float)s->params.root_midi + pitch_seq_semitones(&s->params, s->step);
+    e.hz = 440.0f * exp2f((midi - 69.0f) / 12.0f);
+    if (!s->params.gate[s->step]) {
+        e.kind = PITCH_EV_MOVE;
+        return e;
+    }
     /* a full-length gate ends on the next step's start, so a held note is
        let go before the next one and every gated step is heard */
     size_t off = (size_t)(s->params.gate_len * (float)n);
     s->until_off = off < 1 ? 1 : (off > n ? n : off);
     s->held = true;
     e.kind = PITCH_EV_ON;
-    float midi = (float)s->params.root_midi + pitch_seq_semitones(&s->params, s->step);
-    e.hz = 440.0f * exp2f((midi - 69.0f) / 12.0f);
     e.velocity = s->params.velocity[s->step];
     return e;
 }
@@ -122,6 +125,8 @@ void pitch_seq_advance(PitchSeq *s, size_t samples) {
 void pitch_event_play(PitchEvent e, VoiceBank *v, Chandas *h, Mod *m) {
     if (e.kind == PITCH_EV_OFF) {
         voice_bank_note_off_all(v);
+    } else if (e.kind == PITCH_EV_MOVE) {
+        voice_bank_glide_newest_to_hz(v, e.hz);
     } else if (e.kind == PITCH_EV_ON) {
         voice_bank_note_off_all(v);
         voice_bank_note_on(v, -1, e.hz, e.velocity);

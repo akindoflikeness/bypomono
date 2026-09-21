@@ -111,10 +111,8 @@ static void rendered_release_follows_the_envelope_not_the_master_curve(void) {
     patch.master_level = 0.65f;
     Voice voice;
     voice_init(&voice, SR, patch);
-    Chain chain = chain_default();
-    chain.amp.kind = AMP_ENVELOPE;
-    chain.amp.env = env_params_default();
-    voice_set_chain(&voice, chain);
+    EnvParams adsr = env_params_default();
+    voice_set_adsr(&voice, adsr);
     voice_note_on(&voice, 110.0f, 0.5f);
 
     GainCapture capture = {0};
@@ -124,7 +122,7 @@ static void rendered_release_follows_the_envelope_not_the_master_curve(void) {
                "held gain %g compounds envelope and master", (double)held);
 
     voice_note_off(&voice);
-    voice_render_frames(&voice, (size_t)(SR * chain.amp.env.release_s * 0.5f),
+    voice_render_frames(&voice, (size_t)(SR * adsr.release_s * 0.5f),
                         capture_gain, &capture);
     /* 80 dB over the release, so halfway is 40 dB down */
     CHECK_NEAR(capture.gain / held, 0.01f, 1e-3f,

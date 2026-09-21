@@ -21,18 +21,13 @@ static void voices(App *a, Ui *ui, Stack *s) {
     }
     stack_row(s, flow_bottom(&flow) - flow.area.y0);
 
-    bool drone_holds = a->chain.amp.kind != AMP_ENVELOPE;
     if (hit == 0) {
         a->shadow.voices = 1;
         push_log(a, "mono. one voice; a new note glides out of the last.");
     } else if (hit == 1) {
         a->shadow.voices = POLY_MAX;
-        if (drone_holds)
-            push_log(a, "poly 4 is set, but the drone is one voice. switch "
-                        "it off and notes stack up to four.");
-        else
-            push_log(a, "poly 4. up to four notes at once; a fifth takes "
-                        "the oldest.");
+        push_log(a, "poly 4. up to four notes at once; a fifth takes the "
+                    "oldest. a held drone keeps one of the four.");
     } else if (hit == 2) {
         a->shadow.unison = a->shadow.unison > 1 ? 1 : UNISON_MAX;
         if (a->shadow.unison > 1)
@@ -75,7 +70,7 @@ void draw_sound_column(App *a, Ui *ui, Rct r) {
                 push_log(a, "midi is connected, so the instrument is "
                             "configured for midi — this control is idle until "
                             "it's unplugged.");
-        } else if (a->shadow_melody.enabled) {
+        } else if (a->shadow_melody.enabled || a->shadow_pitch.enabled) {
             if (param_fader_veiled(a, ui, row, PARAM_DRONE_HZ) && press_on(ui, row))
                 push_log(a, "the sequencer owns the pitch while it runs — "
                             "switch it off to hand this slider back.");

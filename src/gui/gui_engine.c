@@ -116,12 +116,10 @@ typedef struct {
     Chandas chandas;
     Tape tape;
     Limiter limiter;
-    EngageGate gate;
     Mod mod;
     ModBase base; /* what the controls say, before modulation */
     uint32_t decim;
     float peak_acc[2];
-    bool engaged;
     bool midi_driving;
     bool rec_on;
     bool transport_running;
@@ -212,13 +210,8 @@ static void engine_apply(AudioState *s, Event ev) {
         chandas_note_pulse(&s->chandas);
         mod_note_on(&s->mod);
         break;
-    case EV_SET_CHAIN: {
-        State next = voice_bank_state(&s->voice);
-        next.chain = ev.u.chain;
-        voice_bank_set_state(&s->voice, next);
-        break;
-    }
-    case EV_ENGAGE:
+    case EV_SET_ADSR: voice_bank_set_adsr_now(&s->voice, ev.u.adsr); break;
+    case EV_ENGAGE: voice_bank_set_drone(&s->voice, ev.u.flag); break;
     case EV_RECORD:
     case EV_SET_MIDI_DRIVING:
         break;
@@ -243,7 +236,6 @@ typedef struct {
     size_t base;
     int channels;
     bool rec_armed;
-    bool notes_live;
 } RenderCtx;
 
 static void emit_frame(void *ud, size_t n, const Frame *frame) {
@@ -252,8 +244,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     App *a = s->app;
     Stereo w = verb_process(&s->verb, frame);
     w = chandas_process(&s->chandas, w);
-    float g = engage_gate_next(&s->gate, s->engaged || ctx->notes_live);
-    Stereo limited = limiter_process(&s->limiter, (Stereo){w.l * g, w.r * g});
+    Stereo limited = limiter_process(&s->limiter, w);
     float l = limited.l, r = limited.r;
     s->decim++;
     s->peak_acc[0] = fmaxf(s->peak_acc[0], fabsf(l));
@@ -298,7 +289,6 @@ static void render(void *ud, float *data, size_t frames, int channels) {
 
     Event ev;
     while (EventRing_pop(&a->ctrl, &ev)) {
-        if (ev.kind == EV_ENGAGE) s->engaged = ev.u.flag;
         if (ev.kind == EV_RECORD) s->rec_on = ev.u.flag;
         if (ev.kind == EV_SET_MIDI_DRIVING) s->midi_driving = ev.u.flag;
         engine_apply(s, ev);
@@ -331,8 +321,7 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(s, run);
-        RenderCtx ctx = {s, data, done, channels, rec_armed,
-                         voice_bank_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
+        RenderCtx ctx = {s, data, done, channels, rec_armed};
         voice_bank_render_frames(&s->voice, run, emit_frame, &ctx);
         if (s->transport_running) melody_advance(&s->melody, run);
         if (s->transport_running || s->pitch.held)
@@ -391,9 +380,8 @@ int gui_audio_start(App *a) {
     s->base.melody = melody_params_default();
     s->base.warmth = tape_warmth(&s->tape);
     s->base.bend = 0.0f;
-    s->engaged = true;
     s->transport_running = true;
-    engage_gate_init(&s->gate, a->sample_rate, s->engaged);
+    voice_bank_set_drone(&s->voice, a->engaged);
     midi_note_clear(&a->midi_note);
     return audio_out_start(&a->audio, render, s);
 }
@@ -509,38 +497,6 @@ void gui_drain_viz(App *a) {
         a->lissa_head = (a->lissa_head + 1) % 512;
         if (a->lissa_len < 512) a->lissa_len++;
     }
-}
-
-void gui_sync_chain(App *a) {
-    bool notes_drive = midi_driving(a) || a->shadow_melody.enabled || a->hosted;
-    Chain want;
-    if (notes_drive && !a->engaged) {
-        want.amp.kind = AMP_ENVELOPE;
-        want.amp.env = env_params_default();
-        want.amp.env.attack_s = a->shadow_attack_s;
-        want.amp.env.decay_s = a->shadow_decay_s;
-        want.amp.env.sustain = a->shadow_sustain;
-        want.amp.env.release_s = a->shadow_release_s;
-    } else {
-        want = chain_default();
-    }
-    bool same = want.amp.kind == a->chain.amp.kind
-                && (want.amp.kind != AMP_ENVELOPE
-                    || (want.amp.env.attack_s == a->chain.amp.env.attack_s
-                        && want.amp.env.decay_s == a->chain.amp.env.decay_s
-                        && want.amp.env.release_s == a->chain.amp.env.release_s
-                        && want.amp.env.sustain == a->chain.amp.env.sustain));
-    if (same) return;
-    bool becoming_notes = want.amp.kind == AMP_ENVELOPE;
-    bool was_notes = a->chain.amp.kind == AMP_ENVELOPE;
-    a->chain = want;
-    Event ev = {.kind = EV_SET_CHAIN, .u.chain = want};
-    app_send(a, ev);
-    if (becoming_notes != was_notes)
-        push_log(a, becoming_notes
-                        ? "notes raise the sound now. velocity is the level; "
-                          "the envelope under the keys shapes the rest."
-                        : "the drone holds the sound again.");
 }
 
 /* a CC moves its control the way the fader does, along the same curve */

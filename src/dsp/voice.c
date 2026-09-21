@@ -87,10 +87,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->velocity = 1.0f;
     v->velocity_to = 1.0f;
     v->fb_smooth = patch.feedback;
-    v->amp_bridge = 0.0f;
-    v->floor_last = 0.0f;
-    v->amp_seen = AMP_DRONE;
-    v->chain = chain_default();
+    v->adsr = env_params_default();
     envelope_init(&v->env, sample_rate);
     v->field_amount = 0.0f;
     v->field_smooth = clampf(patch.field, 0.0f, 1.0f);
@@ -122,8 +119,8 @@ void voice_set_drone_hz(Voice *v, float hz) {
     v->rip_line.rot_to = allpass_coeff_for(hz, v->sample_rate, PHASE_PER_PASS);
 }
 
-void voice_set_chain(Voice *v, Chain chain) {
-    v->chain = chain;
+void voice_set_adsr(Voice *v, EnvParams adsr) {
+    v->adsr = adsr;
 }
 
 void voice_note_on(Voice *v, float hz, float velocity) {
@@ -283,7 +280,6 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     float fb_exp = 1.0f / PHI;
     float index_target = clampf(v->patch.index, 0.0f, 1.0f);
     float master_target = master_gain(v->patch.master_level);
-    AmpSource amp = v->chain.amp;
     float field_target = clampf(v->patch.field, 0.0f, 1.0f);
     float curve_target = clampf(v->patch.curve, 0.0f, 1.0f);
     float param_k = glide_k(PARAM_GLIDE_S, v->sample_rate);
@@ -377,18 +373,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         }
         v->rip_sig = rip_line_process(&v->rip_line, mix * inv_carriers);
         v->master += (master_target - v->master) * param_k;
-        EnvParams env_params = amp.kind == AMP_ENVELOPE ? amp.env : env_params_default();
-        (void)envelope_tick(&v->env, &env_params);
-        float floor_ = amp.kind == AMP_DRONE
-            ? v->master
-            : envelope_level(&v->env) * v->velocity * v->master;
-        if (amp.kind != v->amp_seen) {
-            v->amp_bridge = v->floor_last - floor_;
-            v->amp_seen = amp.kind;
-        }
-        floor_ = clampf(floor_ + v->amp_bridge, 0.0f, 1.0f);
-        v->amp_bridge -= v->amp_bridge * param_k;
-        v->floor_last = floor_;
+        float floor_ = envelope_tick(&v->env, &v->adsr) * v->velocity * v->master;
         v->field_smooth += (field_target - v->field_smooth) * param_k;
         v->curve_smooth += (curve_target - v->curve_smooth) * param_k;
         Field field = breath_tick(&v->breath, v->freq, v->field_smooth, floor_, v->curve_smooth);

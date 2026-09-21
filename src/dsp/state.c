@@ -1,30 +1,15 @@
 #include "dsp.h"
 
-Chain chain_default(void) {
-    Chain c;
-    c.amp.kind = AMP_DRONE;
-    c.amp.env.attack_s = 0.0f;
-    c.amp.env.decay_s = 0.0f;
-    c.amp.env.release_s = 0.0f;
-    c.amp.env.sustain = 0.0f;
-    return c;
-}
-
-bool chain_is_structural_change(const Chain *a, const Chain *b) {
-    return a->amp.kind != b->amp.kind;
-}
-
 State state_new(Patch patch) {
     State s;
     s.patch = patch;
-    s.chain = chain_default();
+    s.adsr = env_params_default();
     return s;
 }
 
+/* the envelope never needs a crossfade: a voice's envelope takes new
+   settings mid-note without stepping */
 bool state_is_structural_change(const State *a, const State *b) {
-    if (chain_is_structural_change(&a->chain, &b->chain)) {
-        return true;
-    }
     if (a->patch.algorithm != b->patch.algorithm) {
         return true;
     }

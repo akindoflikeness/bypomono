@@ -72,9 +72,6 @@ float limiter_reduction_db(const Limiter *l);
 #define GATE_GLIDE_S 0.013f
 #define GATE_FLOOR 1e-6f
 
-typedef struct { float gain, k; } EngageGate;
-void engage_gate_init(EngageGate *g, float sample_rate, bool engaged);
-float engage_gate_next(EngageGate *g, bool open);
 
 /* ---------- algorithm ---------- */
 
@@ -234,23 +231,12 @@ void breath_reset(Breath *b);
 
 /* ---------- state ---------- */
 
-typedef enum { AMP_DRONE = 0, AMP_ENVELOPE } AmpKind;
-
-typedef struct {
-    AmpKind kind;
-    EnvParams env; /* meaningful when kind == AMP_ENVELOPE */
-} AmpSource;
-
-typedef struct { AmpSource amp; } Chain;
-Chain chain_default(void); /* AMP_DRONE */
-
 typedef struct {
     Patch patch;
-    Chain chain;
+    EnvParams adsr; /* every voice's amplitude */
 } State;
 
 State state_new(Patch patch);
-bool chain_is_structural_change(const Chain *a, const Chain *b);
 bool state_is_structural_change(const State *a, const State *b);
 
 /* ---------- voice ---------- */
@@ -305,12 +291,7 @@ typedef struct {
     /* Velocity is a gain outside the normalized envelope. It is smoothed on
        a sounding voice so a different retrigger velocity cannot step the VCA. */
     float velocity, velocity_to;
-    /* the amplitude authority changing hands must not step the level, so the
-       new one starts where the old one was and closes the gap over the house
-       glide */
-    float amp_bridge, floor_last;
-    AmpKind amp_seen;
-    Chain chain;
+    EnvParams adsr;
     Envelope env;
 } Voice;
 
@@ -319,7 +300,7 @@ void voice_free(Voice *v);
 void voice_note_off(Voice *v);
 void voice_set_freq_hz(Voice *v, float hz);
 void voice_set_drone_hz(Voice *v, float hz); /* retunes the rip rotator */
-void voice_set_chain(Voice *v, Chain chain);
+void voice_set_adsr(Voice *v, EnvParams adsr);
 void voice_note_on(Voice *v, float hz, float velocity);
 /* Like note_on, but a held polyphonic voice is being reassigned. It preserves
    the user's normal glide setting while imposing a brief click-safe minimum. */
@@ -371,34 +352,39 @@ void voice_pair_drone_to_hz(VoicePair *p, float hz);
 void voice_pair_note_on(VoicePair *p, float hz, float velocity);
 void voice_pair_note_steal(VoicePair *p, float hz, float velocity);
 bool voice_pair_note_sounding(const VoicePair *p);
-const Chain *voice_pair_chain(const VoicePair *p);
+const EnvParams *voice_pair_adsr(const VoicePair *p);
 void voice_pair_set_bend_semitones(VoicePair *p, float semitones);
 void voice_pair_note_off(VoicePair *p);
 float voice_pair_target_hz(const VoicePair *p);
 void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *userdata);
-void voice_pair_set_chain_now(VoicePair *p, Chain chain); /* no crossfade */
+void voice_pair_set_adsr_now(VoicePair *p, EnvParams adsr); /* no crossfade */
 void voice_pair_set_detune_cents(VoicePair *p, float cents);
 void voice_pair_wake(VoicePair *p);
-/* both voices are note-driven and their envelopes have finished */
+/* both voices' envelopes have finished */
 bool voice_pair_silent(const VoicePair *p);
 
 /* ---------- bank ---------- */
 
 #define BANK_PAIRS (POLY_MAX * UNISON_MAX)
+#define DRONE_KEY (-2)
 #define BANK_CHUNK 128
 #define UNISON_WIDTH 0.5f
 
 /* Up to POLY_MAX notes, each played by UNISON_MAX crossfading pairs.
-   Slot = note * UNISON_MAX + copy. The drone always plays on note 0. */
+   Slot = note * UNISON_MAX + copy. The drone is a held gate on note 0: it
+   holds that note's envelope at sustain until it is let go. In poly, keys
+   play the other notes; in mono a key borrows note 0 and hands it back. */
 typedef struct {
     VoicePair pairs[BANK_PAIRS];
     float gain[BANK_PAIRS];
-    int key[POLY_MAX]; /* -1 = no key (sequencer or drone) */
+    int key[POLY_MAX]; /* -1 = no key (sequencer), DRONE_KEY = the drone */
     bool held[POLY_MAX];
     uint32_t stamp[POLY_MAX];
     uint32_t clock;
     int newest;
-    int poly; /* note slots reachable under the current patch and chain */
+    int poly; /* note slots reachable under the current patch */
+    bool drone;     /* the drone's gate is held */
+    float drone_hz; /* where note 0 returns when a key lets go of it */
     float spread, step;
     Frame scratch[BANK_PAIRS][BANK_CHUNK];
 } VoiceBank;
@@ -409,18 +395,22 @@ bool voice_bank_crossing(const VoiceBank *b);
 State voice_bank_state(const VoiceBank *b);
 void voice_bank_set_state(VoiceBank *b, State next);
 void voice_bank_set_patch(VoiceBank *b, Patch patch);
-void voice_bank_set_chain_now(VoiceBank *b, Chain chain);
+void voice_bank_set_adsr_now(VoiceBank *b, EnvParams adsr);
 const Patch *voice_bank_patch(const VoiceBank *b);
 const Compiled *voice_bank_compiled(const VoiceBank *b);
-const Chain *voice_bank_chain(const VoiceBank *b);
+const EnvParams *voice_bank_adsr(const VoiceBank *b);
 int voice_bank_poly(const VoiceBank *b);
 void voice_bank_set_freq_hz(VoiceBank *b, float hz);
 void voice_bank_set_drone_hz(VoiceBank *b, float hz);
 void voice_bank_glide_to_hz(VoiceBank *b, float hz); /* the drone, note 0 */
 void voice_bank_drone_to_hz(VoiceBank *b, float hz);  /* the drone hz control */
+/* moves the newest note's pitch without touching its envelope */
+void voice_bank_glide_newest_to_hz(VoiceBank *b, float hz);
+/* holds or lets go of the drone's gate on note 0 */
+void voice_bank_set_drone(VoiceBank *b, bool held);
 void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity);
 /* mono releases whatever sounds; poly releases the note on `key`, or every
-   held note for key -1 */
+   held note for key -1. The drone's gate stays held through both. */
 void voice_bank_note_off(VoiceBank *b, int key);
 void voice_bank_note_off_all(VoiceBank *b);
 bool voice_bank_note_sounding(const VoiceBank *b);
@@ -593,10 +583,12 @@ PitchSeqParams pitch_seq_sanitize(PitchSeqParams p);
 float pitch_seq_semitones(const PitchSeqParams *p, int step);
 float pitch_seq_step_seconds(const PitchSeqParams *p, float bpm);
 
-typedef enum { PITCH_EV_NONE, PITCH_EV_ON, PITCH_EV_OFF } PitchEventKind;
+/* MOVE is a gate-off step: the pitch follows the line, the envelope is left
+   alone */
+typedef enum { PITCH_EV_NONE, PITCH_EV_ON, PITCH_EV_OFF, PITCH_EV_MOVE } PitchEventKind;
 typedef struct {
     PitchEventKind kind;
-    float hz, velocity; /* PITCH_EV_ON */
+    float hz, velocity; /* ON; MOVE uses hz */
 } PitchEvent;
 
 typedef struct {
@@ -969,7 +961,7 @@ typedef struct {
     float warmth;
     bool limiter_enabled;
     float limiter_ceiling_db;
-    /* the note envelope (Chain.amp.env), which lives outside Patch */
+    /* the note envelope (State.adsr), which lives outside Patch */
     float attack_s, decay_s, sustain, release_s;
     bool drone;
     ModBank mods;

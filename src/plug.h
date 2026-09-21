@@ -51,11 +51,9 @@ typedef struct Plug {
     Chandas chandas;
     Tape tape;
     Limiter limiter;
-    EngageGate gate;
     Mod mod;
     ModBase base; /* what the params say, before modulation */
     bool engine_alive;
-    bool engaged;
     bool transport_running;
     float applied_drone_hz;
     /* main thread: the sequences and routes host state saves; state_load hands

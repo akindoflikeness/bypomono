@@ -450,7 +450,6 @@ static void direct_controls_use_real_units(void) {
     char err[768];
     app.shadow = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
     app.shadow_verb = verb_params_default();
-    app.chain = chain_default();
 
     CHECK(run_ok("alg 4", err, sizeof err), "alg: %s", err);
     CHECK(app.shadow.algorithm == ALGORITHMS[3], "alg did not set IV");

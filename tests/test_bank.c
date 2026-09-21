@@ -9,13 +9,6 @@
 
 static void noop_emit(void *userdata, size_t n, const Frame *frame) {}
 
-static Chain notes_chain(void) {
-    Chain c;
-    c.amp.kind = AMP_ENVELOPE;
-    c.amp.env = env_params_default();
-    return c;
-}
-
 static Patch voiced(int voices, int unison, float detune) {
     Patch p = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
     p.voices = (uint8_t)voices;
@@ -57,10 +50,6 @@ static void mono_is_the_pair_it_replaced(void) {
     voice_bank_init(&b, SR, patch);
     for (int pass = 0; pass < 2; pass++) {
         if (pass == 1) {
-            State s = voice_pair_state(&p);
-            s.chain = notes_chain();
-            voice_pair_set_state(&p, s);
-            voice_bank_set_state(&b, s);
             voice_pair_note_on(&p, 220.0f, 0.7f);
             voice_bank_note_on(&b, 57, 220.0f, 0.7f);
         } else {
@@ -84,7 +73,6 @@ static void mono_is_the_pair_it_replaced(void) {
 static void four_notes_sound_together(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
-    voice_bank_set_chain_now(&b, notes_chain());
     CHECK(voice_bank_poly(&b) == 4, "poly is %d", voice_bank_poly(&b));
     int keys[4] = { 60, 64, 67, 71 };
     for (int i = 0; i < 4; i++) voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
@@ -103,7 +91,6 @@ static void four_notes_sound_together(void) {
 static void a_fifth_note_takes_the_oldest(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
-    voice_bank_set_chain_now(&b, notes_chain());
     int keys[4] = { 60, 64, 67, 71 };
     for (int i = 0; i < 4; i++) {
         voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
@@ -122,7 +109,6 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
     Patch p = voiced(4, 1, 0.0f);
     p.glide_seconds = 0.0f;
     voice_bank_init(&b, SR, p);
-    voice_bank_set_chain_now(&b, notes_chain());
     int keys[4] = {60, 64, 67, 71};
     for (int i = 0; i < 4; i++)
         voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
@@ -170,7 +156,6 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
 static void a_key_lets_go_of_its_own_note(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
-    voice_bank_set_chain_now(&b, notes_chain());
     int keys[3] = { 48, 55, 63 };
     for (int i = 0; i < 3; i++) voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
     voice_bank_render_frames(&b, 1024, noop_emit, NULL);
@@ -195,7 +180,6 @@ static void a_key_lets_go_of_its_own_note(void) {
 static void mono_releases_on_any_key(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 1, 0.0f));
-    voice_bank_set_chain_now(&b, notes_chain());
     voice_bank_note_on(&b, 60, midi_hz(60), 0.8f);
     voice_bank_note_on(&b, 62, midi_hz(62), 0.8f);
     voice_bank_note_off(&b, 60);
@@ -204,25 +188,31 @@ static void mono_releases_on_any_key(void) {
     voice_bank_free(&b);
 }
 
-static void the_drone_is_one_voice(void) {
+/* in poly the drone keeps note 0; keys take the other three and let go
+   without touching it */
+static void a_held_drone_keeps_its_own_note(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
-    CHECK(voice_bank_poly(&b) == 1, "the drone reaches %d notes", voice_bank_poly(&b));
-    voice_bank_note_on(&b, 60, midi_hz(60), 0.8f);
-    voice_bank_note_on(&b, 67, midi_hz(67), 0.8f);
-    voice_bank_render_frames(&b, 4096, noop_emit, NULL);
-    float held[POLY_MAX];
-    CHECK(voice_bank_held_hz(&b, held) == 1, "the drone holds %d pitches",
-          voice_bank_held_hz(&b, held));
-    for (int s = 1; s < BANK_PAIRS; s++)
-        CHECK(b.gain[s] == 0.0f, "slot %d plays under the drone at gain %g", s, (double)b.gain[s]);
+    voice_bank_drone_to_hz(&b, 55.0f);
+    voice_bank_set_drone(&b, true);
+    int keys[3] = {60, 64, 67};
+    for (int i = 0; i < 3; i++) voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
+    voice_bank_render_frames(&b, 2048, noop_emit, NULL);
+    CHECK(b.key[0] == DRONE_KEY && b.held[0], "a key took the drone's note");
+    CHECK(holds_hz(&b, 55.0f), "the drone's pitch is not held");
+    voice_bank_note_on(&b, 71, midi_hz(71), 0.8f); /* a fourth key steals, not note 0 */
+    CHECK(b.key[0] == DRONE_KEY, "a stolen note was the drone's");
+    voice_bank_note_off(&b, -1);
+    for (int n = 1; n < POLY_MAX; n++) CHECK(!b.held[n], "note %d still held", n);
+    CHECK(b.held[0], "letting go of every key let go of the drone");
+    voice_bank_set_drone(&b, false);
+    CHECK(!b.held[0], "the drone still holds after it was let go");
     voice_bank_free(&b);
 }
 
 static void going_mono_lets_the_chord_go(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
-    voice_bank_set_chain_now(&b, notes_chain());
     for (int k = 0; k < 3; k++) voice_bank_note_on(&b, 60 + 4 * k, midi_hz(60 + 4 * k), 0.8f);
     voice_bank_render_frames(&b, 1024, noop_emit, NULL);
     voice_bank_set_patch(&b, voiced(1, 1, 0.0f));
@@ -254,6 +244,7 @@ static void stereo_emit(void *userdata, size_t n, const Frame *f) {
 static void unison_detunes_and_spreads_the_pair(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 2, 20.0f));
+    voice_bank_set_drone(&b, true);
     CHECK_NEAR(b.pairs[0].voices[0].detune_to, exp2f(-10.0f / 1200.0f), 1e-6f, "copy 0 detune %g",
                (double)b.pairs[0].voices[0].detune_to);
     CHECK_NEAR(b.pairs[1].voices[1].detune_to, exp2f(10.0f / 1200.0f), 1e-6f, "copy 1 detune %g",
@@ -272,6 +263,7 @@ static void unison_detunes_and_spreads_the_pair(void) {
 static void switching_unison_introduces_no_step(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 1, 12.0f));
+    voice_bank_set_drone(&b, true);
     voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
     Stereo_ steady = { 0 };
     voice_bank_render_frames(&b, (size_t)(SR / 2), stereo_emit, &steady);
@@ -295,6 +287,7 @@ static void switching_unison_introduces_no_step(void) {
 static void a_returning_copy_is_on_the_note(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 1, 8.0f));
+    voice_bank_set_drone(&b, true);
     voice_bank_glide_to_hz(&b, 330.0f);
     voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
     voice_bank_set_patch(&b, voiced(1, 2, 8.0f));
@@ -328,6 +321,7 @@ static void moving_rip_does_not_step_the_carriers(void) {
     p.rip = 0.0f;
     voice_bank_init(&b, SR, p);
     voice_bank_drone_to_hz(&b, 110.0f);
+    voice_bank_set_drone(&b, true);
     voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
     Curve steady = {0};
     voice_bank_render_frames(&b, (size_t)(SR / 4), curve_emit, &steady);
@@ -350,7 +344,7 @@ void test_bank(void) {
     only_a_held_poly_reassignment_uses_the_safety_glide();
     a_key_lets_go_of_its_own_note();
     mono_releases_on_any_key();
-    the_drone_is_one_voice();
+    a_held_drone_keeps_its_own_note();
     going_mono_lets_the_chord_go();
     unison_detunes_and_spreads_the_pair();
     switching_unison_introduces_no_step();

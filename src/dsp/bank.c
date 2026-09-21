@@ -19,9 +19,7 @@ static int reach_unison(const VoiceBank *b) {
     return count_in(voice_bank_patch(b)->unison, UNISON_MAX);
 }
 
-/* the drone is one held tone, so only notes spread across the slots */
 static int reach_poly(const VoiceBank *b) {
-    if (voice_bank_chain(b)->amp.kind != AMP_ENVELOPE) return 1;
     return count_in(voice_bank_patch(b)->voices, POLY_MAX);
 }
 
@@ -107,6 +105,8 @@ void voice_bank_init(VoiceBank *b, float sample_rate, Patch patch) {
     }
     b->clock = 0;
     b->newest = 0;
+    b->drone = false;
+    b->drone_hz = START_HZ;
     b->poly = POLY_MAX;
     apply_voicing(b);
     for (int s = 0; s < BANK_PAIRS; s++) b->gain[s] = slot_wanted(b, s) ? 1.0f : 0.0f;
@@ -138,7 +138,7 @@ void voice_bank_set_state(VoiceBank *b, State next) {
         }
         for (int i = 0; i < 2; i++) {
             voice_set_patch(&p->voices[i], next.patch);
-            voice_set_chain(&p->voices[i], next.chain);
+            voice_set_adsr(&p->voices[i], next.adsr);
         }
         p->step = 0.0f;
         p->blend = (float)p->target;
@@ -150,14 +150,12 @@ void voice_bank_set_state(VoiceBank *b, State next) {
 void voice_bank_set_patch(VoiceBank *b, Patch patch) {
     State s;
     s.patch = patch;
-    s.chain = *voice_bank_chain(b);
+    s.adsr = *voice_bank_adsr(b);
     voice_bank_set_state(b, s);
 }
 
-void voice_bank_set_chain_now(VoiceBank *b, Chain chain) {
-    for (int s = 0; s < BANK_PAIRS; s++) voice_pair_set_chain_now(&b->pairs[s], chain);
-    apply_voicing(b);
-    for (int s = 0; s < BANK_PAIRS; s++) b->gain[s] = slot_wanted(b, s) ? 1.0f : 0.0f;
+void voice_bank_set_adsr_now(VoiceBank *b, EnvParams adsr) {
+    for (int s = 0; s < BANK_PAIRS; s++) voice_pair_set_adsr_now(&b->pairs[s], adsr);
 }
 
 const Patch *voice_bank_patch(const VoiceBank *b) {
@@ -168,8 +166,8 @@ const Compiled *voice_bank_compiled(const VoiceBank *b) {
     return voice_pair_compiled(&b->pairs[0]);
 }
 
-const Chain *voice_bank_chain(const VoiceBank *b) {
-    return voice_pair_chain(&b->pairs[0]);
+const EnvParams *voice_bank_adsr(const VoiceBank *b) {
+    return voice_pair_adsr(&b->pairs[0]);
 }
 
 int voice_bank_poly(const VoiceBank *b) {
@@ -188,21 +186,31 @@ void voice_bank_glide_to_hz(VoiceBank *b, float hz) {
     for (int copy = 0; copy < UNISON_MAX; copy++) voice_pair_glide_to_hz(slot_pair(b, 0, copy), hz);
 }
 
+/* a key or sequencer playing on note 0 keeps its pitch; note 0 comes back
+   to the drone hz when it is handed back */
 void voice_bank_drone_to_hz(VoiceBank *b, float hz) {
+    b->drone_hz = hz;
+    if (b->held[0] && b->key[0] != DRONE_KEY) return;
     for (int copy = 0; copy < UNISON_MAX; copy++)
         voice_pair_drone_to_hz(slot_pair(b, 0, copy), hz);
 }
 
+void voice_bank_glide_newest_to_hz(VoiceBank *b, float hz) {
+    for (int copy = 0; copy < UNISON_MAX; copy++)
+        voice_pair_glide_to_hz(slot_pair(b, b->newest, copy), hz);
+}
+
 /* same key again, then a free slot, then the oldest released, then the
-   oldest held */
+   oldest held. A held drone keeps note 0 to itself. */
 static int pick_note(const VoiceBank *b, int key) {
+    int first = b->drone ? 1 : 0;
     if (key >= 0) {
-        for (int n = 0; n < b->poly; n++)
+        for (int n = first; n < b->poly; n++)
             if (b->key[n] == key && (b->held[n] || !note_silent(b, n))) return n;
     }
     for (int pass = 0; pass < 3; pass++) {
         int best = -1;
-        for (int n = 0; n < b->poly; n++) {
+        for (int n = first; n < b->poly; n++) {
             if (pass == 0 && (b->held[n] || !note_silent(b, n))) continue;
             if (pass == 1 && b->held[n]) continue;
             if (best < 0 || b->stamp[n] < b->stamp[best]) best = n;
@@ -212,8 +220,7 @@ static int pick_note(const VoiceBank *b, int key) {
     return 0;
 }
 
-void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity) {
-    int note = b->poly > 1 ? pick_note(b, key) : 0;
+static void play_note(VoiceBank *b, int note, int key, float hz, float velocity) {
     /* mono glides from wherever it is; a fresh poly slot starts on its pitch */
     bool fresh = b->poly > 1 && note_silent(b, note);
     /* A ringing release is reusable but has no key-down owner, so it keeps
@@ -243,15 +250,46 @@ void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity) {
     b->newest = note;
 }
 
+void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity) {
+    int note = b->poly > 1 ? pick_note(b, key) : 0;
+    play_note(b, note, key, hz, velocity);
+}
+
+/* With the drone held, note 0 is never released: a key that borrowed it
+   hands it back, its envelope falls to the sustain the drone holds, and a
+   key (not a sequencer, which sets the next pitch itself) glides it home. */
+static void let_go(VoiceBank *b, int note, bool glide_home) {
+    if (note == 0 && b->drone) {
+        if (b->key[0] != DRONE_KEY && glide_home)
+            voice_bank_glide_to_hz(b, b->drone_hz);
+        b->key[0] = DRONE_KEY;
+        return;
+    }
+    release_note(b, note);
+}
+
 void voice_bank_note_off(VoiceBank *b, int key) {
     for (int n = 0; n < POLY_MAX; n++) {
         if (b->poly > 1 && key >= 0 && b->key[n] != key) continue;
-        release_note(b, n);
+        let_go(b, n, key >= 0);
     }
 }
 
 void voice_bank_note_off_all(VoiceBank *b) {
-    for (int n = 0; n < POLY_MAX; n++) release_note(b, n);
+    for (int n = 0; n < POLY_MAX; n++) let_go(b, n, false);
+}
+
+void voice_bank_set_drone(VoiceBank *b, bool held) {
+    if (held == b->drone) return;
+    b->drone = held;
+    if (held) {
+        /* in mono a held key keeps note 0 and hands it over when let go */
+        if (b->poly == 1 && b->held[0]) return;
+        play_note(b, 0, DRONE_KEY, b->drone_hz, 1.0f);
+    } else if (b->key[0] == DRONE_KEY) {
+        release_note(b, 0);
+        b->key[0] = -1;
+    }
 }
 
 bool voice_bank_note_sounding(const VoiceBank *b) {
@@ -274,10 +312,6 @@ const Envelope *voice_bank_newest_env(const VoiceBank *b) {
 }
 
 int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]) {
-    if (voice_bank_chain(b)->amp.kind != AMP_ENVELOPE) {
-        out[0] = voice_pair_target_hz(slot_pair_c(b, 0, 0));
-        return 1;
-    }
     int count = 0;
     for (int n = 0; n < b->poly; n++)
         if (b->held[n]) out[count++] = voice_pair_target_hz(slot_pair_c(b, n, 0));

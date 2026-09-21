@@ -61,9 +61,9 @@ static void gated_steps_play_on_the_clock(void) {
     size_t step = (size_t)(0.125f * SR); /* 1/16 at 120 */
     Heard h = {0};
     run(&s, step * 4, &h);
-    /* on, off, on, off, on, off, then step 4 has no gate */
-    CHECK(h.n == 6, "%d events in a bar of four steps", h.n);
-    if (h.n < 6) return;
+    /* on, off, on, off, on, off, then step 4 has no gate and only moves */
+    CHECK(h.n == 7, "%d events in a bar of four steps", h.n);
+    if (h.n < 7) return;
     CHECK(h.ev[0].kind == PITCH_EV_ON && h.at[0] == 0, "first note late");
     CHECK_NEAR(h.ev[0].hz, 220.0f, 0.01f, "root %g", h.ev[0].hz);
     CHECK(h.ev[1].kind == PITCH_EV_OFF && h.at[1] == step / 2,
@@ -73,6 +73,33 @@ static void gated_steps_play_on_the_clock(void) {
     CHECK(h.at[2] == step, "second step at %zu", h.at[2]);
     CHECK_NEAR(h.ev[4].hz, 220.0f * exp2f(3.4f / 12.0f), 0.02f,
                "fine pitch %g", h.ev[4].hz);
+    CHECK(h.ev[6].kind == PITCH_EV_MOVE && h.at[6] == step * 3,
+          "a gate-off step should move the pitch on its step");
+    CHECK_NEAR(h.ev[6].hz, 220.0f, 0.01f, "the move went to %g", h.ev[6].hz);
+}
+
+static void drop(void *u, size_t i, const Frame *f) {
+    (void)u;
+    (void)i;
+    (void)f;
+}
+
+static void a_gate_off_step_moves_the_note_without_restarting_it(void) {
+    static VoiceBank b;
+    voice_bank_init(&b, SR, patch_init(ALGORITHMS[0], RATIO_GOLDEN));
+    static Chandas h;
+    chandas_init(&h, SR);
+    static Mod m;
+    mod_init(&m, SR);
+    pitch_event_play((PitchEvent){PITCH_EV_ON, 220.0f, 1.0f}, &b, &h, &m);
+    voice_bank_render_frames(&b, (size_t)(SR * 0.05f), drop, NULL);
+    const Envelope *e = voice_bank_newest_env(&b);
+    float t_before = e->t;
+    pitch_event_play((PitchEvent){PITCH_EV_MOVE, 330.0f, 0.0f}, &b, &h, &m);
+    CHECK(e->t >= t_before, "the move restarted the envelope");
+    CHECK_NEAR(voice_bank_target_hz(&b), 330.0f, 1e-3f, "the note did not move");
+    chandas_free(&h);
+    voice_bank_free(&b);
 }
 
 static void snap_rounds_to_12_tet(void) {
@@ -224,10 +251,7 @@ static void a_note_under_rip_starts_without_a_click(void) {
           "patch did not parse");
     VoiceBank b;
     voice_bank_init(&b, SR, s.patch);
-    Chain c = chain_default();
-    c.amp.kind = AMP_ENVELOPE;
-    c.amp.env = (EnvParams){0.044f, 0.3f, 0.37f, 0.43f};
-    voice_bank_set_chain_now(&b, c);
+    voice_bank_set_adsr_now(&b, (EnvParams){0.044f, 0.3f, 0.37f, 0.43f});
     static const float NOTES[] = {82.4f, 110.0f, 98.0f, 130.8f, 87.3f, 146.8f};
     mono_n = 0;
     for (int k = 0; k < 18; k++) {
@@ -260,6 +284,7 @@ static void a_note_under_rip_starts_without_a_click(void) {
 
 void test_notes(void) {
     gated_steps_play_on_the_clock();
+    a_gate_off_step_moves_the_note_without_restarting_it();
     snap_rounds_to_12_tet();
     the_length_wraps_and_off_lets_go();
     melody_sync_follows_the_tempo();

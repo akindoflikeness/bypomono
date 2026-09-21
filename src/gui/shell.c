@@ -57,9 +57,10 @@ void app_set_engaged(App *a, bool on) {
     Event ev = {.kind = EV_ENGAGE, .u.flag = on};
     app_send(a, ev);
     if (on)
-        push_log(a, "drone on. it resumes at %.1f hz.", a->drone_hz);
+        push_log(a, "drone on. the envelope holds at sustain, %.1f hz.",
+                 (double)a->drone_hz);
     else
-        push_log(a, "drone off. the shell keeps breathing in silence.");
+        push_log(a, "drone off. the envelope releases.");
 }
 
 /* ---------- shell / sky constants ---------- */

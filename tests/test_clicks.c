@@ -33,9 +33,9 @@ typedef enum {
     MV_INDEX, MV_RIP, MV_FB, MV_LEVEL, MV_FIELD, MV_CURVE, MV_GLIDE, MV_DETUNE,
     MV_VOICES, MV_UNISON, MV_ALGORITHM, MV_RATIO_MODE, MV_OP_OFF, MV_OP_ON,
     MV_OP_LEVEL, MV_DRONE_HZ, MV_BEND, MV_NOTE_ON, MV_NOTE_OFF, MV_STEAL,
-    MV_TO_NOTES, MV_TO_DRONE, MV_ATTACK, MV_DECAY, MV_SUSTAIN, MV_RELEASE,
+    MV_DRONE_OFF, MV_DRONE_ON, MV_ATTACK, MV_DECAY, MV_SUSTAIN, MV_RELEASE,
     MV_VERB_MIX, MV_VERB_GHOST, MV_VERB_DECAY, MV_VERB_DAMP, MV_VERB_HAUNT,
-    MV_WARMTH, MV_CHANDAS_ON, MV_CHANDAS_MIX, MV_CHANDAS_DIV, MV_PRESET,
+    MV_CHANDAS_ON, MV_CHANDAS_MIX, MV_CHANDAS_DIV, MV_PRESET,
     MV_REPEAT_IN_FADE, MV_COUNT
 } Move;
 
@@ -43,16 +43,17 @@ typedef enum {
 static Reach move_reach(Move m) {
     switch (m) {
     case MV_LEVEL: case MV_OP_LEVEL: case MV_VERB_MIX: case MV_VERB_GHOST:
-    case MV_VERB_DECAY: case MV_VERB_DAMP: case MV_VERB_HAUNT: case MV_WARMTH:
+    case MV_VERB_DECAY: case MV_VERB_DAMP: case MV_VERB_HAUNT:
     case MV_CHANDAS_MIX: case MV_ATTACK: case MV_DECAY: case MV_SUSTAIN:
     case MV_RELEASE: case MV_OP_OFF: case MV_OP_ON: case MV_NOTE_ON:
-    case MV_NOTE_OFF: case MV_STEAL: case MV_CHANDAS_ON:
+    case MV_NOTE_OFF: case MV_STEAL: case MV_CHANDAS_ON: case MV_DRONE_OFF:
+    case MV_DRONE_ON:
         return REACH_GAIN;
     case MV_INDEX: case MV_RIP: case MV_FB: case MV_FIELD: case MV_CURVE:
     case MV_GLIDE: case MV_DETUNE: case MV_DRONE_HZ: case MV_BEND:
         return REACH_PHASE;
     case MV_VOICES: case MV_UNISON: case MV_ALGORITHM: case MV_RATIO_MODE:
-    case MV_TO_NOTES: case MV_TO_DRONE: case MV_PRESET: case MV_REPEAT_IN_FADE:
+    case MV_PRESET: case MV_REPEAT_IN_FADE:
         return REACH_STRUCTURE;
     case MV_CHANDAS_DIV:
         return REACH_TIMING;
@@ -84,8 +85,8 @@ static const char *move_name(Move m) {
     case MV_NOTE_ON: return "note on";
     case MV_NOTE_OFF: return "note off";
     case MV_STEAL: return "a fifth note steals";
-    case MV_TO_NOTES: return "drone -> notes";
-    case MV_TO_DRONE: return "notes -> drone";
+    case MV_DRONE_OFF: return "drone let go";
+    case MV_DRONE_ON: return "drone held";
     case MV_ATTACK: return "attack";
     case MV_DECAY: return "decay";
     case MV_SUSTAIN: return "sustain";
@@ -95,7 +96,6 @@ static const char *move_name(Move m) {
     case MV_VERB_DECAY: return "room decay";
     case MV_VERB_DAMP: return "room damp";
     case MV_VERB_HAUNT: return "room haunt";
-    case MV_WARMTH: return "warmth";
     case MV_CHANDAS_ON: return "chandas on";
     case MV_CHANDAS_MIX: return "chandas mix";
     case MV_CHANDAS_DIV: return "chandas division";
@@ -112,10 +112,8 @@ typedef struct {
     VoiceBank bank;
     StereoVerb verb;
     Chandas chandas;
-    Tape tape;
-    EngageGate gate;
     Melody melody;
-    bool melody_on, engaged, notes_live, built;
+    bool melody_on, built;
     size_t repeat_in; /* samples until a second, identical patch message */
     Patch repeat;
     int poly, unison;
@@ -123,12 +121,10 @@ typedef struct {
     Move move;
 } Rig;
 
-static Chain notes_chain(void) {
-    Chain c;
-    c.amp.kind = AMP_ENVELOPE;
-    c.amp.env = env_params_default();
-    c.amp.env.attack_s = ENV_ATTACK_MIN; /* the worst case for a gate */
-    return c;
+static EnvParams notes_adsr(void) {
+    EnvParams e = env_params_default();
+    e.attack_s = ENV_ATTACK_MIN; /* the worst case for a gate */
+    return e;
 }
 
 static Patch plain_patch(int poly, int unison) {
@@ -168,17 +164,12 @@ static void rig_make(void *ctx) {
     verb_configure(&r->verb, voice_bank_patch(&r->bank), voice_bank_compiled(&r->bank));
     verb_set_params(&r->verb, verb_params_default());
     chandas_init(&r->chandas, SR);
-    tape_init(&r->tape, SR);
-    tape_set(&r->tape, 0.5f);
     MelodyParams m = melody_params_default();
     m.enabled = r->shun;
     m.rate_hz = 8.0f; /* gates often enough to land inside the window */
     m.root_midi = 40;
     melody_init(&r->melody, SR, m);
     r->melody_on = m.enabled;
-    r->engaged = !r->notes;
-    r->notes_live = r->notes;
-    engage_gate_init(&r->gate, SR, true);
     voice_bank_drone_to_hz(&r->bank, HZ);
     voice_bank_set_drone_hz(&r->bank, HZ);
     verb_set_drone_hz(&r->verb, HZ);
@@ -194,18 +185,14 @@ static void rig_make(void *ctx) {
         c.warp = 0.796f;
         c.tail = 0.252f;
         chandas_set_params(&r->chandas, c);
-        tape_set(&r->tape, 0.696f);
     }
     if (r->notes) {
-        Chain c = notes_chain();
-        if (r->shun) {
-            c.amp.env.attack_s = 0.0436f;
-            c.amp.env.decay_s = 0.296f;
-            c.amp.env.sustain = 0.427f;
-            c.amp.env.release_s = 0.368f;
-        }
-        voice_bank_set_chain_now(&r->bank, c);
+        EnvParams e = notes_adsr();
+        if (r->shun) e = (EnvParams){0.0436f, 0.296f, 0.368f, 0.427f};
+        voice_bank_set_adsr_now(&r->bank, e);
         if (!r->melody_on) voice_bank_note_on(&r->bank, 45, HZ, 0.9f);
+    } else {
+        voice_bank_set_drone(&r->bank, true);
     }
     r->built = true;
 }
@@ -235,9 +222,7 @@ static void rig_emit(void *userdata, size_t n, const Frame *f) {
     Rig *r = fill->rig;
     Stereo s = verb_process(&r->verb, f);
     s = chandas_process(&r->chandas, s);
-    s = tape_process(&r->tape, s);
-    float g = engage_gate_next(&r->gate, r->engaged || r->notes_live);
-    fill->out[fill->at++] = soft_clip(s.l * g);
+    fill->out[fill->at++] = s.l;
 }
 
 static void rig_render(void *ctx, float *out, size_t n) {
@@ -262,7 +247,6 @@ static void rig_render(void *ctx, float *out, size_t n) {
         if (r->repeat_in > 0 && r->repeat_in <= run) {
             run = r->repeat_in;
         }
-        r->notes_live = voice_bank_chain(&r->bank)->amp.kind == AMP_ENVELOPE;
         voice_bank_render_frames(&r->bank, run, rig_emit, &fill);
         if (r->repeat_in > 0) {
             r->repeat_in -= run;
@@ -278,7 +262,6 @@ static void rig_apply(void *ctx) {
     Patch p = *voice_bank_patch(&r->bank);
     VerbParams v = verb_params(&r->verb);
     ChandasParams c = chandas_params(&r->chandas);
-    State st = voice_bank_state(&r->bank);
     switch (r->move) {
     case MV_INDEX: p.index = 0.9f; patch_to(r, p); break;
     case MV_RIP: p.rip = 0.7f; patch_to(r, p); break;
@@ -317,29 +300,18 @@ static void rig_apply(void *ctx) {
         for (int i = 0; i < POLY_MAX + 1; i++)
             voice_bank_note_on(&r->bank, 48 + 3 * i, midi_to_hz(48 + 3 * i), 0.9f);
         break;
-    case MV_TO_NOTES: st.chain = notes_chain(); voice_bank_set_state(&r->bank, st); break;
-    case MV_TO_DRONE: {
-        if (r->melody_on) {
-            MelodyParams m = r->melody.params;
-            m.enabled = false;
-            melody_set_params(&r->melody, m);
-            r->melody_on = false;
-            voice_bank_note_off_all(&r->bank);
-        }
-        st.chain = chain_default();
-        voice_bank_set_state(&r->bank, st);
-        break;
-    }
+    case MV_DRONE_OFF: voice_bank_set_drone(&r->bank, false); break;
+    case MV_DRONE_ON: voice_bank_set_drone(&r->bank, true); break;
     case MV_ATTACK:
     case MV_DECAY:
     case MV_SUSTAIN:
     case MV_RELEASE: {
-        if (st.chain.amp.kind != AMP_ENVELOPE) st.chain = notes_chain();
-        if (r->move == MV_ATTACK) st.chain.amp.env.attack_s = 2.0f;
-        if (r->move == MV_DECAY) st.chain.amp.env.decay_s = 0.05f;
-        if (r->move == MV_SUSTAIN) st.chain.amp.env.sustain = 0.1f;
-        if (r->move == MV_RELEASE) st.chain.amp.env.release_s = 4.0f;
-        voice_bank_set_state(&r->bank, st);
+        EnvParams e = *voice_bank_adsr(&r->bank);
+        if (r->move == MV_ATTACK) e.attack_s = 2.0f;
+        if (r->move == MV_DECAY) e.decay_s = 0.05f;
+        if (r->move == MV_SUSTAIN) e.sustain = 0.1f;
+        if (r->move == MV_RELEASE) e.release_s = 4.0f;
+        voice_bank_set_adsr_now(&r->bank, e);
         break;
     }
     case MV_VERB_MIX: v.mix = 0.9f; verb_set_params(&r->verb, v); break;
@@ -347,7 +319,6 @@ static void rig_apply(void *ctx) {
     case MV_VERB_DECAY: v.decay = 0.3f; verb_set_params(&r->verb, v); break;
     case MV_VERB_DAMP: v.damp = 0.95f; verb_set_params(&r->verb, v); break;
     case MV_VERB_HAUNT: v.haunt = 0.9f; verb_set_params(&r->verb, v); break;
-    case MV_WARMTH: tape_set(&r->tape, 1.0f); break;
     case MV_CHANDAS_ON:
         c.enabled = !c.enabled;
         c.mix = 0.6f;

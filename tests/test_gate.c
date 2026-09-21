@@ -1,57 +1,100 @@
+/* The drone is a held gate on the ADSR: engaging it plays note 0 through
+   attack and decay and holds it at sustain until it is let go. */
 #include "../src/dsp/dsp.h"
 #include "test.h"
 
 #define SR 48000.0f
 
-static void born_closed_is_exact_zero_forever(void) {
-    EngageGate g;
-    engage_gate_init(&g, SR, false);
-    for (size_t i = 0; i < (size_t)SR; i++) {
-        CHECK(engage_gate_next(&g, false) == 0.0f, "gain %g at sample %zu", g.gain, i);
-    }
+static void drop(void *u, size_t i, const Frame *f) {
+    (void)u;
+    (void)i;
+    (void)f;
 }
 
-static void born_open_is_exact_unity(void) {
-    EngageGate g;
-    engage_gate_init(&g, SR, true);
-    CHECK(engage_gate_next(&g, true) == 1.0f, "gain %g", g.gain);
+static const EnvParams ADSR = {0.01f, 0.1f, 0.2f, 0.5f};
+
+static void held_drone(VoiceBank *b, int voices) {
+    Patch p = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
+    p.voices = (uint8_t)voices;
+    voice_bank_init(b, SR, p);
+    voice_bank_set_adsr_now(b, ADSR);
+    voice_bank_drone_to_hz(b, 110.0f);
+    voice_bank_set_drone(b, true);
 }
 
-static void travel_never_steps(void) {
-    EngageGate g;
-    engage_gate_init(&g, SR, false);
-    float k = 1.0f - expf(-1.0f / (GATE_GLIDE_S * SR));
-    float prev = 0.0f;
-    for (size_t i = 0; i < (size_t)SR; i++) {
-        bool open = (i / 4800) % 2 == 0;
-        float x = engage_gate_next(&g, open);
-        CHECK(x >= 0.0f && x <= 1.0f, "gain %g out of range", x);
-        CHECK(fabsf(x - prev) <= k + 1e-7f, "gate stepped %g in one sample", fabsf(x - prev));
-        prev = x;
-    }
+static const Envelope *note0(const VoiceBank *b) {
+    const VoicePair *p = &b->pairs[0];
+    return &p->voices[p->target].env;
 }
 
-static void closing_reaches_true_zero_within_a_quarter_second(void) {
-    EngageGate g;
-    engage_gate_init(&g, SR, true);
-    bool found = false;
-    size_t at = 0;
-    for (size_t i = 0; i < (size_t)(SR * 0.25f); i++) {
-        if (engage_gate_next(&g, false) == 0.0f) {
-            found = true;
-            at = i;
-            break;
-        }
-    }
-    CHECK(found, "gate never reached zero");
-    if (found) {
-        CHECK((float)at / SR < 0.25f, "took %zu samples", at);
-    }
+static void the_drone_settles_at_sustain_and_stays(void) {
+    static VoiceBank b;
+    held_drone(&b, 1);
+    voice_bank_render_frames(&b, (size_t)SR, drop, NULL);
+    CHECK_NEAR(envelope_level(note0(&b)), ADSR.sustain, 1e-3f, "level %g after a second",
+               envelope_level(note0(&b)));
+    voice_bank_render_frames(&b, (size_t)(SR * 3.0f), drop, NULL);
+    CHECK(note0(&b)->stage == ENV_HELD, "the drone let go by itself");
+    CHECK_NEAR(envelope_level(note0(&b)), ADSR.sustain, 1e-3f, "level %g held",
+               envelope_level(note0(&b)));
+    voice_bank_free(&b);
+}
+
+static void a_key_under_the_drone_comes_back_to_sustain(void) {
+    static VoiceBank b;
+    held_drone(&b, 1);
+    voice_bank_render_frames(&b, (size_t)SR, drop, NULL);
+    voice_bank_note_on(&b, 64, midi_to_hz(64), 1.0f);
+    voice_bank_render_frames(&b, (size_t)(SR * 0.01f), drop, NULL);
+    CHECK(envelope_level(note0(&b)) > ADSR.sustain + 0.1f,
+          "the key did not fire the attack: %g", envelope_level(note0(&b)));
+    voice_bank_note_off(&b, 64);
+    CHECK(note0(&b)->stage == ENV_HELD, "letting go of the key released the drone");
+    CHECK_NEAR(voice_bank_target_hz(&b), 110.0f, 1e-3f, "the key did not hand the pitch back");
+    voice_bank_render_frames(&b, (size_t)SR, drop, NULL);
+    CHECK_NEAR(envelope_level(note0(&b)), ADSR.sustain, 1e-3f, "level %g after the key",
+               envelope_level(note0(&b)));
+    voice_bank_free(&b);
+}
+
+static void a_sequencer_note_under_the_drone_keeps_its_pitch(void) {
+    static VoiceBank b;
+    held_drone(&b, 1);
+    voice_bank_note_off_all(&b);
+    voice_bank_note_on(&b, -1, 330.0f, 1.0f);
+    voice_bank_note_off_all(&b);
+    CHECK(note0(&b)->stage == ENV_HELD, "a sequencer's note off released the drone");
+    CHECK_NEAR(voice_bank_target_hz(&b), 330.0f, 1e-3f,
+               "the pitch went home under a running sequence");
+    voice_bank_free(&b);
+}
+
+static void letting_the_drone_go_releases_to_silence(void) {
+    static VoiceBank b;
+    held_drone(&b, 1);
+    voice_bank_render_frames(&b, (size_t)SR, drop, NULL);
+    voice_bank_set_drone(&b, false);
+    CHECK(note0(&b)->stage == ENV_RELEASED, "the drone did not start its release");
+    voice_bank_render_frames(&b, (size_t)(SR * (ADSR.release_s + 0.05f)), drop, NULL);
+    CHECK(!voice_bank_note_sounding(&b), "still sounding after the release");
+    voice_bank_free(&b);
+}
+
+static void a_held_key_outlasts_the_drone(void) {
+    static VoiceBank b;
+    held_drone(&b, 1);
+    voice_bank_note_on(&b, 64, midi_to_hz(64), 1.0f);
+    voice_bank_set_drone(&b, false);
+    CHECK(note0(&b)->stage == ENV_HELD, "dropping the drone cut a held key");
+    voice_bank_note_off(&b, 64);
+    CHECK(note0(&b)->stage == ENV_RELEASED, "the key's release was held back");
+    voice_bank_free(&b);
 }
 
 void test_gate(void) {
-    born_closed_is_exact_zero_forever();
-    born_open_is_exact_unity();
-    travel_never_steps();
-    closing_reaches_true_zero_within_a_quarter_second();
+    the_drone_settles_at_sustain_and_stays();
+    a_key_under_the_drone_comes_back_to_sustain();
+    a_sequencer_note_under_the_drone_keeps_its_pitch();
+    letting_the_drone_go_releases_to_silence();
+    a_held_key_outlasts_the_drone();
 }

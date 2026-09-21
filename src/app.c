@@ -171,6 +171,8 @@ int main(void) {
     Patch patch = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
     voice_init(&e->voice, sample_rate, patch);
     voice_set_freq_hz(&e->voice, START_HZ);
+    /* the drone: a note held for as long as the program runs */
+    voice_note_on(&e->voice, START_HZ, 1.0f);
     verb_init(&e->verb, sample_rate);
     verb_configure(&e->verb, &e->voice.patch, &e->voice.compiled);
 

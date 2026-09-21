@@ -48,6 +48,7 @@ static void additive_carriers_are_summed_at_the_output(void) {
     Voice v;
     voice_init(&v, SR, patch);
     voice_set_freq_hz(&v, NOTE_HZ);
+    voice_note_on(&v, NOTE_HZ, 1.0f);
 
     Frame frame;
     voice_render_frames(&v, 257, copy_frame, &frame);

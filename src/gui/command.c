@@ -193,7 +193,7 @@ static const Verb VERBS[] = {
      NULL, NULL, NULL},
     {.name = "drone",
      .group = G_SOUND,
-     .about = "show or set whether the drone is sounding",
+     .about = "show or set whether the drone holds the envelope open",
      .run = run_switch,
      .parse = parse_switch,
      .complete = switch_complete,

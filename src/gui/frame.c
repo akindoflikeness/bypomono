@@ -64,7 +64,7 @@ void app_frame(App *a, Ui *ui) {
         a->fps = inst + (a->fps - inst) * k;
     }
 
-    gui_sync_chain(a);
+    gui_sync_adsr(a);
     tell_new_tips(a);
     gui_apply_cc(a, ui);
     gui_drain_viz(a);
@@ -118,7 +118,7 @@ void app_init_defaults(App *a) {
     a->tempo_source = TEMPO_INTERNAL;
     a->transport_running = true;
     a->drone_hz = s.drone_hz;
-    a->chain = chain_default();
+    a->adsr_sent.attack_s = -1.0f; /* nothing sent yet */
     a->engaged = true;
     a->cc_bind[1] = CC_GLIDE; /* modwheel */
     a->preset_filter.kind = FILTER_ALL;

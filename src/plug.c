@@ -134,19 +134,13 @@ static Patch patch_of_vals(const Plug *p) {
     return patch;
 }
 
-static Chain chain_of_vals(const Plug *p) {
-    Chain want;
-    if (getv(p, P_DRONE) > 0.5) {
-        want = chain_default();
-    } else {
-        want.amp.kind = AMP_ENVELOPE;
-        want.amp.env = env_params_default();
-        want.amp.env.attack_s = (float)getv(p, P_ATTACK);
-        want.amp.env.decay_s = (float)getv(p, P_ENV_DECAY);
-        want.amp.env.sustain = (float)getv(p, P_SUSTAIN);
-        want.amp.env.release_s = (float)getv(p, P_RELEASE);
-    }
-    return want;
+static EnvParams adsr_of_vals(const Plug *p) {
+    EnvParams e = env_params_default();
+    e.attack_s = (float)getv(p, P_ATTACK);
+    e.decay_s = (float)getv(p, P_ENV_DECAY);
+    e.sustain = (float)getv(p, P_SUSTAIN);
+    e.release_s = (float)getv(p, P_RELEASE);
+    return e;
 }
 
 /* audio thread: push the atomics into the engine */
@@ -193,11 +187,7 @@ static void apply_vals(Plug *p) {
     p->base.melody = mp;
     p->base.warmth = (float)getv(p, P_WARMTH);
 
-    /* polite in the DAW: silent until notes unless DRONE is thrown */
-    p->engaged = getv(p, P_DRONE) > 0.5;
-    State st = voice_bank_state(&p->voice);
-    st.chain = chain_of_vals(p);
-    voice_bank_set_state(&p->voice, st);
+    voice_bank_set_adsr_now(&p->voice, adsr_of_vals(p));
     /* glide only when the hz itself moved: glide_to_hz retriggers the
        breath gesture and overrides a sounding note's pitch */
     float hz = (float)getv(p, P_DRONE_HZ);
@@ -207,6 +197,8 @@ static void apply_vals(Plug *p) {
         voice_bank_set_drone_hz(&p->voice, hz);
         verb_set_drone_hz(&p->verb, hz);
     }
+    /* polite in the DAW: silent until notes unless DRONE is thrown */
+    voice_bank_set_drone(&p->voice, getv(p, P_DRONE) > 0.5);
     atomic_store_explicit(&p->dirty, false, memory_order_relaxed);
     atomic_store_explicit(&p->host_touched, true, memory_order_relaxed);
 }
@@ -426,20 +418,15 @@ static void apply_gui_event(Plug *p, Event ev) {
         chandas_note_pulse(&p->chandas);
         mod_note_on(&p->mod);
         break;
-    case EV_SET_CHAIN: {
-        State next = voice_bank_state(&p->voice);
-        next.chain = ev.u.chain;
-        voice_bank_set_state(&p->voice, next);
-        if (ev.u.chain.amp.kind == AMP_ENVELOPE) {
-            setv(p, P_ATTACK, ev.u.chain.amp.env.attack_s);
-            setv(p, P_ENV_DECAY, ev.u.chain.amp.env.decay_s);
-            setv(p, P_SUSTAIN, ev.u.chain.amp.env.sustain);
-            setv(p, P_RELEASE, ev.u.chain.amp.env.release_s);
-        }
+    case EV_SET_ADSR:
+        voice_bank_set_adsr_now(&p->voice, ev.u.adsr);
+        setv(p, P_ATTACK, ev.u.adsr.attack_s);
+        setv(p, P_ENV_DECAY, ev.u.adsr.decay_s);
+        setv(p, P_SUSTAIN, ev.u.adsr.sustain);
+        setv(p, P_RELEASE, ev.u.adsr.release_s);
         break;
-    }
     case EV_ENGAGE:
-        p->engaged = ev.u.flag;
+        voice_bank_set_drone(&p->voice, ev.u.flag);
         setv(p, P_DRONE, ev.u.flag ? 1 : 0);
         break;
     case EV_RECORD:
@@ -464,9 +451,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     Plug *p = e->p;
     Stereo w = verb_process(&p->verb, frame);
     w = chandas_process(&p->chandas, w);
-    bool notes_live = voice_bank_chain(&p->voice)->amp.kind == AMP_ENVELOPE;
-    float g = engage_gate_next(&p->gate, p->engaged || notes_live);
-    Stereo limited = limiter_process(&p->limiter, (Stereo){w.l * g, w.r * g});
+    Stereo limited = limiter_process(&p->limiter, w);
     float l = limited.l, r = limited.r;
     e->l[e->base + n] = l;
     e->r[e->base + n] = r;
@@ -912,8 +897,6 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     voice_bank_init(&p->voice, (float)sr, patch_of_vals(p));
     voice_bank_set_freq_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     p->applied_drone_hz = (float)getv(p, P_DRONE_HZ);
-    /* born in the right chain: nothing to crossfade from on insert */
-    voice_bank_set_chain_now(&p->voice, chain_of_vals(p));
     verb_init(&p->verb, (float)sr);
     voice_bank_set_drone_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     verb_set_drone_hz(&p->verb, (float)getv(p, P_DRONE_HZ));
@@ -924,7 +907,6 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     chandas_init(&p->chandas, (float)sr);
     tape_init(&p->tape, (float)sr);
     limiter_init(&p->limiter, (float)sr);
-    engage_gate_init(&p->gate, (float)sr, false);
     mod_init(&p->mod, (float)sr);
     p->mod.bank = mod_bank_sanitize(p->mods_main);
     p->base.bend = 0.0f;

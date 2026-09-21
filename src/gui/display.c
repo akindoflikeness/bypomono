@@ -100,7 +100,7 @@ static void paint_envelope(const App *a, Canvas *c, Rct rect) {
     }
     draw_polyline(c, pts, (size_t)n, 2.0f, PAPER);
 
-    if (a->chain.amp.kind == AMP_ENVELOPE) {
+    {
         uint32_t clock = atomic_load_explicit(&((App *)a)->env_clock,
                                               memory_order_relaxed);
         EnvStage stage = (EnvStage)(clock >> 30);
@@ -125,22 +125,11 @@ static void envelope_knobs(App *a, Ui *ui, Rct r) {
     static const ParamId KNOBS[] = {PARAM_ATTACK, PARAM_ENV_DECAY,
                                     PARAM_SUSTAIN, PARAM_RELEASE};
     const int n = (int)(sizeof KNOBS / sizeof KNOBS[0]);
-    bool reaches = a->chain.amp.kind == AMP_ENVELOPE || a->shadow_melody.enabled;
     float kw = rct_w(r) / (float)n;
     for (int k = 0; k < n; k++) {
         Rct kr = rct(roundf(r.x0 + kw * (float)k), r.y0,
                      roundf(r.x0 + kw * (float)(k + 1)), r.y1);
-        bool live = reaches;
-        param_knob(a, ui, kr, KNOBS[k], live);
-        if (live || !press_on(ui, kr)) continue;
-        if (midi_driving(a))
-            push_log(a, "midi is connected, but the drone is still on "
-                        "— turn it off to make notes the amplitude "
-                        "authority and the envelope reachable.");
-        else
-            push_log(a, "the envelope only reaches anything once notes "
-                        "raise the sound — connect midi or start the "
-                        "sequencer, and switch the drone off.");
+        param_knob(a, ui, kr, KNOBS[k]);
     }
 }
 
@@ -169,10 +158,10 @@ static void draw_info_page(App *a, Ui *ui, Rct r) {
     float y = content.y0;
 
     text_draw(c, heading, (P2){content.x0, y}, ALIGN_LEFT_TOP,
-              "BYPO MONO C", PAPER, 0.0f);
+              "BLOW YOUR PHASE OFF", PAPER, 0.0f);
     y += text_row_height(heading) + TIGHT;
     text_draw(c, body, (P2){content.x0, y}, ALIGN_LEFT_TOP,
-              "design + audio architecture  AKOL", PAPER, 0.0f);
+              "AKOL", PAPER, 0.0f);
     y += text_row_height(body) + SECTION;
 
     text_draw(c, heading, (P2){content.x0, y}, ALIGN_LEFT_TOP, "CREDITS", PAPER,
@@ -200,11 +189,11 @@ static void draw_info_page(App *a, Ui *ui, Rct r) {
 static void draw_shell_page(App *a, Ui *ui, Rct r) { draw_stage(a, ui, r); }
 
 static const Tab DISPLAY[DISPLAY_TABS] = {
-    [TAB_SHELL] = {"SHELL", draw_shell_page},
+    [TAB_SHELL] = {"LOG", draw_shell_page},
     [TAB_SCOPE] = {"SCOPE", draw_scope_page},
     [TAB_ENV] = {"ENV", draw_envelope_page},
-    [TAB_PRE] = {"PRE", draw_presets_page},
-    [TAB_INFO] = {"I", draw_info_page},
+    [TAB_PRE] = {"PRESET", draw_presets_page},
+    [TAB_INFO] = {"INFO", draw_info_page},
 };
 
 void draw_display_tabs(App *a, Ui *ui, Rct bar) {

@@ -63,7 +63,7 @@ typedef enum {
     EV_SET_PATCH, EV_SET_VERB, EV_SET_MELODY, EV_SET_CHANDAS, EV_SET_WARMTH,
     EV_SET_LIMITER,
     EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
-    EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING,
+    EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_ADSR, EV_SET_MIDI_DRIVING,
     EV_SET_SEQ, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC, EV_SET_PITCH
 } EventKind;
 
@@ -75,7 +75,7 @@ typedef struct {
         MelodyParams melody;
         ChandasParams chandas;
         struct { bool enabled; float ceiling_db; } limiter;
-        Chain chain;
+        EnvParams adsr;
         float f;
         bool flag;
         struct { float hz, velocity; int key; } note; /* key -1 = none */
@@ -223,8 +223,8 @@ typedef struct App {
     bool transport_running;
     float drone_hz;
     ModBank mods;
-    Chain chain;
-    bool engaged;
+    EnvParams adsr_sent; /* the envelope the engine last heard */
+    bool engaged;        /* the drone holds its gate */
     bool restored;
     bool hosted; /* running as a plugin editor: host notes always may drive */
 
@@ -346,8 +346,10 @@ void gui_audio_stop(App *a);
 void gui_drain_viz(App *a);
 void gui_drain_recording(App *a);
 void gui_apply_cc(App *a, Ui *ui);
-void gui_sync_chain(App *a);
+/* sends the envelope settings whenever they differ from what was sent */
+void gui_sync_adsr(App *a);
 bool midi_driving(const App *a);
+
 int midi_port_names(char names[][128], int max);
 bool gui_set_midi_port(App *a, const char *name); /* NULL = close */
 /* audio thread: newest pitch and held pitch classes for the keyboard */
@@ -374,7 +376,7 @@ FaderAct knob_track(Ui *ui, UiId id, Rct r, const char *label,
    pressed so the caller can say why. */
 bool param_fader(App *a, Ui *ui, Rct r, ParamId id);
 bool param_fader_veiled(App *a, Ui *ui, Rct r, ParamId id);
-bool param_knob(App *a, Ui *ui, Rct r, ParamId id, bool live);
+bool param_knob(App *a, Ui *ui, Rct r, ParamId id);
 /* "< text >": -1 for a click on the left arrow, +1 anywhere else */
 int stepper(Ui *ui, UiId id, Rct r, const char *text, bool live);
 void hard_rect(Canvas *c, Rct r, float width);

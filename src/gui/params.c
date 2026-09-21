@@ -258,14 +258,7 @@ void params_send(App *a, int groups) {
                                           a->shadow_limiter_ceiling_db}});
     if (groups & PG_DRONE)
         app_send(a, (Event){.kind = EV_GLIDE_TO, .u.f = a->drone_hz});
-    /* the envelope only reaches the engine while notes raise the sound */
-    if ((groups & PG_ENV) && a->chain.amp.kind == AMP_ENVELOPE) {
-        a->chain.amp.env.attack_s = a->shadow_attack_s;
-        a->chain.amp.env.decay_s = a->shadow_decay_s;
-        a->chain.amp.env.sustain = a->shadow_sustain;
-        a->chain.amp.env.release_s = a->shadow_release_s;
-        app_send(a, (Event){.kind = EV_SET_CHAIN, .u.chain = a->chain});
-    }
+    if (groups & PG_ENV) gui_sync_adsr(a);
 }
 
 float log_position(float p, float lo, float hi) {
@@ -296,3 +289,20 @@ float env_time_pos(float v, float lo) {
     if (!(v > floor)) return 0.0f;
     return clamp01(logf(v / floor) / logf(ENV_TIME_MAX / floor));
 }
+
+static bool adsr_same(const EnvParams *a, const EnvParams *b) {
+    return a->attack_s == b->attack_s && a->decay_s == b->decay_s
+           && a->release_s == b->release_s && a->sustain == b->sustain;
+}
+
+void gui_sync_adsr(App *a) {
+    EnvParams want = env_params_default();
+    want.attack_s = a->shadow_attack_s;
+    want.decay_s = a->shadow_decay_s;
+    want.sustain = a->shadow_sustain;
+    want.release_s = a->shadow_release_s;
+    if (adsr_same(&want, &a->adsr_sent)) return;
+    a->adsr_sent = want;
+    app_send(a, (Event){.kind = EV_SET_ADSR, .u.adsr = want});
+}
+

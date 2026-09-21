@@ -517,16 +517,12 @@ bool param_fader_veiled(App *a, Ui *ui, Rct r, ParamId id) {
     return act.kind != FADER_NONE;
 }
 
-bool param_knob(App *a, Ui *ui, Rct r, ParamId id, bool live) {
+bool param_knob(App *a, Ui *ui, Rct r, ParamId id) {
     char val[48];
     param_text(a, id, val, sizeof val);
     FaderAct act = knob_track(ui, ui_id_n("param knob", (int)id), r,
                               PARAMS[id].label, val,
                               param_pos(id, param_get(a, id)));
-    if (!live) {
-        dither_rect_ink(ui->canvas, r, VEIL, 2.0f, INK_BLACK);
-        return false;
-    }
     return param_apply(a, id, act);
 }
 

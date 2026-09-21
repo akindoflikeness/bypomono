@@ -335,6 +335,7 @@ static double rms_at_decay_voiced(float decay) {
     Voice v;
     voice_init(&v, SR, patch);
     voice_set_freq_hz(&v, 50.0f);
+    voice_note_on(&v, 50.0f, 1.0f); /* held: the default envelope sustains at 1 */
     StereoVerb verb;
     verb_init(&verb, SR);
     Compiled compiled = compile(patch.algorithm);

@@ -160,20 +160,6 @@ Stereo limiter_process(Limiter *l, Stereo x) {
 
 float limiter_reduction_db(const Limiter *l) { return l->reduction_db; }
 
-/* ---- gate ---- */
-
-void engage_gate_init(EngageGate *g, float sample_rate, bool engaged) {
-    g->gain = engaged ? 1.0f : 0.0f;
-    g->k = 1.0f - expf(-1.0f / (GATE_GLIDE_S * fmaxf(sample_rate, 1.0f)));
-}
-
-float engage_gate_next(EngageGate *g, bool open) {
-    float target = open ? 1.0f : 0.0f;
-    g->gain += (target - g->gain) * g->k;
-    if (!open && g->gain < GATE_FLOOR) g->gain = 0.0f;
-    return g->gain;
-}
-
 /* ---- shared primitives ---- */
 
 float dc_block_process(DcBlock *d, float x) {

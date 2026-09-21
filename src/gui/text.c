@@ -17,7 +17,6 @@ typedef struct {
 static const FaceSpec FACES[FACE_COUNT] = {
     {"byposerif", "BYPOSerif.otb", 0},
     {"unifontexmono", "UnifontExMono.ttf", 16},
-    {"european_teletext", "EuropeanTeletext.ttf", 16},
 };
 
 static FT_Library g_ft;
@@ -92,17 +91,15 @@ float grid_size(float want, float native) {
 }
 
 /* BYPOSerif is hand-drawn at these sizes only and has no outlines */
-static const float UI_SIZES[] = {9, 10, 11, 12, 13, 16};
+static const float UI_SIZES[] = {10, 11, 12, 13, 16, 18};
 
+/* the first drawn size above the one asked for, so text runs a step large */
 FontId ui_font(float want) {
-    float best = UI_SIZES[0];
-    for (size_t i = 1; i < sizeof UI_SIZES / sizeof UI_SIZES[0]; i++)
-        if (fabsf(UI_SIZES[i] - want) < fabsf(best - want)) best = UI_SIZES[i];
-    return (FontId){UI_FACE, best};
-}
-
-FontId readout_font(float want) {
-    return (FontId){READOUT_FACE, grid_size(want, 16.0f)};
+    size_t n = sizeof UI_SIZES / sizeof UI_SIZES[0];
+    float asked = roundf(want);
+    for (size_t i = 0; i < n; i++)
+        if (UI_SIZES[i] > asked) return (FontId){UI_FACE, UI_SIZES[i]};
+    return (FontId){UI_FACE, UI_SIZES[n - 1]};
 }
 
 static GlyphEntry *lookup(int face, int px, uint32_t cp) {

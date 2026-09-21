@@ -411,7 +411,7 @@ Without AI this wouldn't exist. Primarily it has been programmed by AI agents. E
 
 <pre align="center">
 ══════════════════════════════════════════════════════════════════
-    MIT · fonts: BYPOSerif, European Teletext, Unifont Ex Mono    
+          MIT · fonts: BYPOSerif, Unifont Ex Mono          
   see <a href="THIRD-PARTY-LICENSES.txt">THIRD-PARTY-LICENSES.txt</a>
   <a href="#top">↑ top</a>
 ══════════════════════════════════════════════════════════════════

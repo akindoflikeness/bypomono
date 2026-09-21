@@ -90,7 +90,10 @@ $(CLI): $(DSP_OBJ) src/audio.o src/midi.o src/app.o
 $(GUI): $(DSP_OBJ) $(GUI_OBJ) src/audio.o src/midi.o
 	$(CC) $(CFLAGS) $(GUI_LDFLAGS) -o $@ $^ $(SYS_LIBS) $(FT_LIBS) $(RUNTIME_LIBS)
 
-src/gui/%.o: src/gui/%.c src/gui/app.h src/gui/canvas.h src/gui/text.h src/gui/ui.h src/dsp/dsp.h
+GUI_HDR = src/gui/app.h src/gui/canvas.h src/gui/text.h src/gui/ui.h \
+          src/gui/layout.h src/gui/params.h src/dsp/dsp.h
+
+src/gui/%.o: src/gui/%.c $(GUI_HDR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -c $< -o $@
 
 src/audio.o: src/audio.c src/audio.h
@@ -99,7 +102,7 @@ src/audio.o: src/audio.c src/audio.h
 # the preset tests link the parser and saver
 TEST_GUI_OBJ = src/gui/json_session.o src/gui/presets.o
 TEST_GUI_OBJ += src/gui/command.o src/gui/cmd_controls.o src/gui/cmd_mod.o src/gui/focus.o \
-                src/cli/view.o
+                src/gui/params.o src/gui/layout.o src/cli/view.o
 
 $(TESTS): $(DSP_OBJ) $(TEST_OBJ) $(TEST_GUI_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -110,7 +113,7 @@ check: $(TESTS)
 %.o: %.c src/dsp/dsp.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-tests/%.o: tests/%.c tests/test.h src/dsp/dsp.h src/gui/app.h
+tests/%.o: tests/%.c tests/test.h $(GUI_HDR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # ---------- CLAP ----------
@@ -141,7 +144,7 @@ GUI_PIC = $(filter-out src/gui/gui_main.pic.o,$(GUI_SRC:.c=.pic.o))
 PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
           src/plug.pic.o src/plug_gui.pic.o $(GUI_BACKEND_OBJ)
 
-%.pic.o: %.c src/dsp/dsp.h src/gui/app.h src/plug.h src/plug_gui.h src/plug_gui_backend.h
+%.pic.o: %.c $(GUI_HDR) src/plug.h src/plug_gui.h src/plug_gui_backend.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(FT_CFLAGS) -fPIC -c $< -o $@
 
 # A .clap installed on Linux or Windows is one file with nothing beside it,
@@ -149,8 +152,7 @@ PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
 # to this directory. The standalone keeps using assets/, so its object is the
 # empty half of the file.
 FONT_FILES = assets/fonts/byposerif/BYPOSerif.otb \
-             assets/fonts/unifontexmono/UnifontExMono.ttf \
-             assets/fonts/european_teletext/EuropeanTeletext.ttf
+             assets/fonts/unifontexmono/UnifontExMono.ttf
 
 src/gui/fonts_embedded.pic.o: src/gui/fonts_embedded.c src/gui/text.h \
                               $(FONT_FILES)

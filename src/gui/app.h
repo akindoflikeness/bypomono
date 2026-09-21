@@ -10,6 +10,8 @@
 #include "../midi.h"
 #include "../ring.h"
 #include "canvas.h"
+#include "layout.h"
+#include "params.h"
 #include "text.h"
 #include "ui.h"
 
@@ -32,28 +34,16 @@
 #define GROUP 8.0f
 #define SECTION 13.0f
 #define FADER_H 23.0f
+#define ROW_H 21.0f /* buttons, chips and steppers */
+#define STEPPER_ARROW_W 14.0f
 #define FOOTER_LINE_H 23.0f
-#define PRESET_STRIP_H 23.0f /* top of column three; fits the 21px preset bar */
-#define ROOM_ART_H 144.0f
 #define TREE_H 150.0f
-#define ENGAGE_H 34.0f
-#define CELL_GUTTER GAP
-#define HINT_CHIP_H 15.0f
 #define HINT_ROW_H 21.0f
 #define FOOTER_OPEN_H 144.0f
-#define SEAM_GRAB 9.0f
 #define VIZ_DECIMATE 4
 #define REPAINT_FLOOR_MS 10
 #define GOLDEN_MAJOR (1.0f / PHI)
-#define OPS_COL_W 250.0f
-#define STATS_COL_W 233.0f
-#define CONTROLS_HOUSE_W 325.0f
-#define REFERENCE_ROW_W DESIGN_W
-#define REFERENCE_CENTRE_W (REFERENCE_ROW_W - STATS_COL_W - OPS_COL_W)
-#define OPS_COL_SHARE (OPS_COL_W / REFERENCE_ROW_W)
-#define STATS_COL_SHARE (STATS_COL_W / REFERENCE_ROW_W)
-#define CONTROLS_SHARE (CONTROLS_HOUSE_W / REFERENCE_CENTRE_W)
-#define PRESET_NAME_W 178.0f /* design-grid pixels; room for preset names/search */
+#define PRESET_NAME_W 200.0f
 #define INFO_BUTTON_SIDE 9.0f /* source pixels of the built-in 9x9 cog */
 #define INFO_BUTTON_W (INFO_BUTTON_SIDE + 2.0f * GAP)
 #define BEND_SEMITONES 2.0f
@@ -214,10 +204,10 @@ typedef enum {
 const char *cc_target_name(CcTarget t);
 CcTarget cc_target_from_name(const char *s);
 
-typedef struct {
-    float tree, ops, controls; /* <0 = house default */
-    float top;                 /* <0 = house default */
-} Splits;
+/* the display column's pages, in tab order */
+enum { TAB_SHELL, TAB_SCOPE, TAB_ENV, TAB_PRE, TAB_INFO, DISPLAY_TABS };
+/* the space column's pages */
+enum { TAB_ROOM, TAB_CHANDAS, SPACE_TABS };
 
 #define LOG_LINES 64
 #define LOG_LINE_LEN 256
@@ -271,7 +261,6 @@ typedef struct App {
     double last_frame_time;
     uint64_t frame_count;
     float fps;
-    bool splash_over;
     float ripple_phase, suture_phase, rock_phase[3], spin, shell_scale;
     float index_smooth, dread_level, agitation;
     Dread dread;
@@ -286,11 +275,6 @@ typedef struct App {
     bool cc_heard[128];
     uint32_t cc_seen[128];
 
-    /* layout */
-    Splits splits;
-    Rct preset_bar_rect;
-    bool have_preset_bar_rect;
-
     /* preset bank */
     UiText preset_name;
     PresetRef preset_names[MAX_PRESETS];
@@ -300,7 +284,7 @@ typedef struct App {
     PresetFilter preset_filter;
     PresetRef preset_loaded, preset_selected;
     bool have_loaded, have_selected;
-    bool preset_searching, preset_focus, presets_open, presets_were_open;
+    bool preset_searching, preset_focus;
     int preset_button_at; /* bar button the keyboard walk is on */
     double preset_click_at;
     bool have_click_at;
@@ -329,8 +313,8 @@ typedef struct App {
 
     /* panes */
     bool info_open, show_fps;
-    int ops_tab, display_tab;
-    UiScroll left_scroll, right_scroll;
+    int space_tab, display_tab;
+    int display_back; /* the tab the presets page returns to */
 
     /* recording */
     Recorder recorder;
@@ -372,16 +356,8 @@ void gui_run_unbind(App *a, int cc); /* -1 = all */
 /* widgets.c */
 typedef enum { FADER_NONE, FADER_SET, FADER_RESET } FaderActKind;
 typedef struct { FaderActKind kind; float t; } FaderAct;
-float log_position(float p, float lo, float hi);
-float position_of_log(float v, float lo, float hi);
 FaderAct fader_track(Ui *ui, UiId id, Rct r, const char *label,
                      const char *value, float t);
-bool fader(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
-           float hi);
-bool fader_log(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
-               float hi, const char *suffix);
-bool fader_int(Ui *ui, UiId id, Rct r, const char *label, int *v, int lo,
-               int hi);
 /* A rotary knob: label above, value below, the arc from 7:30 round to 4:30.
    Vertical drag sweeps the range in KNOB_DRAG_PX, Shift for a tenth of
    that; double-click resets. FADER_SET carries the new position. */
@@ -389,11 +365,14 @@ bool fader_int(Ui *ui, UiId id, Rct r, const char *label, int *v, int lo,
 #define KNOB_FINE 0.1f
 FaderAct knob_track(Ui *ui, UiId id, Rct r, const char *label,
                     const char *value, float t);
-/* envelope times: `lo` at the bottom of the sweep, then equal ratios from
-   ENV_TIME_FLOOR (or lo, if higher) up to ENV_TIME_MAX */
-#define ENV_TIME_FLOOR 0.001f
-float env_time_at(float t, float lo);
-float env_time_pos(float v, float lo);
+/* Faders and knobs for a PARAMS row: they apply the change and send it.
+   The veiled fader is drawn greyed and ignores input; it returns true when
+   pressed so the caller can say why. */
+bool param_fader(App *a, Ui *ui, Rct r, ParamId id);
+bool param_fader_veiled(App *a, Ui *ui, Rct r, ParamId id);
+bool param_knob(App *a, Ui *ui, Rct r, ParamId id, bool live);
+/* "< text >": -1 for a click on the left arrow, +1 anywhere else */
+int stepper(Ui *ui, UiId id, Rct r, const char *text, bool live);
 void hard_rect(Canvas *c, Rct r, float width);
 void bubble_chain(Canvas *c, Ui *ui, P2 a, P2 b, bool active, float index,
                   double time);
@@ -402,8 +381,13 @@ Rct window_chrome_tagged(Canvas *c, Rct r, const char *title, const char *tag);
 bool pane_button(Ui *ui, UiId id, Rct r, const char *text, bool armed);
 bool chip_button(Ui *ui, UiId id, Rct r, const char *text, bool selected);
 bool bookmark(Ui *ui, UiId id, Rct r, const char *label, bool selected);
-int wave_tabs(Ui *ui, UiId id, Rct r, const char *const *labels, int n,
-              int active);
+typedef struct {
+    const char *label;
+    void (*draw)(App *a, Ui *ui, Rct r);
+} Tab;
+/* a row of wave tabs across the top of r and the active page below it */
+void tab_view(App *a, Ui *ui, const char *id, Rct r, const Tab *tabs, int n,
+              int *active);
 void draw_graticule(Canvas *c, Rct r, int cols, int rows);
 void beam_segment(Canvas *c, P2 a, P2 b, int k, bool decayed);
 void dotted_rect(Canvas *c, Rct r, uint8_t ink);
@@ -411,7 +395,6 @@ extern const char *const ICON_COG[9];
 void draw_icon(Canvas *c, const char *const rows[9], P2 at, uint8_t ink, float k);
 bool icon_button(Ui *ui, UiId id, Rct r, const char *const rows[9],
                  const char *label, bool armed, float k);
-float tab_width(float available, float gap, int n);
 void draw_block_caret(Canvas *c, Ui *ui, FontId f, P2 text_pos,
                       const char *text, uint8_t bg);
 
@@ -448,44 +431,38 @@ void draw_console_drawer(App *a, Ui *ui, Rct footer);
 void app_frame(App *a, Ui *ui);
 void app_init_defaults(App *a);
 
-/* shared app helpers (centre.c) */
+/* shared app helpers (shell.c) */
 extern const char *const ROMAN[8];
 const char *mode_name_of(RatioMode m);
 int algorithm_index_of(const Patch *p);
 void app_set_algorithm(App *a, int idx);
 void app_set_engaged(App *a, bool on);
+/* the pointer went down inside r this frame */
+bool press_on(const Ui *ui, Rct r);
+
+/* focus.c: the presets list is the display's PRE page */
+bool presets_showing(const App *a);
+void presets_show(App *a, bool on);
 
 /* panes.c */
 /* Tab walks search -> list -> buttons, Left/Right pick a bar button */
 void presets_walk_keys(App *a, Ui *ui);
-void draw_preset_bar(App *a, Ui *ui, Rct r);
-void draw_presets_pane(App *a, Ui *ui);
+void draw_header(App *a, Ui *ui, Rct r);
+void draw_presets_pane(App *a, Ui *ui, Rct r);
 void draw_info_pane(App *a, Ui *ui);
 void draw_fps_counter(App *a, Ui *ui, float footer_h);
 
-/* rails.c */
-void draw_left_rail(App *a, Ui *ui, Rct r);
-void draw_right_rail(App *a, Ui *ui, Rct r);
+/* one column each */
+void draw_sound_column(App *a, Ui *ui, Rct r);   /* sound.c */
+void draw_fm_column(App *a, Ui *ui, Rct r);      /* fm.c */
+void draw_display_column(App *a, Ui *ui, Rct r); /* display.c */
+void draw_space_column(App *a, Ui *ui, Rct r);   /* space.c */
+void draw_melody_bar(App *a, Ui *ui, Rct r);     /* melody_bar.c */
 
-/* centre.c */
-void draw_controls_house(App *a, Ui *ui, Rct r);
-void draw_stage(App *a, Ui *ui, Rct r);    /* starfield + monolith */
-void draw_display_cell(App *a, Ui *ui, Rct r);
-void centre_prelayout(App *a, Ui *ui);     /* phase integrators, dread */
-
-/* visuals.c: logalith + splash */
-typedef struct {
-    P2 pole;
-    float tilt, max_r, bore_r, pitch, yaw, focal;
-} Pose;
-typedef struct {
-    float suture_ph, ripple_ph, cycles, along, level, grown, index;
-    uint32_t ghosts;
-    float ghost_spread, stipple;
-} Look;
-void logalith_fit(Rct rect, P2 *pole, float *base_r);
-void logalith_draw(Canvas *c, const Pose *pose, const Look *look, uint8_t ink);
-float logalith_unit_r(float theta, float ph, float cycles);
-bool splash_draw(App *a, Canvas *c, Rct rect, float elapsed);
+/* shell.c */
+void draw_stage(App *a, Ui *ui, Rct r);    /* starfield + shell */
+void shell_prelayout(App *a, Ui *ui);      /* phase integrators, dread */
+/* sideways jitter under dread, in pixels */
+float shell_tremble(const App *a);
 
 #endif

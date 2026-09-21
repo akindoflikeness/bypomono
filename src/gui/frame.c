@@ -5,42 +5,6 @@
 
 #include "app.h"
 
-static float min_share(float axis) {
-    float s = SEAM_GRAB / axis;
-    return s < 1.0f / 3.0f ? s : 1.0f / 3.0f;
-}
-
-typedef struct {
-    bool moved;
-    float delta;
-    bool reset;
-} SeamAct;
-
-static SeamAct seam(Ui *ui, const char *id, Rct grab, bool upright) {
-    SeamAct act = {0};
-    Resp r = ui_interact_drag(ui, ui_id(id), grab, 0.0f);
-    if (r.hovered)
-        ui->cursor = upright ? CURSOR_RESIZE_H : CURSOR_RESIZE_V;
-    if (r.hovered || r.dragged) {
-        /* 1px PAPER line down the middle */
-        if (upright) {
-            float x = 0.5f * (grab.x0 + grab.x1);
-            draw_rect_filled(ui->canvas, rct(x, grab.y0, x + 1.0f, grab.y1),
-                             PAPER);
-        } else {
-            float y = 0.5f * (grab.y0 + grab.y1);
-            draw_rect_filled(ui->canvas, rct(grab.x0, y, grab.x1, y + 1.0f),
-                             PAPER);
-        }
-    }
-    if (r.dragged) {
-        act.moved = true;
-        act.delta = upright ? r.drag_delta.x : r.drag_delta.y;
-    }
-    act.reset = r.double_clicked;
-    return act;
-}
-
 static void handle_keys(App *a, Ui *ui) {
     UiId bar_id = ui_id("preset bar");
     UiId list_id = ui_id("preset list");
@@ -75,8 +39,8 @@ static void handle_keys(App *a, Ui *ui) {
             a->console_input.len = 0;
             a->console_input.text[0] = '\0';
             if (ui->focus == console_id) ui->focus = 0;
-        } else if (a->presets_open) {
-            a->presets_open = false;
+        } else if (presets_showing(a)) {
+            presets_show(a, false);
         }
     }
 
@@ -106,108 +70,33 @@ void app_frame(App *a, Ui *ui) {
     gui_drain_viz(a);
     gui_drain_recording(a);
     a->pointer = ui->in.mouse;
-    centre_prelayout(a, ui);
+    shell_prelayout(a, ui);
     handle_keys(a, ui);
+    layout_frame_begin();
 
-    /* ---- carve the frame ---- */
-    Rct full = rct(0, 0, DESIGN_W, DESIGN_H);
+    Screen s = screen_layout(rct(0, 0, DESIGN_W, DESIGN_H),
+                             fminf(FOOTER_LINE_H, DESIGN_H));
+    draw_header(a, ui, s.header);
+    draw_footer(a, ui, s.footer);
 
-    float footer_h = fminf(FOOTER_LINE_H, DESIGN_H);
-    Rct footer = rct(full.x0, full.y1 - footer_h, full.x1, full.y1);
-    draw_footer(a, ui, footer);
-
-    Rct band = rct(full.x0, full.y0, full.x1, footer.y0);
-    Rct row = band;
-    float row_w = rct_w(row);
-    float stats_share = a->splits.tree >= 0.0f ? a->splits.tree : STATS_COL_SHARE;
-    float ops_share = a->splits.ops >= 0.0f ? a->splits.ops : OPS_COL_SHARE;
-    float lo = min_share(row_w);
-    stats_share = clampf(stats_share, lo, 1.0f / 3.0f);
-    ops_share = clampf(ops_share, lo, 1.0f / 3.0f);
-    float stats_w = roundf(stats_share * row_w);
-    float ops_w = roundf(ops_share * row_w);
-
-    Rct stats = rct(row.x0, row.y0, row.x0 + stats_w, row.y1);
-    Rct ops = rct(row.x1 - ops_w, row.y0, row.x1, row.y1);
-    Rct centre = rct(stats.x1, row.y0, ops.x0, row.y1);
-
-    draw_left_rail(a, ui, stats);
-    draw_right_rail(a, ui, ops);
-    draw_rect_stroke(c, stats, 2.0f, PAPER);
-    draw_rect_stroke(c, ops, 2.0f, PAPER);
-
-    /* central cells */
-    float centre_w = rct_w(centre);
-    float controls_share =
-        a->splits.controls >= 0.0f ? a->splits.controls : CONTROLS_SHARE;
-    controls_share = clampf(controls_share, min_share(centre_w), 0.8f);
-    float top_share = a->splits.top >= 0.0f ? a->splits.top : GOLDEN_MAJOR;
-    top_share = clampf(top_share, min_share(rct_h(centre)), 0.9f);
-
-    float cx_w = roundf(controls_share * centre_w);
-    Rct cell_x = rct(centre.x0, centre.y0, centre.x0 + cx_w, centre.y1);
-    Rct right = rct(cell_x.x1 + CELL_GUTTER, centre.y0, centre.x1, centre.y1);
-    float cy_h = roundf(top_share * rct_h(right));
-    Rct cell_y = rct(right.x0, right.y0, right.x1, right.y0 + cy_h);
-    Rct cell_w = rct(right.x0, cell_y.y1 + CELL_GUTTER, right.x1, right.y1);
-
-    draw_rect_stroke(c, cell_x, 2.0f, PAPER);
-    draw_rect_stroke(c, cell_y, 2.0f, PAPER);
-    draw_rect_stroke(c, cell_w, 2.0f, PAPER);
-
-    Rct stage_clip = rct_shrink(cell_y, 3.0f);
+    struct { Rct r; void (*draw)(App *, Ui *, Rct); } panels[] = {
+        {s.sound, draw_sound_column},     {s.fm, draw_fm_column},
+        {s.display, draw_display_column}, {s.space, draw_space_column},
+        {s.melody, draw_melody_bar},
+    };
     Rct saved = canvas_clip(c);
-    canvas_set_clip(c, stage_clip);
-    draw_stage(a, ui, cell_y);
-    canvas_set_clip(c, saved);
-
-    /* The command line remains the preset interface while the compact
-       preset/info controls have no settled home outside the display. */
-    // draw_preset_bar(a, ui, compact_preset_strip);
-
-    draw_display_cell(a, ui, rct_shrink(cell_w, 2.0f));
-    draw_controls_house(a, ui, rct_shrink(cell_x, 2.0f));
-
-    /* seams */
-    SeamAct s;
-    s = seam(ui, "seam tree",
-             rct(stats.x1 - SEAM_GRAB * 0.5f, band.y0,
-                 stats.x1 + SEAM_GRAB * 0.5f, band.y1),
-             true);
-    if (s.moved) a->splits.tree = clampf(stats_share + s.delta / row_w, lo, 1.0f / 3.0f);
-    if (s.reset) a->splits.tree = -1.0f;
-
-    s = seam(ui, "seam ops",
-             rct(ops.x0 - SEAM_GRAB * 0.5f, band.y0, ops.x0 + SEAM_GRAB * 0.5f,
-                 band.y1),
-             true);
-    if (s.moved) a->splits.ops = clampf(ops_share - s.delta / row_w, lo, 1.0f / 3.0f);
-    if (s.reset) a->splits.ops = -1.0f;
-
-    s = seam(ui, "seam controls",
-             rct(cell_x.x1 + CELL_GUTTER * 0.5f - SEAM_GRAB * 0.5f, centre.y0,
-                 cell_x.x1 + CELL_GUTTER * 0.5f + SEAM_GRAB * 0.5f, centre.y1),
-             true);
-    if (s.moved)
-        a->splits.controls =
-            clampf(controls_share + s.delta / centre_w, min_share(centre_w), 0.8f);
-    if (s.reset) a->splits.controls = -1.0f;
-
-    s = seam(ui, "seam rows",
-             rct(right.x0, cell_y.y1 + CELL_GUTTER * 0.5f - SEAM_GRAB * 0.5f,
-                 right.x1, cell_y.y1 + CELL_GUTTER * 0.5f + SEAM_GRAB * 0.5f),
-             false);
-    if (s.moved)
-        a->splits.top = clampf(top_share + s.delta / rct_h(right),
-                               min_share(rct_h(centre)), 0.9f);
-    if (s.reset) a->splits.top = -1.0f;
+    for (size_t i = 0; i < sizeof panels / sizeof panels[0]; i++) {
+        Rct inner = rct_shrink(panels[i].r, 2.0f);
+        canvas_set_clip(c, rct_intersect(saved, inner));
+        panels[i].draw(a, ui, inner);
+        canvas_set_clip(c, saved);
+        draw_rect_stroke(c, panels[i].r, 2.0f, PAPER);
+    }
 
     /* overlays */
-    if (a->presets_open) draw_presets_pane(a, ui);
     if (a->info_open) draw_info_pane(a, ui);
-    if (a->show_fps) draw_fps_counter(a, ui, footer_h);
-    if (a->console_open) draw_console_drawer(a, ui, footer);
-
+    if (a->show_fps) draw_fps_counter(a, ui, rct_h(s.footer));
+    if (a->console_open) draw_console_drawer(a, ui, s.footer);
 }
 
 void app_init_defaults(App *a) {
@@ -230,10 +119,9 @@ void app_init_defaults(App *a) {
     a->drone_hz = s.drone_hz;
     a->chain = chain_default();
     a->engaged = true;
-    a->splits = (Splits){-1.0f, -1.0f, -1.0f, -1.0f};
     a->cc_bind[1] = CC_GLIDE; /* modwheel */
     a->preset_filter.kind = FILTER_ALL;
-    a->ops_tab = 0;
-    a->display_tab = 0;
+    a->space_tab = TAB_ROOM;
+    a->display_tab = TAB_SHELL;
     push_log(a, "BLOW YOUR PHASE OFF v%s", APP_VERSION);
 }

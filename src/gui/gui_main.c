@@ -23,6 +23,108 @@ static float pick_scale(void) {
     return pick_display_scale(r.w, r.h);
 }
 
+#define SHOT_FRAMES 60
+#define SHOT_CLICK_EVERY 6
+
+static bool write_bmp(const char *path, const Canvas *c) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return false;
+    int row = (c->w * 3 + 3) & ~3;
+    uint32_t size = 54u + (uint32_t)(row * c->h);
+    uint8_t h[54] = {'B', 'M'};
+    uint32_t fields[] = {size, 0, 54, 40, (uint32_t)c->w, (uint32_t)c->h};
+    memcpy(h + 2, &fields[0], 4);
+    memcpy(h + 10, &fields[2], 4);
+    memcpy(h + 14, &fields[3], 4);
+    memcpy(h + 18, &fields[4], 4);
+    memcpy(h + 22, &fields[5], 4);
+    h[26] = 1;
+    h[28] = 24;
+    fwrite(h, 1, sizeof h, f);
+    uint8_t *line = calloc(1, (size_t)row);
+    for (int y = c->h - 1; y >= 0; y--) {
+        for (int x = 0; x < c->w; x++) {
+            uint32_t p = c->px[y * c->w + x];
+            line[x * 3] = (uint8_t)p;
+            line[x * 3 + 1] = (uint8_t)(p >> 8);
+            line[x * 3 + 2] = (uint8_t)(p >> 16);
+        }
+        fwrite(line, 1, (size_t)row, f);
+    }
+    free(line);
+    return fclose(f) == 0;
+}
+
+/* BYPO_SHOT=<file.bmp> draws frames with no window, audio or saved state,
+   writes the last one and quits. BYPO_CMD runs console lines first, split
+   on ';'. BYPO_CLICK clicks design-space points "x,y;x,y", one every
+   SHOT_CLICK_EVERY frames. Exits 3 when a panel's contents overflowed. */
+static int run_shot(App *a, const char *path) {
+    Canvas canvas;
+    canvas_init(&canvas, (int)DESIGN_W, (int)DESIGN_H);
+    Ui *ui = &g_ui;
+    memset(ui, 0, sizeof *ui);
+    ui->canvas = &canvas;
+
+    const char *cmds = getenv("BYPO_CMD");
+    if (cmds) {
+        char buf[1024];
+        snprintf(buf, sizeof buf, "%s", cmds);
+        for (char *line = strtok(buf, ";"); line; line = strtok(NULL, ";"))
+            console_run_line(a, line);
+    }
+    P2 clicks[16];
+    int nclicks = 0;
+    const char *spec = getenv("BYPO_CLICK");
+    for (const char *p = spec; p && *p && nclicks < 16;) {
+        float x, y;
+        if (sscanf(p, "%f,%f", &x, &y) != 2) break;
+        clicks[nclicks++] = (P2){x, y};
+        p = strchr(p, ';');
+        if (p) p++;
+    }
+
+    int frames = SHOT_FRAMES + nclicks * SHOT_CLICK_EVERY;
+    for (int i = 0; i < frames; i++) {
+        UiInput *in = &ui->in;
+        in->pressed = in->released = in->double_clicked = false;
+        int k = i / SHOT_CLICK_EVERY - 1, at = i % SHOT_CLICK_EVERY;
+        if (k >= 0 && k < nclicks && at < 2) {
+            in->mouse = clicks[k];
+            in->mouse_in_window = true;
+            in->pressed = at == 0;
+            in->released = at == 1;
+            in->down = at == 0;
+            if (at == 0) ui->last_press_pos = in->mouse;
+        } else {
+            in->mouse_in_window = false;
+        }
+        ui->dt = 1.0f / 60.0f;
+        ui->time = (double)i / 60.0;
+        ui->hot = 0;
+        app_frame(a, ui);
+        ui->drag_prev = in->mouse;
+        Event ev; /* no audio thread: drop what the frame sent */
+        while (EventRing_pop(&a->ctrl, &ev)) {}
+    }
+
+    int status = 0;
+    if (!write_bmp(path, &canvas)) {
+        fprintf(stderr, "shot: could not write %s\n", path);
+        status = 1;
+    }
+    float px = 0.0f;
+    const char *where = layout_overflow_first(&px);
+    if (layout_overflow_count() > 0) {
+        fprintf(stderr, "shot: %d overflow(s), first %s by %.0f px\n",
+                layout_overflow_count(), where ? where : "?", (double)px);
+        if (!status) status = 3;
+    }
+    text_shutdown();
+    canvas_free(&canvas);
+    return status;
+}
+
 int main(void) {
     SDL_SetMainReady();
     App *a = &g_app;
@@ -30,6 +132,12 @@ int main(void) {
     prepare_preset_dir();
 
     text_init(asset_dir()); /* reports the source it loaded from itself */
+
+    const char *shot = getenv("BYPO_SHOT");
+    if (shot && *shot) {
+        preset_rescan(a);
+        return run_shot(a, shot);
+    }
 
     a->restored = app_restore_state(a);
     preset_rescan(a);

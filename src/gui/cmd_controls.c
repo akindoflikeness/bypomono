@@ -1,5 +1,5 @@
-/* Direct sound controls. One specification owns parsing, ranges, units and
-   engine dispatch; get/set/status can consume this same table later. */
+/* Direct sound controls. Continuous ones take their range, unit and default
+   from PARAMS (params.c); the rest are listed here. */
 #include "command.h"
 
 #include <math.h>
@@ -9,54 +9,55 @@
 #include <string.h>
 #include <strings.h>
 
-typedef enum {
-    CT_ALG, CT_MODE, CT_PATCH, CT_VERB, CT_ENV, CT_HZ, CT_NOTE, CT_WARMTH,
-    CT_LIMITER
-} ControlKind;
-
-typedef enum {
-    P_INDEX, P_RIP, P_FB, P_GLIDE, P_FIELD, P_CURVE, P_LEVEL, P_DETUNE,
-    V_MIX, V_GHOST, V_DECAY, V_DAMP, V_HAUNT,
-    E_ATTACK, E_DECAY, E_SUSTAIN, E_RELEASE
-} ControlSlot;
+typedef enum { CT_ALG, CT_MODE, CT_PARAM, CT_NOTE, CT_LIMITER } ControlKind;
 
 typedef struct {
     const char *name;
     ControlKind kind;
-    ControlSlot slot;
-    float lo, hi;
-    const char *unit;
-    const char *alt_unit;
+    ParamId param; /* CT_PARAM */
+    float lo, hi;  /* the others */
     bool integer;
 } ControlSpec;
 
 static const ControlSpec SPECS[] = {
-    {"alg", CT_ALG, 0, 1, 8, NULL, NULL, true},
-    {"mode", CT_MODE, 0, 0, 0, NULL, NULL, false},
-    {"index", CT_PATCH, P_INDEX, 0, 1, NULL, NULL, false},
-    {"rip", CT_PATCH, P_RIP, 0, 1, NULL, NULL, false},
-    {"fb", CT_PATCH, P_FB, 0, 1, NULL, NULL, false},
-    {"glide", CT_PATCH, P_GLIDE, 0, 2, "s", "seconds", false},
-    {"field", CT_PATCH, P_FIELD, 0, 1, NULL, NULL, false},
-    {"curve", CT_PATCH, P_CURVE, 0, 1, NULL, NULL, false},
-    {"level", CT_PATCH, P_LEVEL, 0, 1, NULL, NULL, false},
-    {"detune", CT_PATCH, P_DETUNE, 0, UNISON_DETUNE_MAX, "cents", "cent", false},
-    {"mix", CT_VERB, V_MIX, 0, 1, NULL, NULL, false},
-    {"ghost", CT_VERB, V_GHOST, 0, 1, NULL, NULL, false},
-    {"reverb_decay", CT_VERB, V_DECAY, 0.05f, 8, "s", "seconds", false},
-    {"damp", CT_VERB, V_DAMP, 0, 0.99f, NULL, NULL, false},
-    {"haunt", CT_VERB, V_HAUNT, 0, 1, NULL, NULL, false},
-    {"attack", CT_ENV, E_ATTACK, ENV_ATTACK_MIN, ENV_TIME_MAX, "s", "seconds", false},
-    {"env_decay", CT_ENV, E_DECAY, 0, ENV_TIME_MAX, "s", "seconds", false},
-    {"sustain", CT_ENV, E_SUSTAIN, 0, 1, NULL, NULL, false},
-    {"release", CT_ENV, E_RELEASE, ENV_RELEASE_MIN, ENV_TIME_MAX, "s", "seconds", false},
-    {"hz", CT_HZ, 0, 27.5f, 440, "hz", NULL, false},
-    {"note", CT_NOTE, 0, 0, 127, NULL, NULL, true},
-    {"warmth", CT_WARMTH, 0, 0, 1, NULL, NULL, false},
-    {"limiter", CT_LIMITER, 0, 0, 1, NULL, NULL, true},
-    {"ceiling", CT_LIMITER, 1, LIMITER_CEILING_DB_MIN, LIMITER_CEILING_DB_MAX,
-     "dbtp", NULL, false},
+    {"alg", CT_ALG, 0, 1, 8, true},
+    {"mode", CT_MODE, 0, 0, 0, false},
+    {"index", CT_PARAM, PARAM_INDEX, 0, 0, false},
+    {"rip", CT_PARAM, PARAM_RIP, 0, 0, false},
+    {"fb", CT_PARAM, PARAM_FB, 0, 0, false},
+    {"glide", CT_PARAM, PARAM_GLIDE, 0, 0, false},
+    {"field", CT_PARAM, PARAM_FIELD, 0, 0, false},
+    {"curve", CT_PARAM, PARAM_CURVE, 0, 0, false},
+    {"level", CT_PARAM, PARAM_LEVEL, 0, 0, false},
+    {"detune", CT_PARAM, PARAM_DETUNE, 0, 0, false},
+    {"mix", CT_PARAM, PARAM_MIX, 0, 0, false},
+    {"ghost", CT_PARAM, PARAM_GHOST, 0, 0, false},
+    {"reverb_decay", CT_PARAM, PARAM_VERB_DECAY, 0, 0, false},
+    {"damp", CT_PARAM, PARAM_DAMP, 0, 0, false},
+    {"haunt", CT_PARAM, PARAM_HAUNT, 0, 0, false},
+    {"attack", CT_PARAM, PARAM_ATTACK, 0, 0, false},
+    {"env_decay", CT_PARAM, PARAM_ENV_DECAY, 0, 0, false},
+    {"sustain", CT_PARAM, PARAM_SUSTAIN, 0, 0, false},
+    {"release", CT_PARAM, PARAM_RELEASE, 0, 0, false},
+    {"hz", CT_PARAM, PARAM_DRONE_HZ, 0, 0, false},
+    {"note", CT_NOTE, 0, 0, 127, true},
+    {"warmth", CT_PARAM, PARAM_WARMTH, 0, 0, false},
+    {"limiter", CT_LIMITER, 0, 0, 1, true},
+    {"ceiling", CT_PARAM, PARAM_CEILING, 0, 0, false},
 };
+
+static float spec_lo(const ControlSpec *s) {
+    return s->kind == CT_PARAM ? PARAMS[s->param].lo : s->lo;
+}
+static float spec_hi(const ControlSpec *s) {
+    return s->kind == CT_PARAM ? PARAMS[s->param].hi : s->hi;
+}
+static const char *spec_unit(const ControlSpec *s) {
+    return s->kind == CT_PARAM ? PARAMS[s->param].unit : NULL;
+}
+static const char *spec_alt_unit(const ControlSpec *s) {
+    return s->kind == CT_PARAM ? PARAMS[s->param].alt_unit : NULL;
+}
 
 static bool reason(char *err, size_t cap, const char *fmt, ...) {
     va_list ap;
@@ -84,9 +85,9 @@ static bool number_of(const char *word, const ControlSpec *s, float *out) {
     char *end = NULL;
     float v = strtof(word, &end);
     if (end == word || !isfinite(v)) return false;
-    if (*end && (!s->unit || (strcasecmp(end, s->unit) != 0
-                              && (!s->alt_unit
-                                  || strcasecmp(end, s->alt_unit) != 0))))
+    const char *unit = spec_unit(s), *alt = spec_alt_unit(s);
+    if (*end && (!unit || (strcasecmp(end, unit) != 0
+                           && (!alt || strcasecmp(end, alt) != 0))))
         return false;
     if (s->integer && v != floorf(v)) return false;
     *out = v;
@@ -108,28 +109,15 @@ bool control_parse(Command *c, char *err, size_t n) {
         return true;
     }
     float value;
-    if (!number_of(c->words[0], s, &value) || value < s->lo || value > s->hi) {
-        const char *unit = s->unit ? s->unit : "";
+    if (!number_of(c->words[0], s, &value) || value < spec_lo(s)
+        || value > spec_hi(s)) {
+        const char *unit = spec_unit(s) ? spec_unit(s) : "";
         return reason(err, n, "%s wants %g to %g%s, not '%s'", s->name,
-                      (double)s->lo, (double)s->hi, unit, c->words[0]);
+                      (double)spec_lo(s), (double)spec_hi(s), unit, c->words[0]);
     }
     c->value = value;
     c->choice = (int)value;
     return true;
-}
-
-static void send_patch(App *a) {
-    app_send(a, (Event){.kind = EV_SET_PATCH, .u.patch = a->shadow});
-}
-
-static void send_envelope(App *a) {
-    if (a->chain.amp.kind != AMP_ENVELOPE) return;
-    a->chain.amp.env.attack_s = a->shadow_attack_s;
-    a->chain.amp.env.decay_s = a->shadow_decay_s;
-    a->chain.amp.env.sustain = a->shadow_sustain;
-    a->chain.amp.env.release_s = a->shadow_release_s;
-    a->chain.amp.env.curve = a->shadow.curve;
-    app_send(a, (Event){.kind = EV_SET_CHAIN, .u.chain = a->chain});
 }
 
 bool control_run(App *a, const Command *c, char *err, size_t n) {
@@ -140,64 +128,23 @@ bool control_run(App *a, const Command *c, char *err, size_t n) {
     switch (s->kind) {
     case CT_ALG:
         a->shadow.algorithm = ALGORITHMS[c->choice - 1];
-        send_patch(a);
+        params_send(a, PG_PATCH);
         break;
     case CT_MODE:
         patch_apply_ratio_mode(&a->shadow, (RatioMode)c->choice);
-        send_patch(a);
+        params_send(a, PG_PATCH);
         break;
-    case CT_PATCH:
-        switch (s->slot) {
-        case P_INDEX: a->shadow.index = v; break;
-        case P_RIP: a->shadow.rip = v; break;
-        case P_FB: a->shadow.feedback = v; break;
-        case P_GLIDE: a->shadow.glide_seconds = v; break;
-        case P_FIELD: a->shadow.field = v; break;
-        case P_CURVE: a->shadow.curve = v; break;
-        case P_LEVEL: a->shadow.master_level = v; break;
-        case P_DETUNE: a->shadow.unison_detune = v; break;
-        default: break;
-        }
-        send_patch(a);
-        if (s->slot == P_CURVE) send_envelope(a);
+    case CT_PARAM:
+        param_set(a, s->param, v);
+        params_send(a, PARAMS[s->param].group);
         break;
-    case CT_VERB:
-        switch (s->slot) {
-        case V_MIX: a->shadow_verb.mix = v; break;
-        case V_GHOST: a->shadow_verb.ghost = v; break;
-        case V_DECAY: a->shadow_verb.decay = v; break;
-        case V_DAMP: a->shadow_verb.damp = v; break;
-        case V_HAUNT: a->shadow_verb.haunt = v; break;
-        default: break;
-        }
-        app_send(a, (Event){.kind = EV_SET_VERB, .u.verb = a->shadow_verb});
-        break;
-    case CT_ENV:
-        switch (s->slot) {
-        case E_ATTACK: a->shadow_attack_s = v; break;
-        case E_DECAY: a->shadow_decay_s = v; break;
-        case E_SUSTAIN: a->shadow_sustain = v; break;
-        case E_RELEASE: a->shadow_release_s = v; break;
-        default: break;
-        }
-        send_envelope(a);
-        break;
-    case CT_HZ: a->drone_hz = v; goto pitch;
     case CT_NOTE:
         a->drone_hz = midi_to_hz((uint8_t)c->choice);
-    pitch:
-        app_send(a, (Event){.kind = EV_GLIDE_TO, .u.f = a->drone_hz});
-        break;
-    case CT_WARMTH:
-        a->shadow_warmth = v;
-        app_send(a, (Event){.kind = EV_SET_WARMTH, .u.f = v});
+        params_send(a, PG_DRONE);
         break;
     case CT_LIMITER:
-        if (s->slot == 0) a->shadow_limiter_enabled = v > 0.5f;
-        else a->shadow_limiter_ceiling_db = v;
-        app_send(a, (Event){.kind = EV_SET_LIMITER,
-                             .u.limiter = {a->shadow_limiter_enabled,
-                                           a->shadow_limiter_ceiling_db}});
+        a->shadow_limiter_enabled = v > 0.5f;
+        params_send(a, PG_LIMITER);
         break;
     }
     if (s->kind == CT_NOTE)
@@ -249,6 +196,32 @@ static void joined(const Command *c, int from, char *out, size_t cap) {
     }
 }
 
+/* the grouped numeric controls, as "<group> <key>" rows of PARAMS */
+static int grouped_param(const char *group, const char *key) {
+    char name[160];
+    snprintf(name, sizeof name, "%s %s", group, key);
+    return param_find(name);
+}
+
+/* a grouped numeric value in the row's range and unit */
+static bool grouped_number(const char *group, const char *key, int id,
+                           const char *word, char *err, size_t n) {
+    const Control *p = &PARAMS[id];
+    float value;
+    if (!plain_number(word, p->unit, &value) || value < p->lo || value > p->hi
+        || (p->integer && value != floorf(value)))
+        return reason(err, n, "%s %s wants %g to %g%s, not '%s'", group, key,
+                      (double)p->lo, (double)p->hi, p->unit ? p->unit : "",
+                      word);
+    return true;
+}
+
+static void grouped_set(App *a, int id, const char *word) {
+    float value;
+    plain_number(word, PARAMS[id].unit, &value);
+    param_set(a, (ParamId)id, value);
+}
+
 static int tuning_of(const char *word) {
     for (int i = 0; i < NUM_TUNINGS; i++)
         if (strcasecmp(word, tuning_name((Tuning)i)) == 0) return i;
@@ -286,19 +259,9 @@ bool control_parse_mel(Command *c, char *err, size_t n) {
     }
     if (c->nwords != 2)
         return reason(err, n, "mel %s wants one value", key);
-    float value;
-    float lo, hi;
-    bool integer = false;
-    const char *unit = NULL;
-    if (strcasecmp(key, "root") == 0) lo = 24, hi = 57, integer = true;
-    else if (strcasecmp(key, "range") == 0) lo = 1, hi = 13, integer = true;
-    else if (strcasecmp(key, "rate") == 0) lo = 0.1f, hi = 8, unit = "hz";
-    else return reason(err, n, "mel has no control called %s", key);
-    if (!plain_number(c->words[1], unit, &value) || value < lo || value > hi
-        || (integer && value != floorf(value)))
-        return reason(err, n, "mel %s wants %g to %g%s, not '%s'", key,
-                      (double)lo, (double)hi, unit ? unit : "", c->words[1]);
-    return true;
+    int id = grouped_param("mel", key);
+    if (id < 0) return reason(err, n, "mel has no control called %s", key);
+    return grouped_number("mel", key, id, c->words[1], err, n);
 }
 
 bool control_run_mel(App *a, const Command *c, char *err, size_t n) {
@@ -328,16 +291,9 @@ bool control_run_mel(App *a, const Command *c, char *err, size_t n) {
         joined(c, 1, name, sizeof name);
         m->scale = (Scale)scale_of(name);
     } else {
-        float value;
-        plain_number(c->words[1], strcasecmp(c->words[0], "rate") == 0 ? "hz" : NULL,
-                     &value);
-        if (strcasecmp(c->words[0], "root") == 0) m->root_midi = (uint8_t)value;
-        else if (strcasecmp(c->words[0], "range") == 0)
-            m->range_degrees = (uint8_t)value;
-        else
-            m->rate_hz = value;
+        grouped_set(a, grouped_param("mel", c->words[0]), c->words[1]);
     }
-    app_send(a, (Event){.kind = EV_SET_MELODY, .u.melody = *m});
+    params_send(a, PG_MELODY);
     return true;
 }
 
@@ -389,20 +345,9 @@ bool control_parse_chandas(Command *c, char *err, size_t n) {
         if (division_of(c->words[1]) >= 0) return true;
         return reason(err, n, "chandas time does not know '%s'", c->words[1]);
     }
-    float lo, hi;
-    const char *unit = NULL;
-    if (strcasecmp(key, "rate") == 0) lo = 0.1f, hi = 8, unit = "hz";
-    else if (strcasecmp(key, "mix") == 0 || strcasecmp(key, "spread") == 0
-             || strcasecmp(key, "warp") == 0 || strcasecmp(key, "dim") == 0
-             || strcasecmp(key, "tail") == 0) lo = 0, hi = 1;
-    else if (strcasecmp(key, "size") == 0)
-        lo = CHANDAS_MIN_SIZE, hi = CHANDAS_MAX_SIZE;
-    else return reason(err, n, "chandas has no control called %s", key);
-    float value;
-    if (!plain_number(c->words[1], unit, &value) || value < lo || value > hi)
-        return reason(err, n, "chandas %s wants %g to %g%s, not '%s'", key,
-                      (double)lo, (double)hi, unit ? unit : "", c->words[1]);
-    return true;
+    int id = grouped_param("chandas", key);
+    if (id < 0) return reason(err, n, "chandas has no control called %s", key);
+    return grouped_number("chandas", key, id, c->words[1], err, n);
 }
 
 bool control_run_chandas(App *a, const Command *c, char *err, size_t n) {
@@ -434,20 +379,9 @@ bool control_run_chandas(App *a, const Command *c, char *err, size_t n) {
     } else if (strcasecmp(key, "time") == 0) {
         h->division = (size_t)division_of(c->words[1]);
     } else {
-        float value;
-        plain_number(c->words[1], strcasecmp(key, "rate") == 0 ? "hz" : NULL,
-                     &value);
-        if (strcasecmp(key, "rate") == 0) h->rate_hz = value;
-        else if (strcasecmp(key, "mix") == 0) {
-            h->mix = value;
-            if (value == 0.0f) h->enabled = false;
-        } else if (strcasecmp(key, "spread") == 0) h->spread = value;
-        else if (strcasecmp(key, "size") == 0) h->size = value;
-        else if (strcasecmp(key, "warp") == 0) h->warp = value;
-        else if (strcasecmp(key, "dim") == 0) h->dimension = value;
-        else h->tail = value;
+        grouped_set(a, grouped_param("chandas", key), c->words[1]);
     }
-    app_send(a, (Event){.kind = EV_SET_CHANDAS, .u.chandas = *h});
+    params_send(a, PG_CHANDAS);
     return true;
 }
 
@@ -474,74 +408,14 @@ int control_complete_chandas(char *const words[], int nwords,
 }
 
 static float scalar_value(const App *a, const ControlSpec *s) {
-    if (s->kind == CT_HZ) return a->drone_hz;
-    if (s->kind == CT_WARMTH) return a->shadow_warmth;
-    if (s->kind == CT_LIMITER)
-        return s->slot == 0 ? (a->shadow_limiter_enabled ? 1.0f : 0.0f)
-                            : a->shadow_limiter_ceiling_db;
-    if (s->kind == CT_PATCH) switch (s->slot) {
-    case P_INDEX: return a->shadow.index;
-    case P_RIP: return a->shadow.rip;
-    case P_FB: return a->shadow.feedback;
-    case P_GLIDE: return a->shadow.glide_seconds;
-    case P_FIELD: return a->shadow.field;
-    case P_CURVE: return a->shadow.curve;
-    case P_LEVEL: return a->shadow.master_level;
-    case P_DETUNE: return a->shadow.unison_detune;
-    default: break;
-    }
-    if (s->kind == CT_VERB) switch (s->slot) {
-    case V_MIX: return a->shadow_verb.mix;
-    case V_GHOST: return a->shadow_verb.ghost;
-    case V_DECAY: return a->shadow_verb.decay;
-    case V_DAMP: return a->shadow_verb.damp;
-    case V_HAUNT: return a->shadow_verb.haunt;
-    default: break;
-    }
-    if (s->kind == CT_ENV) switch (s->slot) {
-    case E_ATTACK: return a->shadow_attack_s;
-    case E_DECAY: return a->shadow_decay_s;
-    case E_SUSTAIN: return a->shadow_sustain;
-    case E_RELEASE: return a->shadow_release_s;
-    default: break;
-    }
+    if (s->kind == CT_PARAM) return param_get(a, s->param);
+    if (s->kind == CT_LIMITER) return a->shadow_limiter_enabled ? 1.0f : 0.0f;
     return 0.0f;
 }
 
-static float scalar_default(const ControlSpec *s) {
-    Patch p = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
-    VerbParams v = verb_params_default();
-    EnvParams e = env_params_default();
-    if (s->kind == CT_HZ) return START_HZ;
-    if (s->kind == CT_WARMTH) return 0.5f;
-    if (s->kind == CT_LIMITER)
-        return s->slot == 0 ? 1.0f : LIMITER_CEILING_DB_DEFAULT;
-    if (s->kind == CT_PATCH) switch (s->slot) {
-    case P_INDEX: return p.index;
-    case P_RIP: return p.rip;
-    case P_FB: return p.feedback;
-    case P_GLIDE: return p.glide_seconds;
-    case P_FIELD: return p.field;
-    case P_CURVE: return p.curve;
-    case P_LEVEL: return p.master_level;
-    case P_DETUNE: return p.unison_detune;
-    default: break;
-    }
-    if (s->kind == CT_VERB) switch (s->slot) {
-    case V_MIX: return v.mix;
-    case V_GHOST: return v.ghost;
-    case V_DECAY: return v.decay;
-    case V_DAMP: return v.damp;
-    case V_HAUNT: return v.haunt;
-    default: break;
-    }
-    if (s->kind == CT_ENV) switch (s->slot) {
-    case E_ATTACK: return e.attack_s;
-    case E_DECAY: return e.decay_s;
-    case E_SUSTAIN: return e.sustain;
-    case E_RELEASE: return e.release_s;
-    default: break;
-    }
+static float scalar_default(const App *a, const ControlSpec *s) {
+    if (s->kind == CT_PARAM) return param_default(a, s->param);
+    if (s->kind == CT_LIMITER) return session_default().limiter_enabled ? 1.0f : 0.0f;
     return 0.0f;
 }
 
@@ -560,10 +434,11 @@ bool control_get(App *a, char *const words[], int nwords, char *err, size_t n) {
         if (s && s->kind == CT_NOTE)
             return reason(err, n, "note is an action; get hz shows its result");
         if (s) {
+            const char *unit = spec_unit(s) ? spec_unit(s) : "";
             push_log(a, "%s %g%s  range %g to %g%s  default %g%s", s->name,
-                     (double)scalar_value(a, s), s->unit ? s->unit : "",
-                     (double)s->lo, (double)s->hi, s->unit ? s->unit : "",
-                     (double)scalar_default(s), s->unit ? s->unit : "");
+                     (double)scalar_value(a, s), unit, (double)spec_lo(s),
+                     (double)spec_hi(s), unit, (double)scalar_default(a, s),
+                     unit);
             return true;
         }
         if (strcasecmp(words[0], "drone") == 0

@@ -41,11 +41,9 @@
 
 EMBED(bypo_font_ui, "byposerif/BYPOSerif.otb");
 EMBED(bypo_font_fallback, "unifontexmono/UnifontExMono.ttf");
-EMBED(bypo_font_readout, "european_teletext/EuropeanTeletext.ttf");
 
 extern const unsigned char bypo_font_ui[], bypo_font_ui_end[];
 extern const unsigned char bypo_font_fallback[], bypo_font_fallback_end[];
-extern const unsigned char bypo_font_readout[], bypo_font_readout_end[];
 
 const unsigned char *embedded_face(int face, size_t *len) {
     const unsigned char *start, *end;
@@ -54,8 +52,6 @@ const unsigned char *embedded_face(int face, size_t *len) {
         start = bypo_font_ui; end = bypo_font_ui_end; break;
     case FACE_UNIFONTEXMONO:
         start = bypo_font_fallback; end = bypo_font_fallback_end; break;
-    case FACE_EUROPEAN_TELETEXT:
-        start = bypo_font_readout; end = bypo_font_readout_end; break;
     default:
         return NULL;
     }

@@ -521,9 +521,22 @@ void gui_sync_chain(App *a) {
                         : "the drone holds the sound again.");
 }
 
+/* a CC moves its control the way the fader does, along the same curve */
+static const ParamId CC_PARAM[CC_LAST + 1] = {
+    [CC_INDEX] = PARAM_INDEX,       [CC_RIP] = PARAM_RIP,
+    [CC_FB] = PARAM_FB,             [CC_FIELD] = PARAM_FIELD,
+    [CC_CURVE] = PARAM_CURVE,       [CC_RELEASE] = PARAM_RELEASE,
+    [CC_GLIDE] = PARAM_GLIDE,       [CC_DRONEHZ] = PARAM_DRONE_HZ,
+    [CC_MIX] = PARAM_MIX,           [CC_GHOST] = PARAM_GHOST,
+    [CC_DECAY] = PARAM_VERB_DECAY,  [CC_DAMP] = PARAM_DAMP,
+    [CC_HAUNT] = PARAM_HAUNT,       [CC_WARMTH] = PARAM_WARMTH,
+    [CC_ATTACK] = PARAM_ATTACK,     [CC_ENVDECAY] = PARAM_ENV_DECAY,
+    [CC_SUSTAIN] = PARAM_SUSTAIN,
+};
+
 void gui_apply_cc(App *a, Ui *ui) {
     (void)ui;
-    bool patch = false, verb = false, warmth = false;
+    int groups = 0;
     for (int cc = 0; cc < 128; cc++) {
         uint32_t word = cc_read(&a->cc, (uint8_t)cc);
         if (word == a->cc_seen[cc]) continue;
@@ -543,57 +556,11 @@ void gui_apply_cc(App *a, Ui *ui) {
         }
         CcTarget target = a->cc_bind[cc];
         if (target == CC_NONE) continue;
-        float p = cc_position(word);
-        switch (target) {
-        case CC_INDEX: a->shadow.index = p; patch = true; break;
-        case CC_RIP: a->shadow.rip = p; patch = true; break;
-        case CC_FB: a->shadow.feedback = p; patch = true; break;
-        case CC_FIELD: a->shadow.field = p; patch = true; break;
-        case CC_CURVE: a->shadow.curve = p; patch = true; break;
-        case CC_RELEASE:
-            a->shadow_release_s = env_time_at(p, ENV_RELEASE_MIN);
-            break;
-        case CC_ATTACK: a->shadow_attack_s = env_time_at(p, 0.0f); break;
-        case CC_ENVDECAY: a->shadow_decay_s = env_time_at(p, 0.0f); break;
-        case CC_SUSTAIN: a->shadow_sustain = p; break;
-        case CC_GLIDE:
-            a->shadow.glide_seconds = 2.0f * powf(p, PHI * PHI * PHI * PHI);
-            patch = true;
-            break;
-        case CC_DRONEHZ: {
-            a->drone_hz = log_position(p, 27.5f, 440.0f);
-            Event ev = {.kind = EV_GLIDE_TO, .u.f = a->drone_hz};
-            app_send(a, ev);
-            break;
-        }
-        case CC_MIX: a->shadow_verb.mix = p; verb = true; break;
-        case CC_GHOST: a->shadow_verb.ghost = p; verb = true; break;
-        case CC_DECAY:
-            a->shadow_verb.decay = log_position(p, 0.05f, 8.0f);
-            verb = true;
-            break;
-        case CC_DAMP: a->shadow_verb.damp = p * 0.99f; verb = true; break;
-        case CC_HAUNT: a->shadow_verb.haunt = p; verb = true; break;
-        case CC_WARMTH: a->shadow_warmth = p; warmth = true; break;
-        case CC_NONE: break;
-        }
+        ParamId id = CC_PARAM[target];
+        param_set(a, id, param_at(id, cc_position(word)));
+        groups |= PARAMS[id].group;
     }
-    Event ev;
-    if (patch) {
-        ev.kind = EV_SET_PATCH;
-        ev.u.patch = a->shadow;
-        app_send(a, ev);
-    }
-    if (verb) {
-        ev.kind = EV_SET_VERB;
-        ev.u.verb = a->shadow_verb;
-        app_send(a, ev);
-    }
-    if (warmth) {
-        ev.kind = EV_SET_WARMTH;
-        ev.u.f = a->shadow_warmth;
-        app_send(a, ev);
-    }
+    params_send(a, groups);
 }
 
 void gui_run_bind(App *a, int cc, CcTarget target) {

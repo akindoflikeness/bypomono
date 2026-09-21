@@ -140,10 +140,10 @@ void presets_walk_keys(App *a, Ui *ui) {
     bool walking = ui->focus == bar_id || ui->focus == list_id
                    || ui->focus == buttons_id;
     if (ui->in.key_pressed[SDL_SCANCODE_TAB]
-        && (walking || (a->presets_open && ui->focus == 0))) {
+        && (walking || (presets_showing(a) && ui->focus == 0))) {
         if (ui->focus == bar_id) {
             ui->focus = list_id;
-            a->presets_open = true;
+            presets_show(a, true);
         } else if (ui->focus == list_id) {
             ui->focus = buttons_id;
         } else {
@@ -157,65 +157,52 @@ void presets_walk_keys(App *a, Ui *ui) {
             && a->preset_button_at < PRESET_BUTTONS - 1)
             a->preset_button_at++;
     }
-    if (ui->focus == list_id && !a->presets_open) ui->focus = 0;
+    if (ui->focus == list_id && !presets_showing(a)) ui->focus = 0;
 }
 
-/* ---------- preset bar ---------- */
-
-static float preset_nav_width(FontId f) {
-    float arrows = fmaxf(text_width(f, "◁", 0.0f), text_width(f, "▷", 0.0f));
-    return roundf(arrows + 14.0f);
-}
+/* ---------- header ---------- */
 
 typedef struct {
-    Rct info, previous, name, next;
+    Rct previous, name, next, save;
 } PresetBarLayout;
 
-/* Keep the compact controls centred as one named group.  Drawing code below
-   uses these rectangles directly, so adding or reordering controls does not
-   depend on a right-edge cursor and reverse placement. */
-static PresetBarLayout preset_bar_layout(Rct area, FontId f, float cy) {
-    float nav_w = preset_nav_width(f);
-    float nav_h = roundf(text_row_height(f) + 8.0f);
-    float group_w = INFO_BUTTON_W + 3.0f * GROUP + 2.0f * nav_w
-                    + PRESET_NAME_W;
-    float x = roundf(rct_center(area).x - 0.5f * group_w);
-    PresetBarLayout layout = {
-        .info = rct_xywh(x, roundf(cy - 0.5f * INFO_BUTTON_W), INFO_BUTTON_W,
-                          INFO_BUTTON_W),
-    };
-    x = layout.info.x1 + GROUP;
-    layout.previous = rct_xywh(x, roundf(cy - 0.5f * nav_h), nav_w, nav_h);
-    x = layout.previous.x1 + GROUP;
-    layout.name = rct_xywh(x, roundf(cy - 10.5f), PRESET_NAME_W, 21.0f);
-    x = layout.name.x1 + GROUP;
-    layout.next = rct_xywh(x, roundf(cy - 0.5f * nav_h), nav_w, nav_h);
-    return layout;
+/* previous, name, next and save as one group centred on the header */
+static PresetBarLayout preset_bar_layout(Rct area, FontId f) {
+    float nav_w = roundf(text_width(f, "<", 0.0f) + 14.0f);
+    float save_w = roundf(text_width(f, "save", 0.0f) + 2.0f * GAP);
+    float group_w = 2.0f * nav_w + PRESET_NAME_W + save_w + 3.0f * GROUP;
+    Rct row = rct(roundf(rct_center(area).x - 0.5f * group_w),
+                  roundf(rct_center(area).y - 0.5f * ROW_H), area.x1,
+                  roundf(rct_center(area).y + 0.5f * ROW_H));
+    PresetBarLayout l;
+    l.previous = cut_left(&row, nav_w);
+    cut_left(&row, GROUP);
+    l.name = cut_left(&row, PRESET_NAME_W);
+    cut_left(&row, GROUP);
+    l.next = cut_left(&row, nav_w);
+    cut_left(&row, GROUP);
+    l.save = cut_left(&row, save_w);
+    return l;
 }
 
-void draw_preset_bar(App *a, Ui *ui, Rct r) {
+static void draw_preset_bar(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     FontId f12 = ui_font(12.0f);
     float row12 = text_row_height(f12);
-    float cy = 0.7f * (r.y0 + r.y1);
-    PresetBarLayout layout = preset_bar_layout(r, f12, cy);
+    PresetBarLayout layout = preset_bar_layout(r, f12);
+    float cy = rct_center(layout.name).y;
     UiId bar_id = ui_id("preset bar");
     UiId buttons_id = ui_id("preset buttons");
     bool on_buttons = ui->focus == buttons_id;
 
-    if (icon_button(ui, ui_id("info tab"), layout.info, ICON_COG, NULL, a->info_open,
-                    1.0f))
-        a->info_open = !a->info_open;
     {
-        if (pane_button(ui, ui_id("preset next"), layout.next, "▷", false)
+        if (pane_button(ui, ui_id("preset next"), layout.next, ">", false)
             || key_hit(a, ui, PB_NEXT))
             preset_cycle(a, true);
         if (on_buttons && a->preset_button_at == PB_NEXT) focus_ring(c, layout.next);
     }
 
     Rct bar = layout.name;
-    a->preset_bar_rect = bar;
-    a->have_preset_bar_rect = true;
 
     if (a->preset_searching) {
         if (a->preset_focus) {
@@ -227,7 +214,7 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
         if (fr.clicked) ui->focus = bar_id;
         /* a press in the pane keeps the query, so the row clicked is the row
            that was showing */
-        bool in_pane = a->presets_open && a->have_presets_pane_rect
+        bool in_pane = presets_showing(a) && a->have_presets_pane_rect
                        && rct_contains(a->presets_pane_rect, ui->in.mouse);
         if (ui->in.pressed && !rct_contains(bar, ui->in.mouse) && !in_pane) {
             if (ui->focus == bar_id) ui->focus = 0;
@@ -277,7 +264,7 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
             preset_qualified(&a->preset_loaded, label, sizeof label);
         else
             snprintf(label, sizeof label, "presets");
-        bool open = a->presets_open;
+        bool open = presets_showing(a);
         Resp br = ui_interact(ui, bar_id, bar, 0.0f);
         draw_rect_filled(c, bar, open ? PAPER : INK_BLACK);
         draw_rect_stroke(c, bar, br.hovered ? 2.0f : 1.0f, PAPER);
@@ -295,45 +282,62 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
                 a->preset_name.text[0] = '\0';
                 a->preset_searching = true;
                 a->preset_focus = true;
-                a->presets_open = true;
+                presets_show(a, true);
                 a->have_click_at = false;
             } else {
-                a->presets_open = !a->presets_open;
+                presets_show(a, !presets_showing(a));
                 a->preset_click_at = now;
                 a->have_click_at = true;
             }
         }
     }
     {
-        if (pane_button(ui, ui_id("preset prev"), layout.previous, "◁", false)
+        if (pane_button(ui, ui_id("preset prev"), layout.previous, "<", false)
             || key_hit(a, ui, PB_PREV))
             preset_cycle(a, false);
         if (on_buttons && a->preset_button_at == PB_PREV)
             focus_ring(c, layout.previous);
     }
+    /* save opens the name field; a name that matches nothing saves on Enter */
+    if (pane_button(ui, ui_id("preset save"), layout.save, "save", false)) {
+        a->preset_name.len = 0;
+        a->preset_name.text[0] = '\0';
+        focus_search(a, ui);
+        push_log(a, "type a name and press enter to save.");
+    }
+}
+
+void draw_header(App *a, Ui *ui, Rct r) {
+    Canvas *c = ui->canvas;
+    draw_rect_filled(c, cut_bottom(&r, 2.0f), PAPER);
+    r = rct_shrink(r, TIGHT);
+    FontId mark = ui_font(16.0f);
+    text_draw(c, mark, (P2){r.x0 + GAP, rct_center(r).y}, ALIGN_LEFT_CENTER,
+              "BLOW YOUR PHASE OFF", PAPER, 1.0f);
+    draw_preset_bar(a, ui, r);
+
+    Rct right = r;
+    cut_right(&right, GAP);
+    Rct drone = cut_right(&right, 90.0f);
+    drone = rct(drone.x0, rct_center(r).y - 0.5f * ROW_H, drone.x1,
+                rct_center(r).y + 0.5f * ROW_H);
+    if (chip_button(ui, ui_id("header drone"), drone, "DRONE", a->engaged))
+        app_set_engaged(a, !a->engaged);
+    cut_right(&right, GROUP);
+    Rct info = cut_right(&right, INFO_BUTTON_W);
+    info = rct(info.x0, rct_center(r).y - 0.5f * INFO_BUTTON_W, info.x1,
+               rct_center(r).y + 0.5f * INFO_BUTTON_W);
+    if (icon_button(ui, ui_id("info tab"), info, ICON_COG, NULL, a->info_open, 1.0f))
+        a->info_open = !a->info_open;
 }
 
 /* ---------- presets pane ---------- */
 
-void draw_presets_pane(App *a, Ui *ui) {
-    const float PANE_W = 340.0f;
+void draw_presets_pane(App *a, Ui *ui, Rct pane) {
     Canvas *c = ui->canvas;
     FontId f12 = ui_font(12.0f);
     FontId f11 = ui_font(11.0f);
-
-    float pane_w = fmaxf(fminf(PANE_W, DESIGN_W - 2.0f * GROUP), GROUP);
-    float pane_h = fmaxf(fminf(300.0f, DESIGN_H - GROUP), GROUP);
-    Rct anchor = a->have_preset_bar_rect ? a->preset_bar_rect
-                                         : rct(0, 0, DESIGN_W, DESIGN_H);
-    float right_limit = fmaxf(DESIGN_W - pane_w - GROUP, GROUP);
-    float px = clampf(rct_center(anchor).x - pane_w * 0.5f, GROUP, right_limit);
-    float pane_top_limit = fmaxf(DESIGN_H - FOOTER_LINE_H - pane_h, 0.0f);
-    float py = clampf(anchor.y1 + GROUP, 0.0f, pane_top_limit);
-    Rct pane = rct_xywh(roundf(px), roundf(py), pane_w, pane_h);
-
-    draw_rect_filled(c, pane, INK_BLACK);
-    draw_rect_stroke(c, pane, 2.0f, PAPER);
-    Rct inner = rct_shrink(pane, GAP);
+    Rct inner = pane;
     a->presets_pane_rect = pane;
     a->have_presets_pane_rect = true;
 
@@ -544,8 +548,9 @@ void draw_info_pane(App *a, Ui *ui) {
     float info_w = fmaxf(fminf(340.0f, DESIGN_W - 2.0f * GROUP), GROUP);
     float info_h = GAP + chrome_h + SECTION + rows_h + SECTION + 21.0f + 16.0f
                    + strip_h + SECTION + ports_h + GAP;
-    Rct pane = rct(roundf(DESIGN_W - GROUP - info_w), GROUP,
-                   roundf(DESIGN_W - GROUP), GROUP + roundf(info_h));
+    float top = HEADER_H + GROUP;
+    Rct pane = rct(roundf(DESIGN_W - GROUP - info_w), top,
+                   roundf(DESIGN_W - GROUP), top + roundf(info_h));
 
     draw_rect_filled(c, pane, INK_BLACK);
     draw_rect_stroke(c, pane, 2.0f, PAPER);

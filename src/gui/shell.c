@@ -1,0 +1,629 @@
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "app.h"
+
+/* ---------- shared app helpers ---------- */
+
+const char *const ROMAN[8] = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII"};
+
+const char *mode_name_of(RatioMode m) {
+    switch (m) {
+    case RATIO_HARMONIC: return "harmonic";
+    case RATIO_FIBONACCI: return "fibonacci";
+    case RATIO_GOLDEN: return "golden";
+    case RATIO_GOLDEN_MIRROR: return "mirror";
+    default: return "plastic";
+    }
+}
+
+int algorithm_index_of(const Patch *p) {
+    for (int i = 0; i < 8; i++)
+        if (ALGORITHMS[i] == p->algorithm) return i;
+    return 0;
+}
+
+void app_set_algorithm(App *a, int idx) {
+    if (idx == algorithm_index_of(&a->shadow)) return;
+    /* The graph changes here; the five oscillators do not. In particular,
+       a carrier becoming a modulator (or vice versa) keeps its ratio and
+       level so the topology can be auditioned against a stable palette. */
+    a->shadow.algorithm = ALGORITHMS[idx];
+    Event ev = {.kind = EV_SET_PATCH, .u.patch = a->shadow};
+    app_send(a, ev);
+    Compiled compiled = compile(a->shadow.algorithm);
+    char glyphs[NUM_NODES + 1];
+    algorithm_to_glyphs(a->shadow.algorithm, glyphs);
+    unsigned max_depth = 0;
+    for (int i = 0; i < NUM_OPS; i++)
+        if (compiled.depth[i] > max_depth) max_depth = compiled.depth[i];
+    push_log(a,
+             "algorithm %s compiled (%s). carriers: %u. max depth: %u. "
+             "feedback on op %d at depth %u.",
+             ROMAN[idx], glyphs, (unsigned)compiled.carrier_count, max_depth,
+             compiled.feedback_op + 1,
+             (unsigned)compiled.depth[compiled.feedback_op]);
+}
+
+bool press_on(const Ui *ui, Rct r) {
+    return ui->in.pressed && ui->in.mouse_in_window
+           && rct_contains(r, ui->in.mouse);
+}
+
+void app_set_engaged(App *a, bool on) {
+    if (a->engaged == on) return;
+    a->engaged = on;
+    Event ev = {.kind = EV_ENGAGE, .u.flag = on};
+    app_send(a, ev);
+    if (on)
+        push_log(a, "drone on. it resumes at %.1f hz.", a->drone_hz);
+    else
+        push_log(a, "drone off. the shell keeps breathing in silence.");
+}
+
+/* ---------- shell / sky constants ---------- */
+
+#define SHELL_WHORLS 5
+#define SHELL_GROWTH 2.0f
+#define SHELL_TURNS 5.0f
+#define SHELL_SPAN_CAP 0.35f
+#define SHELL_RIB_MAX 3.0f
+#define ENGRAVE_REACH_MIN 0.30f
+#define ENGRAVE_REACH_RANGE 0.45f
+#define SHELL_RIB_SWEEP 0.55f
+#define SHELL_RIB_WAVE 0.22f
+#define SHELL_RIB_INNER 2.0f
+#define SUTURE_WAVE 0.035f
+#define SUTURE_SPEED 0.35f
+#define SUTURE_CYCLES_OPEN 21.0f
+#define SUTURE_CYCLES_DAMPED 5.0f
+#define RIPPLE_ALONG_OPEN 3.0f
+#define RIPPLE_ALONG_DAMPED 0.8f
+#define ECHO_MAX 2.0f
+#define ECHO_STEP 0.17f
+#define GHOST_MAX 5.0f
+#define GHOST_GAIN 0.92f
+#define RIPPLE_AMP 0.60f
+#define RIPPLE_WRAP 2.0f
+#define RIPPLE_SPEED 0.9f
+#define AGITATE_SPEED 2.0f
+#define SHELL_TREMBLE_PX 2.0f
+#define SHELL_SEIZE TAU_F
+#define SCALE_MIN 0.55f
+#define SCALE_MAX 1.45f
+#define SCALE_SMOOTH_S 1.8f
+#define UMBILICUS_MAX 0.12f
+#define INDEX_SMOOTH_S 0.6f
+#define SHELL_MIN_PX 2.5f
+#define SUTURE_STEP_PX 3.0f
+#define SHELL_FILL 0.97f
+#define ROCK_PERIOD_S 13.0
+#define ROCK_SWAY 0.060f
+#define ROCK_SPIN_S 377.0f
+#define ROCK_TILT 0.075f
+#define ROCK_TILT_2 0.34f
+#define DREAD_SMOOTH_S 0.9f
+#define AGITATE_RISE_S 20.0f
+#define AGITATE_FALL_S 45.0f
+#define STAR_COUNT 170
+#define SKY_DRIFT 0.0045f
+#define SKY_DRIFT_ANGLE 2.3999632f
+#define SKY_WOBBLE 0.010f
+#define SKY_CURVE 0.09f
+#define SKY_CURVE_PERIOD_S 89.0
+#define SKY_LENS 0.055f
+#define SKY_LENS_MAX 0.40f
+#define SKY_WARP 0.014f
+#define SKY_EDGE 0.24f
+#define SKY_SHIMMER_DUTY 0.34f
+#define EYE_TRACK 0.34f
+#define CULL_MARGIN 1.15f
+#define TAU_D 6.283185307179586476925286766559
+
+static const float BAYER[4][4] = {
+    {0.0f / 16.0f, 8.0f / 16.0f, 2.0f / 16.0f, 10.0f / 16.0f},
+    {12.0f / 16.0f, 4.0f / 16.0f, 14.0f / 16.0f, 6.0f / 16.0f},
+    {3.0f / 16.0f, 11.0f / 16.0f, 1.0f / 16.0f, 9.0f / 16.0f},
+    {15.0f / 16.0f, 7.0f / 16.0f, 13.0f / 16.0f, 5.0f / 16.0f},
+};
+
+/* ---------- pre-layout integrators ---------- */
+
+static float wrap_tau(float x) {
+    x = fmodf(x, TAU_F);
+    if (x < 0.0f) x += TAU_F;
+    return x;
+}
+
+static float scale_for(float master) {
+    return SCALE_MIN + (SCALE_MAX - SCALE_MIN) * clampf(master, 0.0f, 1.0f);
+}
+
+static float integrity(const App *a) {
+    return 100.0f * (1.0f - fmaxf(a->shadow.rip, a->shadow_verb.haunt));
+}
+
+static void update_dread(App *a) {
+    float in = integrity(a);
+    switch (a->dread) {
+    case DREAD_NORMAL:
+        if (in < 47.5f) a->dread = DREAD_LOW;
+        break;
+    case DREAD_LOW:
+        if (in > 52.5f) a->dread = DREAD_NORMAL;
+        else if (in < 12.5f) a->dread = DREAD_CRITICAL;
+        break;
+    case DREAD_CRITICAL:
+        if (in > 17.5f) a->dread = DREAD_LOW;
+        break;
+    }
+}
+
+void shell_prelayout(App *a, Ui *ui) {
+    float dt = clampf(ui->dt, 0.0f, 0.1f);
+    float rate = 1.0f + AGITATE_SPEED * clampf(a->shadow.rip, 0.0f, 1.0f);
+    a->ripple_phase = wrap_tau(a->ripple_phase + dt * RIPPLE_SPEED * rate);
+    a->suture_phase = wrap_tau(a->suture_phase + dt * SUTURE_SPEED * rate);
+    float k = 1.0f - expf(-dt / SCALE_SMOOTH_S);
+    a->shell_scale += (scale_for(a->shadow.master_level) - a->shell_scale) * k;
+    float scale = fmaxf(a->shell_scale, 0.05f);
+    for (int i = 0; i < 3; i++) {
+        float r = (float)(TAU_D / ROCK_PERIOD_S) * powi_f(PHI, i) / scale;
+        a->rock_phase[i] = wrap_tau(a->rock_phase[i] + dt * r);
+    }
+    a->spin = wrap_tau(a->spin + dt * (TAU_F / ROCK_SPIN_S) / scale);
+    float ki = 1.0f - expf(-dt / INDEX_SMOOTH_S);
+    a->index_smooth +=
+        (clampf(a->shadow.index, 0.0f, 1.0f) - a->index_smooth) * ki;
+    update_dread(a);
+    float kd = 1.0f - expf(-dt / DREAD_SMOOTH_S);
+    float target = a->dread == DREAD_CRITICAL ? 1.0f : 0.0f;
+    a->dread_level += (target - a->dread_level) * kd;
+    float subversion =
+        clampf(fmaxf(a->shadow.rip, a->shadow_verb.haunt), 0.0f, 1.0f);
+    a->agitation = clampf(a->agitation
+                              + dt * (subversion / AGITATE_RISE_S
+                                      - a->agitation / AGITATE_FALL_S),
+                          0.0f, 1.0f);
+}
+
+/* ---------- shell geometry ---------- */
+
+typedef struct {
+    P2 pivot, pole;
+    float tilt, max_r;
+} ShellPose;
+
+typedef struct {
+    float suture_ph, ripple_ph, damp;
+    uint32_t echoes, ghosts;
+    float ghost_spread, charge, index, eye_open;
+    RatioMode ratio_mode;
+    float level[NUM_OPS];
+    float grown, stipple;
+} ShellDrive;
+
+static float shell_unit_r(float theta, float ph, float cycles) {
+    float theta_max = SHELL_TURNS * TAU_F;
+    return powf(SHELL_GROWTH, (theta - theta_max) / TAU_F)
+           * (1.0f + SUTURE_WAVE * sinf(theta * cycles + ph));
+}
+
+static void shell_unit_bounds(P2 *lo_out, P2 *hi_out) {
+    static bool init;
+    static P2 lo, hi;
+    if (!init) {
+        float theta_max = SHELL_TURNS * TAU_F;
+        lo = (P2){3.4e38f, 3.4e38f};
+        hi = (P2){-3.4e38f, -3.4e38f};
+        for (int k = 0; k <= 720; k++) {
+            float theta = theta_max * (float)k / 720.0f;
+            float r = powf(SHELL_GROWTH, (theta - theta_max) / TAU_F)
+                      * (1.0f + SUTURE_WAVE);
+            P2 p = {cosf(theta) * r, sinf(theta) * r};
+            lo.x = fminf(lo.x, p.x);
+            lo.y = fminf(lo.y, p.y);
+            hi.x = fmaxf(hi.x, p.x);
+            hi.y = fmaxf(hi.y, p.y);
+        }
+        init = true;
+    }
+    *lo_out = lo;
+    *hi_out = hi;
+}
+
+static float shell_fit_r(float w, float h) {
+    P2 lo, hi;
+    shell_unit_bounds(&lo, &hi);
+    P2 span = {hi.x - lo.x, hi.y - lo.y};
+    float fit = fminf(w / span.x, h / span.y) * SHELL_FILL;
+    fit = fmaxf(fit, 1.0f);
+    /* SHELL_REF_STAGE = 348 x 441 */
+    float ref = fminf(348.0f / span.x, 441.0f / span.y) * SHELL_FILL;
+    ref = fmaxf(ref, 1.0f);
+    return fmaxf(fit, ref);
+}
+
+float shell_tremble(const App *a) {
+    return ((float)(a->frame_count / 2 % 3) - 1.0f) * a->dread_level;
+}
+
+static ShellPose shell_pose(const App *a, Rct rect) {
+    float p0 = a->rock_phase[0], p1 = a->rock_phase[1], p2 = a->rock_phase[2];
+    float w1 = sinf(p0);
+    float w2 = sinf(p1);
+    float tilt = (sinf(p1 + PI_F / 5.0f) + ROCK_TILT_2 * sinf(p2))
+                     / (1.0f + ROCK_TILT_2) * ROCK_TILT
+                 + a->spin;
+
+    float probe_r = shell_fit_r(rct_w(rect), rct_h(rect));
+    P2 lo, hi;
+    shell_unit_bounds(&lo, &hi);
+    float s = a->shell_scale;
+    /* charge is identically 1: charge_hold() == 0, so no lunge */
+    P2 sway = {w1 * probe_r * s * s * ROCK_SWAY,
+               w2 * probe_r * s * s * ROCK_SWAY};
+    P2 half = {(hi.x - lo.x) * 0.5f * probe_r, (hi.y - lo.y) * 0.5f * probe_r};
+    float swing = sinf(ROCK_TILT);
+    P2 headroom = {half.y * swing + SHELL_TREMBLE_PX, half.x * swing};
+    P2 stutter = {shell_tremble(a) * SHELL_TREMBLE_PX, 0.0f};
+    float fitted_r = shell_fit_r(rct_w(rect) - 2.0f * headroom.x,
+                                 rct_h(rect) - 2.0f * headroom.y);
+    float max_r = fitted_r * s;
+    P2 centre = rct_center(rect);
+    P2 pole = {centre.x - (lo.x + hi.x) * 0.5f * max_r,
+               centre.y - (lo.y + hi.y) * 0.5f * max_r};
+    ShellPose out;
+    out.pivot = (P2){centre.x + sway.x + stutter.x, centre.y + sway.y + stutter.y};
+    out.pole = (P2){pole.x + sway.x + stutter.x, pole.y + sway.y + stutter.y};
+    out.tilt = tilt;
+    out.max_r = max_r;
+    return out;
+}
+
+static ShellDrive shell_drive(const App *a) {
+    float seize = 0.0f;
+    if (a->dread_level > 0.001f) {
+        uint64_t h = (a->frame_count * 2654435761ull) % 10007ull;
+        seize = ((float)h / 10007.0f - 0.5f) * SHELL_SEIZE * a->dread_level;
+    }
+    ShellDrive d;
+    d.suture_ph = a->suture_phase + seize;
+    d.ripple_ph = a->ripple_phase + seize;
+    d.damp = clampf(a->shadow_verb.damp, 0.0f, 1.0f);
+    d.echoes = (uint32_t)roundf(clampf(a->shadow.feedback, 0.0f, 1.0f) * ECHO_MAX);
+    d.ghosts = (uint32_t)roundf(clampf(a->shadow_verb.haunt, 0.0f, 1.0f) * GHOST_MAX);
+    d.ghost_spread = 1.0f;
+    d.charge = 1.0f;
+    d.index = a->index_smooth;
+    d.eye_open = 0.0f;
+    d.ratio_mode = a->shadow.ratio_mode;
+    for (int i = 0; i < NUM_OPS; i++) d.level[i] = a->env[i];
+    d.grown = 1.0f;
+    d.stipple = 0.0f;
+    return d;
+}
+
+static void chambers_for(RatioMode mode, uint32_t out[SHELL_WHORLS]) {
+    static const uint32_t T[RATIO_MODE_COUNT][SHELL_WHORLS] = {
+        {30, 24, 18, 12, 6}, {34, 21, 13, 8, 5}, {29, 18, 11, 7, 4},
+        {4, 7, 11, 18, 29},  {28, 21, 16, 12, 9},
+    };
+    int m = (int)mode;
+    if (m < 0 || m >= RATIO_MODE_COUNT) m = 0;
+    memcpy(out, T[m], sizeof(uint32_t) * SHELL_WHORLS);
+}
+
+/* ---------- the eye ---------- */
+
+static void paint_eye(const App *a, Canvas *c, P2 pole, float eye_r, float open) {
+    if (open <= 0.01f || eye_r < 2.0f) return;
+    P2 look = {0.0f, 0.0f};
+    P2 d = {a->pointer.x - pole.x, a->pointer.y - pole.y};
+    float n = sqrtf(d.x * d.x + d.y * d.y);
+    if (n > 1.0f) {
+        look.x = d.x / n * eye_r * EYE_TRACK * open;
+        look.y = d.y / n * eye_r * EYE_TRACK * open;
+    }
+    P2 ce = {pole.x + look.x, pole.y + look.y};
+    float rim = eye_r * 2.2f;
+    float cell = 2.0f;
+    int steps = (int)ceilf(rim * 2.0f / cell);
+    if (steps < 1) steps = 1;
+    for (int iy = 0; iy < steps; iy++) {
+        for (int ix = 0; ix < steps; ix++) {
+            P2 off = {(float)ix * cell - rim, (float)iy * cell - rim};
+            float dd = sqrtf(off.x * off.x + off.y * off.y);
+            if (dd < eye_r || dd > rim) continue;
+            float k = 1.0f - (dd - eye_r) / (rim - eye_r);
+            if (k * k * open > BAYER[iy & 3][ix & 3])
+                draw_rect_filled(c,
+                                 rct_xywh(ce.x + off.x, ce.y + off.y,
+                                          cell - 1.0f, cell - 1.0f),
+                                 PAPER);
+        }
+    }
+    dither_circle_ink(c, ce, eye_r, open, 2.0f, INK_BLACK);
+}
+
+/* ---------- the ammonite ---------- */
+
+typedef struct {
+    Canvas *c;
+    P2 pole;
+    float tilt, max_r, suture_ph, cycles, along, ripple_clock, stipple;
+    uint32_t echoes;
+} MonoCtx;
+
+static float mc_r_at(const MonoCtx *m, float t) {
+    return m->max_r * shell_unit_r(t, m->suture_ph, m->cycles);
+}
+
+static P2 mc_at(const MonoCtx *m, float t, float r) {
+    float a = t + m->tilt;
+    return (P2){roundf(m->pole.x + cosf(a) * r),
+                roundf(m->pole.y + sinf(a) * r)};
+}
+
+static void mc_line(const MonoCtx *m, const P2 *pts, int n, float w,
+                    uint64_t seed) {
+    if (n < 2) return;
+    if (m->stipple <= 0.001f) {
+        draw_polyline(m->c, pts, (size_t)n, w, PAPER);
+        return;
+    }
+    for (int k = 0; k < n - 1; k++) {
+        uint64_t h = seed * 0x9E3779B97F4A7C15ull
+                     ^ (uint64_t)k * 0xC2B2AE3D27D4EB4Full;
+        h ^= h >> 29;
+        h *= 0xBF58476D1CE4E5B9ull;
+        h ^= h >> 32;
+        if ((float)(h % 100000ull) / 100000.0f >= m->stipple)
+            draw_line(m->c, pts[k], pts[k + 1], w, PAPER);
+    }
+}
+
+static float rib_offset(float u, float span, float waviness, float along,
+                        float phase) {
+    float s = fminf(span, SHELL_SPAN_CAP);
+    float lean = SHELL_RIB_SWEEP * s * (1.0f - u);
+    float wave = SHELL_RIB_WAVE * s * waviness * sinf(u * TAU_F);
+    float ripple =
+        RIPPLE_AMP * s * sinf(u * PI_F * along + phase) * sinf(u * PI_F);
+    return -lean + wave + ripple;
+}
+
+static void mc_rib(const MonoCtx *m, float t, float r_inner, float r_outer,
+                   float w, float span, float waviness, uint64_t seed) {
+    float ph = m->ripple_clock + t * RIPPLE_WRAP * (r_outer / m->max_r);
+    const int n = 14;
+    P2 pts[15];
+    for (int k = 0; k <= n; k++) {
+        float u = (float)k / (float)n;
+        pts[k] = mc_at(m, t + rib_offset(u, span, waviness, m->along, ph),
+                       r_inner + (r_outer - r_inner) * u);
+    }
+    mc_line(m, pts, n + 1, w, seed);
+    for (uint32_t e = 1; e <= m->echoes; e++) {
+        float off = ECHO_STEP * fminf(span, SHELL_SPAN_CAP) * (float)e;
+        P2 ep[15];
+        for (int k = 0; k <= n; k++) {
+            float u = (float)k / (float)n;
+            ep[k] = mc_at(m, t + rib_offset(u, span, waviness, m->along, ph) + off,
+                          r_inner + (r_outer - r_inner) * u);
+        }
+        for (int k = 0; k + 1 <= n; k += 2)
+            draw_line(m->c, ep[k], ep[k + 1], 1.0f, PAPER);
+    }
+}
+
+#define RUN_CAP 8192
+
+static void draw_monolith(const App *a, Canvas *c, Rct rect,
+                          const ShellPose *pose, const ShellDrive *drive) {
+    if (fminf(rct_w(rect), rct_h(rect)) < 16.0f) return;
+    float theta_max = SHELL_TURNS * TAU_F;
+    float damp = drive->damp;
+    MonoCtx m;
+    m.c = c;
+    m.pole = pose->pole;
+    m.tilt = pose->tilt;
+    m.max_r = pose->max_r;
+    m.suture_ph = drive->suture_ph;
+    m.cycles = SUTURE_CYCLES_OPEN + (SUTURE_CYCLES_DAMPED - SUTURE_CYCLES_OPEN) * damp;
+    m.along = RIPPLE_ALONG_OPEN + (RIPPLE_ALONG_DAMPED - RIPPLE_ALONG_OPEN) * damp;
+    m.ripple_clock = drive->ripple_ph;
+    m.stipple = clampf(drive->stipple, 0.0f, 1.0f);
+    m.echoes = drive->echoes;
+
+    float bore_r = m.max_r / (1.0f + (drive->charge - 1.0f));
+    float eye = fminf(SHELL_MIN_PX + bore_r * UMBILICUS_MAX * (1.0f - drive->index),
+                      m.max_r * 0.9f);
+    paint_eye(a, c, m.pole, eye, drive->eye_open);
+
+    Rct clip = canvas_clip(c);
+    float dx = fmaxf(fabsf(clip.x0 - m.pole.x), fabsf(clip.x1 - m.pole.x));
+    float dy = fmaxf(fabsf(clip.y0 - m.pole.y), fabsf(clip.y1 - m.pole.y));
+    float far = sqrtf(dx * dx + dy * dy) * CULL_MARGIN + 12.0f;
+    float t_clip;
+    if (far >= m.max_r || !isfinite(far))
+        t_clip = theta_max;
+    else
+        t_clip = clampf(theta_max + TAU_F * logf(far / m.max_r) / logf(SHELL_GROWTH),
+                        0.0f, theta_max);
+    float t_far = fminf(t_clip, theta_max * clampf(drive->grown, 0.0f, 1.0f));
+
+    static P2 run[RUN_CAP];
+    int run_len = 0;
+    bool run_heavy = false;
+    uint64_t seam = 0;
+    float t = 0.0f;
+    while (t <= t_far) {
+        float r = mc_r_at(&m, t);
+        bool heavy = t > theta_max - TAU_F;
+        if (r < eye || heavy != run_heavy) {
+            mc_line(&m, run, run_len, run_heavy ? 2.0f : 1.0f, seam);
+            run_len = 0;
+            seam++;
+            run_heavy = heavy;
+        }
+        if (r >= eye) {
+            if (run_len == RUN_CAP) {
+                mc_line(&m, run, run_len, run_heavy ? 2.0f : 1.0f, seam);
+                run[0] = run[run_len - 1];
+                run_len = 1;
+            }
+            run[run_len++] = mc_at(&m, t, r);
+        }
+        t += clampf(SUTURE_STEP_PX / fmaxf(r, 1.0f), 0.004f, 0.30f);
+    }
+    mc_line(&m, run, run_len, run_heavy ? 2.0f : 1.0f, seam);
+
+    for (uint32_t p = 1; p <= drive->ghosts; p++) {
+        float turn = (float)p * PI_F / 5.0f * drive->ghost_spread;
+        float step = SUTURE_STEP_PX / powi_f(GHOST_GAIN, (int)p * 4);
+        float gt = 0.0f;
+        while (gt <= t_far) {
+            float r = mc_r_at(&m, gt);
+            if (r >= eye) {
+                float ang = gt + m.tilt + turn;
+                draw_dot(c,
+                         (P2){roundf(m.pole.x + cosf(ang) * r),
+                              roundf(m.pole.y + sinf(ang) * r)},
+                         PAPER);
+            }
+            gt += clampf(step / fmaxf(r, 1.0f), 0.004f, 0.30f);
+        }
+    }
+
+    uint32_t chamber_counts[SHELL_WHORLS];
+    chambers_for(drive->ratio_mode, chamber_counts);
+    uint32_t chamber_index = 0;
+    for (int whorl = 0; whorl < SHELL_WHORLS; whorl++) {
+        uint32_t chambers = chamber_counts[whorl];
+        float outer_t = theta_max - (float)whorl * TAU_F;
+        if (outer_t - TAU_F > t_far) {
+            chamber_index += chambers;
+            continue;
+        }
+        float span = TAU_F / (float)chambers;
+        for (uint32_t j = 0; j < chambers; j++) {
+            float ct = outer_t - (float)j * span;
+            int op = (int)(chamber_index % NUM_OPS);
+            chamber_index++;
+            if (ct < 0.0f) continue;
+            float r_in = fmaxf(mc_r_at(&m, ct - TAU_F), eye);
+            float r_out = mc_r_at(&m, ct);
+            if (r_out < eye + SHELL_MIN_PX) continue;
+            mc_rib(&m, ct, fmaxf(r_in, 1.0f), r_out, 1.0f, span, 1.0f,
+                   0x5E00ull + chamber_index);
+            float level = fminf(drive->level[op], 1.0f);
+            uint32_t ribs = 1 + (uint32_t)roundf(level * SHELL_RIB_MAX);
+            while (ribs > 1 && span * r_out / (float)ribs < 3.0f) ribs--;
+            float reach = ENGRAVE_REACH_MIN + ENGRAVE_REACH_RANGE * level;
+            for (uint32_t mm = 1; mm < ribs; mm++) {
+                float rt = ct - span * (float)mm / (float)ribs;
+                if (rt < 0.0f) continue;
+                float ri = fmaxf(mc_r_at(&m, rt - TAU_F), eye);
+                float ro = mc_r_at(&m, rt);
+                if (ro < eye + SHELL_MIN_PX) continue;
+                mc_rib(&m, rt, ro - (ro - ri) * reach, ro, 1.0f, span,
+                       SHELL_RIB_INNER,
+                       0xB100ull + (uint64_t)chamber_index * 8 + mm);
+            }
+        }
+    }
+
+    if (theta_max - TAU_F <= t_far)
+        mc_rib(&m, theta_max, mc_r_at(&m, theta_max - TAU_F),
+               mc_r_at(&m, theta_max), 2.0f,
+               TAU_F / (float)chamber_counts[0], 1.0f, 0xA9E9ull);
+}
+
+/* ---------- starfield ---------- */
+
+static void draw_starfield(const App *a, Canvas *c, Rct rect,
+                           const ShellPose *pose) {
+    double t = a->last_frame_time;
+    float tf = (float)t;
+    float sw = rct_w(rect), sh = rct_h(rect);
+    float curve = SKY_CURVE * (float)sin(t / SKY_CURVE_PERIOD_S * TAU_D);
+    float drift_x = cosf(SKY_DRIFT_ANGLE), drift_y = sinf(SKY_DRIFT_ANGLE);
+    P2 centre = rct_center(rect);
+
+    for (int i = 0; i < STAR_COUNT; i++) {
+        uint64_t h = (uint64_t)i * 0x9E3779B97F4A7C15ull;
+        uint64_t kind = (h >> 5) & 31;
+        float depth = (float)((h >> 21) & 3) / 3.0f;
+        float near = 0.35f + 0.65f * depth;
+        double phase = (double)((h >> 41) & 0xFFFF) / 65535.0 * TAU_D;
+
+        float fx = fract_pos((float)((h >> 11) & 0xFFFF) / 65535.0f
+                             + tf * SKY_DRIFT * near * drift_x);
+        float fy = fract_pos((float)((h >> 27) & 0xFFFF) / 65535.0f
+                             + tf * SKY_DRIFT * near * drift_y);
+        float edge = fmaxf(fminf(1.0f - fabsf(fx - 0.5f) * 2.0f,
+                                 1.0f - fabsf(fy - 0.5f) * 2.0f),
+                           0.0f);
+        edge = clampf(1.0f - edge / SKY_EDGE, 0.0f, 1.0f);
+
+        fx += (float)sin(t / 34.0 * TAU_D + phase) * SKY_WOBBLE * near;
+        fy += (float)sin(t / 21.0 * TAU_D + phase) * SKY_WOBBLE * near;
+
+        P2 u = {fx - 0.5f, fy - 0.5f};
+        float lensq = u.x * u.x + u.y * u.y;
+        u.x *= 1.0f + curve * lensq;
+        u.y *= 1.0f + curve * lensq;
+
+        float nx = u.x * 6.283f, ny = u.y * 6.283f;
+        u.x += sinf(nx * 1.0f + (float)(t * 0.11)) * cosf(ny * 1.3f - (float)(t * 0.07))
+               * SKY_WARP;
+        u.y += sinf(ny * 0.8f - (float)(t * 0.09)) * cosf(nx * 1.7f + (float)(t * 0.13))
+               * SKY_WARP;
+
+        P2 p = {centre.x + u.x * sw, centre.y + u.y * sh};
+
+        P2 off = {p.x - pose->pivot.x, p.y - pose->pivot.y};
+        float d = sqrtf(off.x * off.x + off.y * off.y);
+        if (d > 0.5f) {
+            float push = fminf(SKY_LENS * pose->max_r * pose->max_r / d,
+                               SKY_LENS_MAX * pose->max_r);
+            p.x += off.x / d * push;
+            p.y += off.y / d * push;
+        }
+
+        if (edge > 0.0f) {
+            double rate = 1.3 + 1.7 * (double)((h >> 17) & 15) / 15.0;
+            float blink = 0.5f + 0.5f * (float)sin(t * rate + phase);
+            if (blink < edge * SKY_SHIMMER_DUTY) continue;
+        }
+
+        p.x = roundf(p.x);
+        p.y = roundf(p.y);
+        if (kind == 0) {
+            draw_rect_filled(c, rct(p.x - 1.0f, p.y - 1.0f, p.x + 1.0f, p.y + 1.0f),
+                             PAPER);
+            for (int di = 0; di < 2; di++) {
+                float dd = di == 0 ? 2.0f : 3.0f;
+                draw_dot(c, (P2){p.x + dd, p.y}, PAPER);
+                draw_dot(c, (P2){p.x - dd, p.y}, PAPER);
+                draw_dot(c, (P2){p.x, p.y + dd}, PAPER);
+                draw_dot(c, (P2){p.x, p.y - dd}, PAPER);
+            }
+        } else if (kind <= 5) {
+            draw_rect_filled(c, rct(p.x - 1.0f, p.y - 1.0f, p.x + 1.0f, p.y + 1.0f),
+                             PAPER);
+        } else {
+            draw_dot(c, p, PAPER);
+        }
+    }
+}
+
+void draw_stage(App *a, Ui *ui, Rct r) {
+    Rct stage = rct_shrink(r, 4.0f);
+    ShellPose pose = shell_pose(a, stage);
+    draw_starfield(a, ui->canvas, stage, &pose);
+    ShellDrive drive = shell_drive(a);
+    draw_monolith(a, ui->canvas, stage, &pose, &drive);
+}

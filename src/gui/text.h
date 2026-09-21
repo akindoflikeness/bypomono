@@ -3,17 +3,15 @@
 
 #include "canvas.h"
 
-/* the three faces the program draws with: UI text, readouts, and a
-   fallback with wide glyph coverage for symbols the other two lack */
+/* the two faces the program draws with: all text, and a fallback with wide
+   glyph coverage for symbols the first lacks */
 enum {
     FACE_BYPOSERIF = 0,
     FACE_UNIFONTEXMONO,
-    FACE_EUROPEAN_TELETEXT,
     FACE_COUNT
 };
 
 #define UI_FACE FACE_BYPOSERIF
-#define READOUT_FACE FACE_EUROPEAN_TELETEXT
 #define FALLBACK_FACE FACE_UNIFONTEXMONO
 
 typedef struct {
@@ -36,8 +34,7 @@ void text_shutdown(void);
 
 /* quantise a wanted size to the face's native pixel grid (ppp = 1 here) */
 float grid_size(float want, float native);
-FontId ui_font(float want);      /* UI_FACE, nearest drawn size */
-FontId readout_font(float want); /* READOUT_FACE, native 16 */
+FontId ui_font(float want);      /* UI_FACE, one drawn size above want */
 float font_native(int face);     /* 0 if the face is not grid-snapped */
 
 float text_width(FontId f, const char *s, float letter_spacing);

@@ -26,7 +26,21 @@ void focus_console_drop(App *a) {
     a->console_input.text[0] = '\0';
 }
 
-bool focus_browsing(const App *a) { return a->presets_open; }
+/* the presets list is a display page; closing it goes back to the page
+   that was showing before */
+bool presets_showing(const App *a) { return a->display_tab == TAB_PRE; }
+
+void presets_show(App *a, bool on) {
+    if (on == presets_showing(a)) return;
+    if (on) {
+        a->display_back = a->display_tab;
+        a->display_tab = TAB_PRE;
+    } else {
+        a->display_tab = a->display_back == TAB_PRE ? TAB_SHELL : a->display_back;
+    }
+}
+
+bool focus_browsing(const App *a) { return presets_showing(a); }
 
 bool focus_highlighted(const App *a, PresetRef *out) {
     if (!a->have_selected) return false;

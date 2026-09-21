@@ -19,12 +19,6 @@ static float clamp01(float v) {
     return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }
 
-float tab_width(float available, float gap, int n) {
-    float nf = (float)(n < 1 ? 1 : n);
-    float w = floorf((available - gap * (nf - 1.0f)) / nf);
-    return w < 0.0f ? 0.0f : w;
-}
-
 void hard_rect(Canvas *c, Rct r, float width) {
     draw_rect_stroke(c, r, width, PAPER);
 }
@@ -86,7 +80,7 @@ FaderAct fader_track(Ui *ui, UiId id, Rct r, const char *label,
     }
     hard_rect(c, r, resp.hovered ? 2.0f : 1.0f);
     FontId lf = ui_font(FADER_TEXT);
-    FontId vf = readout_font(FADER_TEXT);
+    FontId vf = ui_font(FADER_TEXT);
     float cy = 0.5f * (inner.y0 + inner.y1);
     backed_text(c, (P2){inner.x0 + 4.0f, cy}, false, label, lf);
     backed_text(c, (P2){inner.x1 - 3.0f, cy}, true, value, vf);
@@ -105,95 +99,11 @@ FaderAct fader_track(Ui *ui, UiId id, Rct r, const char *label,
     return act;
 }
 
-/* prototypes carry no per-param default: FADER_RESET is a no-op in these
-   wrappers; call fader_track directly where reset-to-default is needed */
-bool fader(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
-           float hi) {
-    float span = fabsf(hi - lo);
-    if (span < FLT_EPSILON) span = FLT_EPSILON;
-    float t = clamp01((*v - lo) / span);
-    char value[32];
-    snprintf(value, sizeof value, "%.2f", (double)*v);
-    FaderAct act = fader_track(ui, id, r, label, value, t);
-    if (act.kind == FADER_SET) {
-        float next = lo + act.t * span;
-        if (next != *v) {
-            *v = next;
-            return true;
-        }
-    }
-    return false;
-}
-
-float log_position(float p, float lo, float hi) {
-    if (lo < 1e-6f) lo = 1e-6f;
-    float ratio = hi / lo;
-    if (ratio < 1.0f + FLT_EPSILON) ratio = 1.0f + FLT_EPSILON;
-    return lo * powf(ratio, clamp01(p));
-}
-
-float position_of_log(float v, float lo, float hi) {
-    if (lo < 1e-6f) lo = 1e-6f;
-    float ratio = hi / lo;
-    if (ratio < 1.0f + FLT_EPSILON) ratio = 1.0f + FLT_EPSILON;
-    float q = v / lo;
-    if (q < 1e-6f) q = 1e-6f;
-    return clamp01(logf(q) / logf(ratio));
-}
-
-bool fader_log(Ui *ui, UiId id, Rct r, const char *label, float *v, float lo,
-               float hi, const char *suffix) {
-    float t = position_of_log(*v, lo, hi);
-    char value[48];
-    snprintf(value, sizeof value, "%.2f%s", (double)*v, suffix ? suffix : "");
-    FaderAct act = fader_track(ui, id, r, label, value, t);
-    if (act.kind == FADER_SET) {
-        float next = log_position(act.t, lo, hi);
-        if (next != *v) {
-            *v = next;
-            return true;
-        }
-    }
-    return false;
-}
-
-bool fader_int(Ui *ui, UiId id, Rct r, const char *label, int *v, int lo,
-               int hi) {
-    float span = (float)(hi - lo < 1 ? 1 : hi - lo);
-    float t = clamp01((float)(*v - lo) / span);
-    char value[32];
-    snprintf(value, sizeof value, "%d", *v);
-    FaderAct act = fader_track(ui, id, r, label, value, t);
-    if (act.kind == FADER_SET) {
-        int next = (int)lroundf((float)lo + act.t * span);
-        if (next < lo) next = lo;
-        if (next > hi) next = hi;
-        if (next != *v) {
-            *v = next;
-            return true;
-        }
-    }
-    return false;
-}
-
 /* ---------- knobs ---------- */
 
 #define KNOB_A0 (0.75f * PI_F)
 #define KNOB_SWEEP (1.5f * PI_F)
 #define KNOB_TEXT 11.0f
-
-float env_time_at(float t, float lo) {
-    float floor = fmaxf(ENV_TIME_FLOOR, lo);
-    t = clamp01(t);
-    if (t <= 0.0f) return lo;
-    return floor * powf(ENV_TIME_MAX / floor, t);
-}
-
-float env_time_pos(float v, float lo) {
-    float floor = fmaxf(ENV_TIME_FLOOR, lo);
-    if (!(v > floor)) return 0.0f;
-    return clamp01(logf(v / floor) / logf(ENV_TIME_MAX / floor));
-}
 
 static P2 on_circle(P2 c, float r, float a) {
     return (P2){c.x + cosf(a) * r, c.y + sinf(a) * r};
@@ -422,13 +332,12 @@ static int utf8_count(const char *s) {
     return n;
 }
 
-static bool wave_tab(Ui *ui, UiId id, Rct r, const char *text, bool active) {
+static bool wave_tab(Ui *ui, UiId id, Rct r, FontId wf, const char *text,
+                     bool active) {
     uint8_t fill = active ? PAPER : INK_BLACK;
     uint8_t ink = active ? INK_BLACK : PAPER;
     Resp resp = ui_interact(ui, id, r, 0.0f);
     Canvas *c = ui->canvas;
-    FontId wf = ui_font(12.0f);
-    wf.px *= WAVE_SCALE;
     draw_rect_filled(c, r, fill);
     if (!active) hard_rect(c, r, 1.0f);
     float lift = ui_animate_bool(ui, id, resp.hovered, WAVE_EASE_S);
@@ -454,19 +363,46 @@ static bool wave_tab(Ui *ui, UiId id, Rct r, const char *text, bool active) {
     return resp.clicked;
 }
 
-int wave_tabs(Ui *ui, UiId id, Rct r, const char *const *labels, int n,
-              int active) {
-    float gap = CELL_GUTTER;
-    float w = tab_width(rct_w(r), gap, n);
-    int hit = -1;
-    float x = r.x0;
-    for (int i = 0; i < n; i++) {
-        UiId tid = id + (UiId)(i + 1) * 0x9E3779B97F4A7C15ULL;
-        Rct tr = rct(x, r.y0, x + w, r.y1);
-        if (wave_tab(ui, tid, tr, labels[i], i == active)) hit = i;
-        x += w + gap;
+static const float WAVE_SIZES[] = {12.0f * WAVE_SCALE, 12.0f, 11.0f};
+
+/* the largest wave-tab size whose widest label fits a tab w wide */
+static FontId wave_font(float w, const Tab *tabs, int n) {
+    for (size_t k = 0; k < sizeof WAVE_SIZES / sizeof WAVE_SIZES[0]; k++) {
+        FontId f = ui_font(WAVE_SIZES[k]);
+        bool fits = true;
+        for (int i = 0; i < n && fits; i++)
+            fits = text_width(f, tabs[i].label, WAVE_TRACKING) + 1.0f
+                       + 2.0f * SNUG <= w;
+        if (fits) return f;
     }
-    return hit;
+    return ui_font(WAVE_SIZES[sizeof WAVE_SIZES / sizeof WAVE_SIZES[0] - 1]);
+}
+
+static float tab_w(float available, int n) {
+    float nf = (float)(n < 1 ? 1 : n);
+    float w = floorf((available - GAP * (nf - 1.0f)) / nf);
+    return w < 0.0f ? 0.0f : w;
+}
+
+void tab_view(App *a, Ui *ui, const char *id, Rct r, const Tab *tabs, int n,
+              int *active) {
+    if (*active < 0 || *active >= n) *active = 0;
+    float w = tab_w(rct_w(r), n);
+    FontId f = wave_font(w, tabs, n);
+    Rct bar = cut_top(&r, text_row_height(f) + 2.0f * WAVE_AMP + 2.0f * SNUG);
+    cut_top(&r, GAP);
+    int hit = -1;
+    for (int i = 0; i < n; i++) {
+        Rct tr = rct_xywh(bar.x0 + (float)i * (w + GAP), bar.y0, w, rct_h(bar));
+        if (wave_tab(ui, ui_id_n(id, i), tr, f, tabs[i].label, i == *active))
+            hit = i;
+    }
+    if (hit >= 0) *active = hit;
+    Canvas *c = ui->canvas;
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, rct_intersect(saved, r));
+    tabs[*active].draw(a, ui, r);
+    canvas_set_clip(c, saved);
 }
 
 /* ---------- icons ---------- */
@@ -536,4 +472,67 @@ void draw_block_caret(Canvas *c, Ui *ui, FontId f, P2 text_pos,
     float y = roundf(text_pos.y);
     uint8_t ink = (bg == INK_BLACK) ? PAPER : INK_BLACK;
     draw_rect_filled(c, rct_xywh(x, y, roundf(w), h), ink);
+}
+
+/* ---------- table controls ---------- */
+
+static FaderAct param_track(App *a, Ui *ui, Rct r, ParamId id) {
+    char val[48];
+    param_text(a, id, val, sizeof val);
+    return fader_track(ui, ui_id_n("param", (int)id), r, PARAMS[id].label, val,
+                       param_pos(id, param_get(a, id)));
+}
+
+static bool param_apply(App *a, ParamId id, FaderAct act) {
+    float before = param_get(a, id);
+    if (act.kind == FADER_SET) param_set(a, id, param_at(id, act.t));
+    else if (act.kind == FADER_RESET) param_set(a, id, param_default(a, id));
+    if (param_get(a, id) == before) return false;
+    params_send(a, PARAMS[id].group);
+    return true;
+}
+
+bool param_fader(App *a, Ui *ui, Rct r, ParamId id) {
+    return param_apply(a, id, param_track(a, ui, r, id));
+}
+
+bool param_fader_veiled(App *a, Ui *ui, Rct r, ParamId id) {
+    FaderAct act = param_track(a, ui, r, id);
+    dither_rect_ink(ui->canvas, r, VEIL, 2.0f, INK_BLACK);
+    return act.kind != FADER_NONE;
+}
+
+bool param_knob(App *a, Ui *ui, Rct r, ParamId id, bool live) {
+    char val[48];
+    param_text(a, id, val, sizeof val);
+    FaderAct act = knob_track(ui, ui_id_n("param knob", (int)id), r,
+                              PARAMS[id].label, val,
+                              param_pos(id, param_get(a, id)));
+    if (!live) {
+        dither_rect_ink(ui->canvas, r, VEIL, 2.0f, INK_BLACK);
+        return false;
+    }
+    return param_apply(a, id, act);
+}
+
+int stepper(Ui *ui, UiId id, Rct r, const char *text, bool live) {
+    Resp resp = ui_interact(ui, id, r, 0.0f);
+    Canvas *c = ui->canvas;
+    FontId f = ui_font(12.0f);
+    float arrow = STEPPER_ARROW_W;
+    draw_rect_filled(c, r, INK_BLACK);
+    hard_rect(c, r, resp.hovered ? 2.0f : 1.0f);
+    float cy = 0.5f * (r.y0 + r.y1);
+    text_draw(c, f, (P2){r.x0 + 0.5f * arrow, cy}, ALIGN_CENTER_CENTER, "<",
+              PAPER, 0.0f);
+    text_draw(c, f, (P2){r.x1 - 0.5f * arrow, cy}, ALIGN_CENTER_CENTER, ">",
+              PAPER, 0.0f);
+    Rct mid = rct(r.x0 + arrow, r.y0, r.x1 - arrow, r.y1);
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, rct_intersect(saved, mid));
+    text_draw(c, f, rct_center(mid), ALIGN_CENTER_CENTER, text, PAPER, 0.0f);
+    canvas_set_clip(c, saved);
+    if (!live) dither_rect_ink(c, r, VEIL, 2.0f, INK_BLACK);
+    if (!resp.clicked || !live) return 0;
+    return resp.pointer.x < r.x0 + arrow ? -1 : 1;
 }

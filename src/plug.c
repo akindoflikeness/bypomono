@@ -452,7 +452,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     Stereo w = verb_process(&p->verb, frame);
     w = chandas_process(&p->chandas, w);
     Stereo limited = limiter_process(&p->limiter, w);
-    float l = limited.l, r = limited.r;
+    float l = flush_tiny(limited.l), r = flush_tiny(limited.r);
     e->l[e->base + n] = l;
     e->r[e->base + n] = r;
     App *gapp = e->gapp;

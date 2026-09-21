@@ -978,6 +978,12 @@ Session session_sanitize(Session s);
    instantly: a value written straight into a live signal is a click, and at
    modern speeds a glide short enough to feel immediate costs nothing. New
    parameters go through here rather than rolling their own. */
+/* A tail fading to silence passes through subnormal floats, which are slow
+   and which hosts reject as invalid output; anything this quiet is silence. */
+static inline float flush_tiny(float x) {
+    return fabsf(x) < 1e-20f ? 0.0f : x;
+}
+
 static inline float glide_k(float seconds, float sample_rate) {
     return 1.0f - expf(-1.0f / fmaxf(seconds * fmaxf(sample_rate, 1.0f), 1.0f));
 }

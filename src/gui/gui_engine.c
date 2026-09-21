@@ -245,7 +245,7 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     Stereo w = verb_process(&s->verb, frame);
     w = chandas_process(&s->chandas, w);
     Stereo limited = limiter_process(&s->limiter, w);
-    float l = limited.l, r = limited.r;
+    float l = flush_tiny(limited.l), r = flush_tiny(limited.r);
     s->decim++;
     s->peak_acc[0] = fmaxf(s->peak_acc[0], fabsf(l));
     s->peak_acc[1] = fmaxf(s->peak_acc[1], fabsf(r));

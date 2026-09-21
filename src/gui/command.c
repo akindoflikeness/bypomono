@@ -9,6 +9,9 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <unistd.h> /* rmdir; MinGW declares it through compat.h's <direct.h> */
+#endif
 
 #include "focus.h"
 

@@ -24,6 +24,7 @@ void test_pitch(void);
 void test_console(void);
 void test_mod(void);
 void test_layout(void);
+void test_notes(void);
 
 int main(void) {
     struct { const char *name; void (*fn)(void); } suites[] = {
@@ -41,6 +42,7 @@ int main(void) {
         {"console", test_console},
         {"layout", test_layout},
         {"mod", test_mod},
+        {"notes", test_notes},
     };
     for (size_t i = 0; i < sizeof suites / sizeof suites[0]; i++) {
         int before = test_failures;

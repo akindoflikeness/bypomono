@@ -10,6 +10,9 @@
 #define RIP_MAX_FB 0.9f
 #define FIELD_TO_INDEX 0.1f
 #define RIP_DAMP (1.0f / (PHI * PHI))
+/* A cleared line would otherwise take a new note's full-strength signal in
+   one sample and hand it to the carriers' phase a delay later as a click. */
+#define RIP_WAKE_S 0.006f
 /* Held-voice-only anti-click policy. This 20 ms floor clears the measured
    multi-operator steal seam; the player's glide setting can only make it
    longer, never turn it into a new pitch-control mode. */
@@ -30,6 +33,8 @@ static void rip_line_init(RipLine *r, float sample_rate, float hz) {
     r->rot_k = glide_k(GATE_GLIDE_S, sample_rate);
     r->lp = 0.0f;
     r->fb = 0.0f;
+    r->in_gain = 0.0f;
+    r->in_k = glide_k(RIP_WAKE_S, sample_rate);
 }
 
 static float rip_line_process(RipLine *r, float x) {
@@ -37,7 +42,8 @@ static float rip_line_process(RipLine *r, float x) {
     size_t read = (r->write + r->len - r->delay) % r->len;
     float y = phase_rotator_process(&r->rot, r->buf[read]);
     r->lp = y + RIP_DAMP * (r->lp - y);
-    r->buf[r->write] = x + r->lp * r->fb;
+    r->in_gain = glide_to(r->in_gain, 1.0f, r->in_k);
+    r->buf[r->write] = x * r->in_gain + r->lp * r->fb;
     r->write = (r->write + 1) % r->len;
     return r->lp;
 }
@@ -47,6 +53,7 @@ static void rip_line_clear(RipLine *r) {
     r->write = 0;
     phase_rotator_clear(&r->rot);
     r->lp = 0.0f;
+    r->in_gain = 0.0f;
 }
 
 void voice_init(Voice *v, float sample_rate, Patch patch) {

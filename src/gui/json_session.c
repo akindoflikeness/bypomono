@@ -356,7 +356,11 @@ static const char *const VERB_KEYS[] = {"mix",   "ghost", "decay",
 static const char *const MELODY_KEYS[] = {"enabled",       "tuning",
                                           "scale",         "root_midi",
                                           "range_degrees", "rate_hz",
-                                          "source"};
+                                          "source",        "sync",
+                                          "division"};
+static const char *const PITCH_KEYS[] = {"enabled",  "division", "length",
+                                         "root_midi", "snap",    "gate_len",
+                                         "pitches",  "gates",    "velocities"};
 static const char *const CHANDAS_KEYS[] = {
     "enabled", "mix",    "sync", "division",  "rate_hz",
     "spread",  "size",   "warp", "dimension", "tail"};
@@ -365,17 +369,25 @@ static const char *const SESSION_KEYS[] = {
     "patch",   "verb",    "melody",    "drone_hz",  "chandas",
     "tempo_bpm", "warmth", "harmony",  "release_s", "drone",
     "attack_s",  "decay_s", "sustain", "mods", "limiter_enabled",
-    "limiter_ceiling_db"};
+    "limiter_ceiling_db", "pitch"};
 static const char *const MODS_KEYS[] = {"seqs", "routes", "lfos"};
+/* older presets also carry "gates", which are no longer read */
 static const char *const SEQ_KEYS[] = {"slot",     "mode",   "smooth",
-                                       "division", "length_s", "values",
-                                       "gates"};
+                                       "division", "length_s", "values"};
 static const char *const ROUTE_KEYS[] = {"seq", "target", "depth", "snap",
                                          "lfo"};
 /* presets saved before sequences: lfos, converted once everything is read */
 static const char *const OLD_LFO_KEYS[] = {"slot",    "shape",    "mode",
                                            "unipolar", "rate_hz", "division",
                                            "phase"};
+
+/* a CHANDAS_DIVISIONS name like "1/16" */
+static int8_t js_division(Js *j, int8_t dflt) {
+    const char *names[CHANDAS_DIVISIONS_LEN];
+    for (int i = 0; i < CHANDAS_DIVISIONS_LEN; i++)
+        names[i] = CHANDAS_DIVISIONS[i].name;
+    return (int8_t)js_enum(j, names, CHANDAS_DIVISIONS_LEN, dflt);
+}
 
 static uint8_t js_u8(Js *j, uint8_t dflt) {
     double d;
@@ -518,7 +530,7 @@ static void parse_melody(Js *j, MelodyParams *m) {
     char key[64];
     int r;
     while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, MELODY_KEYS, 7);
+        int k = js_key(key, MELODY_KEYS, 9);
         if (k >= 0 && js_dup(j, &seen, k)) return;
         switch (k) {
         case 0: m->enabled = js_bool(j, m->enabled); break;
@@ -536,6 +548,8 @@ static void parse_melody(Js *j, MelodyParams *m) {
         case 6:
             m->source = (HoldSource)js_enum(j, HOLD_NAMES, 2, HOLD_GOLDEN_WEYL);
             break;
+        case 7: m->sync = js_bool(j, m->sync); break;
+        case 8: m->division = js_division(j, MELODY_DEFAULT_DIVISION); break;
         default: js_skip(j); break;
         }
         if (j->err) return;
@@ -752,17 +766,6 @@ static void parse_value(Js *j, void *ud) {
     s->n++;
 }
 
-/* gates are listed by step number, 1 to 16 */
-static void parse_gate(Js *j, void *ud) {
-    StepsRead *s = ud;
-    double d;
-    if (!js_uint(j, (double)SEQ_STEPS, &d) || d < 1.0) {
-        j->err = true;
-        return;
-    }
-    s->p->gate[(int)d - 1] = true;
-}
-
 static void parse_seq(Js *j, void *ud) {
     ModsRead *m = ud;
     if (!js_ch(j, '{')) {
@@ -776,7 +779,7 @@ static void parse_seq(Js *j, void *ud) {
     char key[64];
     int r;
     while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SEQ_KEYS, 7);
+        int k = js_key(key, SEQ_KEYS, 6);
         if (k >= 0 && js_dup(j, &seen, k)) return;
         double d;
         StepsRead steps = {&p, 0};
@@ -807,7 +810,6 @@ static void parse_seq(Js *j, void *ud) {
             if (!(seen & (1u << 3))) p.division = -1;
             break;
         case 5: js_each(j, parse_value, &steps); break;
-        case 6: js_each(j, parse_gate, &steps); break;
         default: js_skip(j); break;
         }
         if (j->err) return;
@@ -887,6 +889,63 @@ static void parse_mods(Js *j, ModsRead *m) {
     }
 }
 
+/* ---------- pitch sequencer ---------- */
+
+typedef struct {
+    PitchSeqParams *p;
+    int n;
+} PitchRead;
+
+static void parse_pitch_st(Js *j, void *ud) {
+    PitchRead *r = ud;
+    float v = js_f32(j, 0.0f);
+    if (r->n < PITCH_STEPS) r->p->pitch[r->n] = v;
+    r->n++;
+}
+
+static void parse_pitch_gate(Js *j, void *ud) {
+    PitchRead *r = ud;
+    bool v = js_bool(j, true);
+    if (r->n < PITCH_STEPS) r->p->gate[r->n] = v;
+    r->n++;
+}
+
+static void parse_pitch_vel(Js *j, void *ud) {
+    PitchRead *r = ud;
+    float v = js_f32(j, 1.0f);
+    if (r->n < PITCH_STEPS) r->p->velocity[r->n] = v;
+    r->n++;
+}
+
+static void parse_pitch(Js *j, PitchSeqParams *p) {
+    if (!js_ch(j, '{')) {
+        j->err = true;
+        return;
+    }
+    bool first = true;
+    uint32_t seen = 0;
+    char key[64];
+    int r;
+    while ((r = js_obj_next(j, &first, key, sizeof key)) == 1) {
+        int k = js_key(key, PITCH_KEYS, 9);
+        if (k >= 0 && js_dup(j, &seen, k)) return;
+        PitchRead steps = {p, 0};
+        switch (k) {
+        case 0: p->enabled = js_bool(j, p->enabled); break;
+        case 1: p->division = js_division(j, PITCH_DEFAULT_DIVISION); break;
+        case 2: p->length = js_u8(j, p->length); break;
+        case 3: p->root_midi = js_u8(j, p->root_midi); break;
+        case 4: p->snap = js_bool(j, p->snap); break;
+        case 5: p->gate_len = js_f32(j, p->gate_len); break;
+        case 6: js_each(j, parse_pitch_st, &steps); break;
+        case 7: js_each(j, parse_pitch_gate, &steps); break;
+        case 8: js_each(j, parse_pitch_vel, &steps); break;
+        default: js_skip(j); break;
+        }
+        if (j->err) return;
+    }
+}
+
 bool session_from_json(const char *json, Session *out) {
     if (!json || !out) return false;
     Js j = {json, json + strlen(json), false, 0};
@@ -901,7 +960,7 @@ bool session_from_json(const char *json, Session *out) {
     char key[64];
     int r;
     while ((r = js_obj_next(&j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SESSION_KEYS, 16);
+        int k = js_key(key, SESSION_KEYS, 17);
         if (k == 7) k = 4;
         if (k >= 0 && js_dup(&j, &seen, k)) return false;
         switch (k) {
@@ -920,6 +979,7 @@ bool session_from_json(const char *json, Session *out) {
         case 13: parse_mods(&j, &mods); break;
         case 14: s.limiter_enabled = js_bool(&j, s.limiter_enabled); break;
         case 15: s.limiter_ceiling_db = js_f32(&j, s.limiter_ceiling_db); break;
+        case 16: parse_pitch(&j, &s.pitch); break;
         default: js_skip(&j); break;
         }
         if (j.err) return false;
@@ -1058,14 +1118,6 @@ static void write_seq(Sb *b, int slot, const SeqParams *p, bool first) {
         snprintf(line, sizeof line, "%s%s", k ? ", " : "", num);
         sb_put(b, line);
     }
-    sb_put(b, "], \"gates\": [");
-    bool any = false;
-    for (int k = 0; k < SEQ_STEPS; k++) {
-        if (!p->gate[k]) continue;
-        snprintf(line, sizeof line, "%s%d", any ? ", " : "", k + 1);
-        sb_put(b, line);
-        any = true;
-    }
     sb_put(b, "]}");
 }
 
@@ -1097,6 +1149,40 @@ static void write_mods(Sb *b, const ModBank *m) {
     }
     sb_put(b, first ? "]\n" : "\n    ]\n");
     sb_put(b, "  },\n");
+}
+
+static const char *division_name(int d) {
+    return CHANDAS_DIVISIONS[d >= 0 && d < CHANDAS_DIVISIONS_LEN ? d : 0].name;
+}
+
+static void write_pitch(Sb *b, const PitchSeqParams *p) {
+    char line[64], num[48];
+    sb_put(b, "  \"pitch\": {\n");
+    sb_key_b(b, "    ", "enabled", p->enabled, true);
+    sb_key_s(b, "    ", "division", division_name(p->division), true);
+    sb_key_u(b, "    ", "length", p->length, true);
+    sb_key_u(b, "    ", "root_midi", p->root_midi, true);
+    sb_key_b(b, "    ", "snap", p->snap, true);
+    sb_key_f(b, "    ", "gate_len", p->gate_len, true);
+    sb_put(b, "    \"pitches\": [");
+    for (int k = 0; k < PITCH_STEPS; k++) {
+        fmt_f32(num, sizeof num, p->pitch[k]);
+        snprintf(line, sizeof line, "%s%s", k ? ", " : "", num);
+        sb_put(b, line);
+    }
+    sb_put(b, "],\n    \"gates\": [");
+    for (int k = 0; k < PITCH_STEPS; k++) {
+        snprintf(line, sizeof line, "%s%s", k ? ", " : "",
+                 p->gate[k] ? "true" : "false");
+        sb_put(b, line);
+    }
+    sb_put(b, "],\n    \"velocities\": [");
+    for (int k = 0; k < PITCH_STEPS; k++) {
+        fmt_f32(num, sizeof num, p->velocity[k]);
+        snprintf(line, sizeof line, "%s%s", k ? ", " : "", num);
+        sb_put(b, line);
+    }
+    sb_put(b, "]\n  },\n");
 }
 
 char *session_to_json(const Session *s) {
@@ -1151,7 +1237,9 @@ char *session_to_json(const Session *s) {
     sb_key_u(&b, "    ", "range_degrees", s->melody.range_degrees, true);
     sb_key_f(&b, "    ", "rate_hz", s->melody.rate_hz, true);
     sb_key_s(&b, "    ", "source", name_at(HOLD_NAMES, 2, s->melody.source),
-             false);
+             true);
+    sb_key_b(&b, "    ", "sync", s->melody.sync, true);
+    sb_key_s(&b, "    ", "division", division_name(s->melody.division), false);
     sb_put(&b, "  },\n");
 
     sb_key_f(&b, "  ", "drone_hz", s->drone_hz, true);
@@ -1172,6 +1260,7 @@ char *session_to_json(const Session *s) {
     bool any_seq = false;
     for (int i = 0; i < SEQS; i++) any_seq = any_seq || s->mods.seq[i].used;
     if (any_seq) write_mods(&b, &s->mods);
+    write_pitch(&b, &s->pitch);
 
     sb_key_f(&b, "  ", "tempo_bpm", s->tempo_bpm, true);
     sb_key_f(&b, "  ", "warmth", s->warmth, true);

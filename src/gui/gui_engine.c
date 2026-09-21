@@ -112,6 +112,7 @@ typedef struct {
     VoiceBank voice;
     StereoVerb verb;
     Melody melody;
+    PitchSeq pitch;
     Chandas chandas;
     Tape tape;
     Limiter limiter;
@@ -184,7 +185,12 @@ static void engine_apply(AudioState *s, Event ev) {
     case EV_SET_ROUTE:
         mod_set_route(&s->mod, ev.u.route.slot, ev.u.route.r);
         break;
-    case EV_SET_TEMPO: chandas_set_tempo(&s->chandas, ev.u.f); break;
+    case EV_SET_TEMPO:
+        chandas_set_tempo(&s->chandas, ev.u.f);
+        melody_set_tempo(&s->melody, ev.u.f);
+        pitch_seq_set_tempo(&s->pitch, ev.u.f);
+        break;
+    case EV_SET_PITCH: pitch_seq_set_params(&s->pitch, ev.u.pitch); break;
     case EV_SET_TRANSPORT:
         s->transport_running = ev.u.flag;
         chandas_set_transport(&s->chandas, ev.u.flag);
@@ -216,6 +222,18 @@ static void engine_apply(AudioState *s, Event ev) {
     case EV_RECORD:
     case EV_SET_MIDI_DRIVING:
         break;
+    }
+}
+
+/* plays whatever the pitch sequencer has due now. A stopped transport holds
+   the steps, but a note already sounding is still let go on time. */
+static void pitch_run_due(AudioState *s) {
+    size_t until;
+    while (pitch_seq_samples_until(&s->pitch, &until) && until == 0) {
+        if (!s->transport_running && !s->pitch.held) break;
+        PitchEvent e = pitch_seq_fire(&s->pitch);
+        if (e.kind == PITCH_EV_NONE) break;
+        if (!s->midi_driving) pitch_event_play(e, &s->voice, &s->chandas, &s->mod);
     }
 }
 
@@ -291,7 +309,8 @@ static void render(void *ud, float *data, size_t frames, int channels) {
     size_t done = 0;
     while (done < frames) {
         size_t until;
-        if (s->transport_running
+        pitch_run_due(s);
+        if (s->transport_running && !s->pitch.params.enabled
             && melody_samples_until_fire(&s->melody, &until) && until == 0) {
             float hz = melody_fire(&s->melody);
             if (!s->midi_driving) {
@@ -305,20 +324,24 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         if (s->transport_running
             && melody_samples_until_fire(&s->melody, &until) && until < run)
             run = until;
+        if ((s->transport_running || s->pitch.held)
+            && pitch_seq_samples_until(&s->pitch, &until) && until < run)
+            run = until;
         bool modulating = mod_any_seq(&s->mod) || s->mod.groups_prev;
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(s, run);
-        if (mod_take_retrigger(&s->mod,
-                               s->melody.params.enabled || s->midi_driving))
-            seq_retrigger(&s->voice, &s->chandas);
         RenderCtx ctx = {s, data, done, channels, rec_armed,
                          voice_bank_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
         voice_bank_render_frames(&s->voice, run, emit_frame, &ctx);
         if (s->transport_running) melody_advance(&s->melody, run);
+        if (s->transport_running || s->pitch.held)
+            pitch_seq_advance(&s->pitch, run);
         done += run;
     }
     seq_meter_store(&a->seq_meter, &s->mod);
+    atomic_store_explicit(&a->seq_meter.pitch_step, s->pitch.step,
+                          memory_order_relaxed);
 
     float budget = (float)frames / a->sample_rate;
     if (budget > 0.0f) {
@@ -356,6 +379,7 @@ int gui_audio_start(App *a) {
                    voice_bank_compiled(&s->voice));
     verb_set_params(&s->verb, a->shadow_verb);
     melody_init(&s->melody, a->sample_rate, melody_params_default());
+    pitch_seq_init(&s->pitch, a->sample_rate);
     chandas_init(&s->chandas, a->sample_rate);
     tape_init(&s->tape, a->sample_rate);
     limiter_init(&s->limiter, a->sample_rate);
@@ -496,7 +520,6 @@ void gui_sync_chain(App *a) {
         want.amp.env.attack_s = a->shadow_attack_s;
         want.amp.env.decay_s = a->shadow_decay_s;
         want.amp.env.sustain = a->shadow_sustain;
-        want.amp.env.curve = a->shadow.curve;
         want.amp.env.release_s = a->shadow_release_s;
     } else {
         want = chain_default();
@@ -506,7 +529,6 @@ void gui_sync_chain(App *a) {
                     || (want.amp.env.attack_s == a->chain.amp.env.attack_s
                         && want.amp.env.decay_s == a->chain.amp.env.decay_s
                         && want.amp.env.release_s == a->chain.amp.env.release_s
-                        && want.amp.env.curve == a->chain.amp.env.curve
                         && want.amp.env.sustain == a->chain.amp.env.sustain));
     if (same) return;
     bool becoming_notes = want.amp.kind == AMP_ENVELOPE;

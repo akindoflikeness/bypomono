@@ -204,7 +204,8 @@ static const Verb VERBS[] = {
      .run = control_run_mel,
      .parse = control_parse_mel,
      .complete = control_complete_mel,
-     .form = "[on|off|src|tuning|scale|root|range|rate ...]"},
+     .form = "[on|off|src|tuning|scale|root|range|rate|sync ...]",
+     .extra = "mel rate 1/8 puts the notes on the clock; mel sync off frees them"},
     {.name = "op",
      .group = G_SOUND,
      .about = "show an operator, or set its power",
@@ -266,13 +267,23 @@ static const Verb VERBS[] = {
      .run = seq_run, .parse = seq_parse, .view = seq_view,
      .preview = seq_preview, .complete = seq_complete,
      .form = "[<n> [fill <shape>] [set <16 values>] [step <k> <v>] "
-             "[gate <k> on|off] [loop|once] [smooth|steps] [rate <1/16|2.5s>] "
+             "[loop|once] [smooth|steps] [rate <1/16|2.5s>] "
              "[to <target> <depth|off> [snap]]... | <n> rm]",
      .extra = "values go 0 to 1; 0.5 leaves the control where it is\n"
               "seq 1 fill sine to index 0.4 makes a sequence and routes it\n"
-              "seq 2 steps to pitch 1 snap plays notes on 12-tet; gates "
-              "restart the note\n"
+              "seq 2 steps to pitch 1 snap bends the pitch in whole "
+              "semitones; notes come from pitch or mel\n"
               "seq alone lists them; -v pins the view"},
+    {.name = "pitch", .group = G_MODULATION,
+     .about = "the note sequencer: a pitch, gate and velocity per step",
+     .run = pitch_run, .parse = pitch_parse, .view = pitch_view,
+     .preview = pitch_preview, .complete = pitch_complete,
+     .form = "[on|off] [step <k> <st> [vel] [on|off]] [set <16 st>] "
+             "[gate <k> on|off] [vel <k> <0-1>] [len <1-16>] [rate <1/16>] "
+             "[root <A2|45>] [snap on|off] [gatelen <0.05-1>]",
+     .extra = "semitones go -24 to 24 from the root; snap rounds them to 12-tet\n"
+              "turning pitch on turns the melody off, and the other way round\n"
+              "pitch alone shows it; -v pins the view"},
     {.name = "mod", .group = G_MODULATION,
      .about = "bind a midi controller to a control", .run = run_mod,
      .parse = parse_mod, .complete = complete_mod,

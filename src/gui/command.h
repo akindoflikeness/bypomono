@@ -10,7 +10,7 @@ typedef enum { CMD_NOP, CMD_HELP, CMD_RUN } CommandKind;
 
 #define SEQ_CMD_ROUTES 8
 
-/* seq <n> [fill <shape>] [set v1..v16] [step k v] [gate k on|off] [loop|once]
+/* seq <n> [fill <shape>] [set v1..v16] [step k v] [loop|once]
    [smooth|steps] [rate <1/16|2.5s>] [to <target> <depth|off> [snap]]... | rm */
 typedef struct {
     int slot; /* 0-based; -1 = every sequence */
@@ -21,9 +21,8 @@ typedef struct {
     int8_t division; /* -1 = length_s */
     float length_s;
     float values[SEQ_STEPS];
-    int nsteps, ngates, nroutes;
+    int nsteps, nroutes;
     struct { uint8_t step; float v; } steps[SEQ_STEPS];
-    struct { uint8_t step; bool on; } gates[SEQ_STEPS];
     struct {
         uint8_t target;
         float depth;
@@ -106,6 +105,14 @@ bool seq_view(App *a, const Command *c, View *out);
 bool seq_preview(App *a, const Command *c, View *out);
 int seq_complete(char *const words[], int nwords, const char *prefix,
                  char out[][CAND_LEN], int max);
+
+/* cmd_pitch.c */
+bool pitch_parse(Command *c, char *err, size_t err_len);
+bool pitch_run(App *a, const Command *c, char *err, size_t err_len);
+bool pitch_view(App *a, const Command *c, View *out);
+bool pitch_preview(App *a, const Command *c, View *out);
+int pitch_complete(char *const words[], int nwords, const char *prefix,
+                   char out[][CAND_LEN], int max);
 
 /* cmd_controls.c */
 bool control_parse(Command *c, char *err, size_t err_len);

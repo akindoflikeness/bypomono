@@ -26,7 +26,6 @@ static void an_envelopes_own_settings_are_knobs_not_a_chain_change(void) {
     State b = notes_state();
     EnvParams e = env_params_default();
     e.decay_s = 0.4f;
-    e.curve = 0.9f;
     b.chain.amp.env = e;
     CHECK(!state_is_structural_change(&a, &b), "envelope settings crossed");
 }

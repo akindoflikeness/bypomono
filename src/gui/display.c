@@ -56,7 +56,6 @@ static EnvParams shadow_env(const App *a) {
     p.decay_s = a->shadow_decay_s;
     p.sustain = a->shadow_sustain;
     p.release_s = a->shadow_release_s;
-    p.curve = a->shadow.curve;
     return p;
 }
 
@@ -124,15 +123,14 @@ static void paint_envelope(const App *a, Canvas *c, Rct rect) {
 
 static void envelope_knobs(App *a, Ui *ui, Rct r) {
     static const ParamId KNOBS[] = {PARAM_ATTACK, PARAM_ENV_DECAY,
-                                    PARAM_SUSTAIN, PARAM_RELEASE, PARAM_CURVE};
+                                    PARAM_SUSTAIN, PARAM_RELEASE};
     const int n = (int)(sizeof KNOBS / sizeof KNOBS[0]);
     bool reaches = a->chain.amp.kind == AMP_ENVELOPE || a->shadow_melody.enabled;
     float kw = rct_w(r) / (float)n;
     for (int k = 0; k < n; k++) {
         Rct kr = rct(roundf(r.x0 + kw * (float)k), r.y0,
                      roundf(r.x0 + kw * (float)(k + 1)), r.y1);
-        /* curve also bends the field, so it answers under the drone too */
-        bool live = reaches || KNOBS[k] == PARAM_CURVE;
+        bool live = reaches;
         param_knob(a, ui, kr, KNOBS[k], live);
         if (live || !press_on(ui, kr)) continue;
         if (midi_driving(a))

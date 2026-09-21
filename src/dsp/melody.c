@@ -123,17 +123,29 @@ MelodyParams melody_params_default(void) {
     p.range_degrees = 8;
     p.rate_hz = PHI;
     p.source = HOLD_GOLDEN_WEYL;
+    p.sync = false;
+    p.division = MELODY_DEFAULT_DIVISION;
     return p;
 }
 
 static size_t melody_period(const Melody *m) {
-    size_t p = (size_t)(m->sample_rate / fmaxf(m->params.rate_hz, 0.01f));
+    float seconds;
+    if (m->params.sync) {
+        int d = m->params.division;
+        if (d < 0 || d >= CHANDAS_DIVISIONS_LEN) d = MELODY_DEFAULT_DIVISION;
+        seconds = CHANDAS_DIVISIONS[d].beats * 60.0f
+                  / clampf(m->bpm, CHANDAS_MIN_BPM, CHANDAS_MAX_BPM);
+    } else {
+        seconds = 1.0f / fmaxf(m->params.rate_hz, 0.01f);
+    }
+    size_t p = (size_t)(m->sample_rate * seconds);
     return p < 1 ? 1 : p;
 }
 
 void melody_init(Melody *m, float sample_rate, MelodyParams params) {
     m->params = params;
     m->sample_rate = sample_rate;
+    m->bpm = CHANDAS_DEFAULT_BPM;
     m->countdown = 0;
     m->weyl = 0.0f;
     m->rng = 0x9E3779B9u;
@@ -152,6 +164,12 @@ void melody_set_params(Melody *m, MelodyParams params) {
     if (was_disabled && params.enabled) {
         m->countdown = 0;
     }
+}
+
+void melody_set_tempo(Melody *m, float bpm) {
+    m->bpm = bpm;
+    size_t period = melody_period(m);
+    if (m->countdown > period) m->countdown = period;
 }
 
 bool melody_samples_until_fire(const Melody *m, size_t *out) {

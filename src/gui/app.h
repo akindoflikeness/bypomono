@@ -64,7 +64,7 @@ typedef enum {
     EV_SET_LIMITER,
     EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
     EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING,
-    EV_SET_SEQ, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC
+    EV_SET_SEQ, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC, EV_SET_PITCH
 } EventKind;
 
 typedef struct {
@@ -81,12 +81,14 @@ typedef struct {
         struct { float hz, velocity; int key; } note; /* key -1 = none */
         struct { int slot; SeqParams p; } seq;
         struct { int slot; ModRoute r; } route;
+        PitchSeqParams pitch;
     } u;
 } Event;
 
 /* where the audio thread's sequences are, for playheads */
 typedef struct {
     _Atomic uint32_t pos_q16[SEQS]; /* steps, 0..16 */
+    _Atomic int pitch_step;         /* the pitch sequencer's step, -1 = none */
 } SeqMeter;
 void seq_meter_store(SeqMeter *m, const Mod *mod);
 float seq_meter_pos(const SeqMeter *m, int slot);
@@ -197,7 +199,7 @@ CcTarget cc_target_from_name(const char *s);
 enum { TAB_SHELL, TAB_SCOPE, TAB_ENV, TAB_PRE, TAB_INFO, DISPLAY_TABS };
 /* the space column's pages */
 enum { TAB_ROOM, TAB_CHANDAS, SPACE_TABS };
-enum { TAB_MELODY, TAB_SEQS, STRIP_TABS };
+enum { TAB_MELODY, TAB_PITCH, TAB_SEQS, STRIP_TABS };
 
 #define LOG_LINES 64
 #define LOG_LINE_LEN 256
@@ -208,6 +210,7 @@ typedef struct App {
     Patch shadow;
     VerbParams shadow_verb;
     MelodyParams shadow_melody;
+    PitchSeqParams shadow_pitch;
     ChandasParams shadow_chandas;
     float shadow_warmth;
     bool shadow_limiter_enabled;
@@ -305,8 +308,11 @@ typedef struct App {
     bool info_open, show_fps;
     int space_tab, display_tab, strip_tab;
     int seq_selected;  /* the sequence the strip edits */
-    bool seq_painting; /* a drag across the step cells is under way */
-    P2 seq_paint_prev;
+    /* a drag across a row of step cells: which row, where the pointer was,
+       and for on/off rows what every crossed cell becomes */
+    UiId paint_id;
+    P2 paint_prev;
+    bool paint_to;
     int display_back; /* the tab the presets page returns to */
 
     /* recording */
@@ -463,8 +469,26 @@ void draw_display_column(App *a, Ui *ui, Rct r); /* display.c */
 void draw_display_tabs(App *a, Ui *ui, Rct bar);
 void draw_space_column(App *a, Ui *ui, Rct r);   /* space.c */
 void draw_melody_page(App *a, Ui *ui, Rct r);    /* melody_bar.c */
-/* sequences.c: the strip along the bottom, melody or sequences */
+/* sequences.c: the strip along the bottom: melody, pitch or sequences */
 void draw_bottom_strip(App *a, Ui *ui, Rct r);
+
+/* pitch.c: the pitch sequencer's page. It and the melody take turns playing
+   the notes, so turning one on turns the other off. */
+void draw_pitch_page(App *a, Ui *ui, Rct top, Rct body);
+void pitch_send(App *a);
+void pitch_set_enabled(App *a, bool on);
+void melody_set_enabled(App *a, bool on);
+/* "C#3" */
+void midi_note_name(int midi, char *out, size_t cap);
+
+/* steps.c: painting across a row of n step cells */
+int step_at(Rct cells, int n, float x);
+/* each cell the drag crosses takes the pointer's height, lo at the bottom to
+   hi at the top; a double-click puts a cell back to reset. True on a change. */
+bool steps_paint(App *a, Ui *ui, UiId id, Rct cells, float *values, int n,
+                 float lo, float hi, float reset);
+/* on/off cells: the pressed cell flips and the drag copies it across */
+bool steps_toggle(App *a, Ui *ui, UiId id, Rct cells, bool *values, int n);
 
 /* shell.c */
 void draw_stage(App *a, Ui *ui, Rct r);    /* starfield + shell */

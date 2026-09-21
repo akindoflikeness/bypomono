@@ -47,6 +47,7 @@ typedef struct Plug {
     VoiceBank voice;
     StereoVerb verb;
     Melody melody;
+    PitchSeq pitch;
     Chandas chandas;
     Tape tape;
     Limiter limiter;
@@ -60,7 +61,11 @@ typedef struct Plug {
     /* main thread: the sequences and routes host state saves; state_load hands
        them to the audio thread through mod_ev */
     ModBank mods_main;
+    PitchSeqParams pitch_main;
     EventRing mod_ev;
+    /* the melody's clock settings, which are not host params */
+    bool mel_sync;
+    int8_t mel_division;
     /* editor bridge */
     _Atomic(App *) gui_app;
     bool rec_on;

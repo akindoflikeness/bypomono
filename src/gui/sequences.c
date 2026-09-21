@@ -1,15 +1,14 @@
-/* The bottom strip: MELODY or SEQUENCES. A sequence is sixteen values painted
-   across the step cells and pointed at controls through its routes. */
+/* The bottom strip: MELODY, PITCH or SEQUENCES. A sequence is sixteen values
+   painted across the step cells and pointed at controls through its routes. */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "app.h"
 
-#define TABS_W 250.0f
+#define TABS_W 330.0f
 #define LEFT_W 300.0f
 #define ROUTES_W 270.0f
-#define GATE_H 12.0f
 #define DIM_LINE 90
 
 /* ---------- small pieces ---------- */
@@ -226,26 +225,6 @@ static void draw_routes(App *a, Ui *ui, Rct r) {
 
 /* ---------- the step cells ---------- */
 
-static float cell_value(Rct cells, float y) {
-    return clampf((cells.y1 - y) / rct_h(cells), 0.0f, 1.0f);
-}
-
-static int cell_at(Rct cells, float x) {
-    int k = (int)floorf((x - cells.x0) / (rct_w(cells) / (float)SEQ_STEPS));
-    return k < 0 ? 0 : (k >= SEQ_STEPS ? SEQ_STEPS - 1 : k);
-}
-
-/* every cell between the last point and this one takes the height the line
-   between them has there, so a fast stroke leaves no gaps */
-static void paint_stroke(SeqParams *p, Rct cells, P2 from, P2 to) {
-    int k0 = cell_at(cells, from.x), k1 = cell_at(cells, to.x);
-    int lo = k0 < k1 ? k0 : k1, hi = k0 < k1 ? k1 : k0;
-    for (int k = lo; k <= hi; k++) {
-        float t = k1 == k0 ? 1.0f : (float)(k - k0) / (float)(k1 - k0);
-        p->value[k] = cell_value(cells, from.y + (to.y - from.y) * t);
-    }
-}
-
 static void semitone_text(const ModRoute *pr, float v, char *out, size_t cap) {
     float st = (2.0f * v - 1.0f) * pr->depth * MOD_PITCH_SEMITONES;
     if (pr->snap) snprintf(out, cap, "%+d", (int)roundf(st));
@@ -260,30 +239,10 @@ static void draw_cells(App *a, Ui *ui, Rct r) {
     int s = a->seq_selected;
     SeqParams *p = &next.seq[s];
     const ModRoute *pr = pitch_route(&next, s);
-    Rct gates = {0};
-    if (pr) {
-        gates = cut_bottom(&r, GATE_H);
-        cut_bottom(&r, TIGHT);
-    }
     Rct cells = r;
     float cw = rct_w(cells) / (float)SEQ_STEPS;
-
-    UiId paint = ui_id("seq paint");
-    Resp resp = ui_interact_drag(ui, paint, cells, 0.0f);
-    if (resp.hovered) ui->cursor = CURSOR_POINTER;
-    if (resp.double_clicked) {
-        p->value[cell_at(cells, ui->in.mouse.x)] = 0.5f;
-        a->seq_painting = false;
-    } else if (ui->in.pressed && resp.hovered) {
-        a->seq_painting = true;
-        a->seq_paint_prev = ui->in.mouse;
-        paint_stroke(p, cells, ui->in.mouse, ui->in.mouse);
-    } else if (a->seq_painting && ui->in.down) {
-        paint_stroke(p, cells, a->seq_paint_prev, ui->in.mouse);
-        a->seq_paint_prev = ui->in.mouse;
-    } else {
-        a->seq_painting = false;
-    }
+    steps_paint(a, ui, ui_id("seq paint"), cells, p->value, SEQ_STEPS, 0.0f,
+                1.0f, 0.5f);
 
     int head = (int)floorf(seq_meter_pos(&a->seq_meter, s));
     FontId f = ui_font(10.0f);
@@ -306,9 +265,6 @@ static void draw_cells(App *a, Ui *ui, Rct r) {
             float ty = p->value[k] > 0.8f ? y + 4.0f : y - 3.0f - text_row_height(f);
             text_draw(c, f, (P2){rct_center(cell).x, ty}, ALIGN_CENTER_TOP, st,
                       ink, 0.0f);
-            Rct g = rct(cell.x0, gates.y0, cell.x1, gates.y1);
-            if (chip_button(ui, ui_id_n("seq gate", k), g, "", p->gate[k]))
-                p->gate[k] = !p->gate[k];
         }
     }
     draw_curve(c, rct(cells.x0 + 1.0f, cells.y0, cells.x1 - 1.0f, cells.y1), p,
@@ -347,6 +303,7 @@ static void no_page(App *a, Ui *ui, Rct r) {
 
 static const Tab STRIP[STRIP_TABS] = {
     [TAB_MELODY] = {"MELODY", no_page},
+    [TAB_PITCH] = {"PITCH", no_page},
     [TAB_SEQS] = {"SEQUENCES", no_page},
 };
 
@@ -358,5 +315,6 @@ void draw_bottom_strip(App *a, Ui *ui, Rct r) {
     cut_left(&top, SECTION);
     tab_strip(ui, "strip tab", tabs, STRIP, STRIP_TABS, &a->strip_tab);
     if (a->strip_tab == TAB_SEQS) draw_sequences_page(a, ui, top, r);
+    else if (a->strip_tab == TAB_PITCH) draw_pitch_page(a, ui, top, r);
     else draw_melody_page(a, ui, r);
 }

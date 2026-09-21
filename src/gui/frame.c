@@ -105,6 +105,7 @@ void app_init_defaults(App *a) {
     a->shadow = s.patch;
     a->shadow_verb = s.verb;
     a->shadow_melody = s.melody;
+    a->shadow_pitch = s.pitch;
     a->shadow_chandas = s.chandas;
     a->shadow_warmth = s.warmth;
     a->shadow_limiter_enabled = s.limiter_enabled;

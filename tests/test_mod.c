@@ -161,32 +161,6 @@ static void a_removed_route_writes_its_group_once_more(void) {
     CHECK(mod_apply(&m, &base, &out) == 0, "still writing with no routes");
 }
 
-static void gates_retrigger_only_pitch_sequences_and_not_under_the_melody(void) {
-    Mod m;
-    mod_init(&m, SR);
-    SeqParams p = seq_params_default();
-    p.division = -1;
-    p.length_s = 1.6f; /* 0.1 s a step */
-    p.gate[1] = true;
-    mod_set_seq(&m, 0, p);
-    mod_advance(&m, (size_t)(SR * 0.15f), 120.0f);
-    CHECK(!mod_take_retrigger(&m, false), "a gate fired with no pitch route");
-    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
-    mod_init(&m, SR);
-    mod_set_seq(&m, 0, p);
-    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
-    mod_advance(&m, (size_t)(SR * 0.05f), 120.0f);
-    CHECK(!mod_take_retrigger(&m, false), "fired before reaching the gate");
-    mod_advance(&m, (size_t)(SR * 0.1f), 120.0f);
-    CHECK(mod_take_retrigger(&m, false), "crossing the gate did not fire");
-    CHECK(!mod_take_retrigger(&m, false), "one gate fired twice");
-    mod_init(&m, SR);
-    mod_set_seq(&m, 0, p);
-    mod_set_route(&m, 0, (ModRoute){0, MT_PITCH, 1.0f, true});
-    mod_advance(&m, (size_t)(SR * 0.15f), 120.0f);
-    CHECK(!mod_take_retrigger(&m, true), "fired while the melody plays");
-}
-
 static void sanitize_drops_routes_to_empty_sequences(void) {
     ModBank b = mod_bank_default();
     b.route[0] = (ModRoute){0, MT_INDEX, 0.5f, false};
@@ -212,7 +186,6 @@ static void presets_carry_sequences_and_routes(void) {
     p.mode = SEQ_ONCE;
     p.division = -1;
     p.length_s = 3.5f;
-    p.gate[0] = p.gate[9] = true;
     s.mods.seq[2] = p;
     s.mods.seq[0] = seq_of(SEQ_FILL_SINE, true);
     s.mods.route[0] = (ModRoute){2, MT_CH_WARP, -0.3f, false};
@@ -227,7 +200,6 @@ static void presets_carry_sequences_and_routes(void) {
     CHECK(q->used && q->mode == SEQ_ONCE && !q->smooth, "seq 3 mode lost");
     CHECK(q->division == -1 && q->length_s == 3.5f, "seq 3 length %g",
           q->length_s);
-    CHECK(q->gate[0] && q->gate[9] && !q->gate[1], "gates lost");
     for (int k = 0; k < SEQ_STEPS; k++)
         CHECK_NEAR(q->value[k], p.value[k], 1e-6f, "value %d", k);
     CHECK(back.mods.seq[0].division == SEQ_DEFAULT_DIVISION, "seq 1 division");
@@ -365,7 +337,7 @@ static void fresh_app(void) {
 static void seq_line_reads_every_word(void) {
     Command c;
     char err[512];
-    CHECK(parse_line("seq 2 fill tri steps once rate 2.5s step 3 0.9 gate 4 on "
+    CHECK(parse_line("seq 2 fill tri steps once rate 2.5s step 3 0.9 "
                      "to pitch 0.5 snap to chandas warp -0.5 -v",
                      &c, err, sizeof err),
           "did not parse: %s", err);
@@ -378,7 +350,6 @@ static void seq_line_reads_every_word(void) {
     CHECK(m->set_rate && m->division == -1 && m->length_s == 2.5f, "rate");
     CHECK(m->nsteps == 1 && m->steps[0].step == 2 && m->steps[0].v == 0.9f,
           "step");
-    CHECK(m->ngates == 1 && m->gates[0].step == 3 && m->gates[0].on, "gate");
     CHECK(m->nroutes == 2 && m->route[0].snap, "pitch snap route");
     CHECK(m->route[1].target == MT_CH_WARP && m->route[1].depth == -0.5f,
           "two-word target");
@@ -468,7 +439,6 @@ void test_mod(void) {
     a_middle_value_changes_nothing();
     snap_rounds_pitch_to_semitones();
     a_removed_route_writes_its_group_once_more();
-    gates_retrigger_only_pitch_sequences_and_not_under_the_melody();
     sanitize_drops_routes_to_empty_sequences();
     presets_carry_sequences_and_routes();
     an_old_lfo_preset_becomes_sequences();

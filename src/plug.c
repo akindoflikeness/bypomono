@@ -144,7 +144,6 @@ static Chain chain_of_vals(const Plug *p) {
         want.amp.env.attack_s = (float)getv(p, P_ATTACK);
         want.amp.env.decay_s = (float)getv(p, P_ENV_DECAY);
         want.amp.env.sustain = (float)getv(p, P_SUSTAIN);
-        want.amp.env.curve = (float)getv(p, P_CURVE);
         want.amp.env.release_s = (float)getv(p, P_RELEASE);
     }
     return want;
@@ -181,6 +180,8 @@ static void apply_vals(Plug *p) {
     mp.root_midi = (uint8_t)plug_getv_int(p, P_SH_ROOT);
     mp.range_degrees = (uint8_t)plug_getv_int(p, P_SH_RANGE);
     mp.rate_hz = (float)getv(p, P_SH_RATE);
+    mp.sync = p->mel_sync;
+    mp.division = p->mel_division;
     if (was_enabled && !mp.enabled) voice_bank_note_off_all(&p->voice);
     melody_set_params(&p->melody, mp);
     tape_set(&p->tape, (float)getv(p, P_WARMTH));
@@ -227,6 +228,9 @@ Session plug_session_of_vals(const Plug *p) {
     s.melody.root_midi = (uint8_t)plug_getv_int(p, P_SH_ROOT);
     s.melody.range_degrees = (uint8_t)plug_getv_int(p, P_SH_RANGE);
     s.melody.rate_hz = (float)getv(p, P_SH_RATE);
+    s.melody.sync = p->mel_sync;
+    s.melody.division = p->mel_division;
+    s.pitch = p->pitch_main;
     s.drone_hz = (float)getv(p, P_DRONE_HZ);
     s.chandas.enabled = getv(p, P_CH_ON) > 0.5;
     s.chandas.mix = (float)getv(p, P_CH_MIX);
@@ -329,6 +333,12 @@ static void mirror_patch_vals(Plug *p, const Patch *patch) {
     setv(p, P_DETUNE, patch->unison_detune);
 }
 
+static void plug_set_tempo(Plug *p, float bpm) {
+    chandas_set_tempo(&p->chandas, bpm);
+    melody_set_tempo(&p->melody, bpm);
+    pitch_seq_set_tempo(&p->pitch, bpm);
+}
+
 static void apply_gui_event(Plug *p, Event ev) {
     switch (ev.kind) {
     case EV_SET_PATCH:
@@ -356,6 +366,8 @@ static void apply_gui_event(Plug *p, Event ev) {
         if (p->melody.params.enabled && !ev.u.melody.enabled)
             voice_bank_note_off_all(&p->voice);
         melody_set_params(&p->melody, ev.u.melody);
+        p->mel_sync = ev.u.melody.sync;
+        p->mel_division = ev.u.melody.division;
         setv(p, P_SH_ON, ev.u.melody.enabled ? 1 : 0);
         setv(p, P_SH_SRC, ev.u.melody.source == HOLD_XORSHIFT ? 1 : 0);
         setv(p, P_SH_TUNING, (double)ev.u.melody.tuning);
@@ -389,7 +401,8 @@ static void apply_gui_event(Plug *p, Event ev) {
         setv(p, P_LIMITER_CEILING, ev.u.limiter.ceiling_db);
         break;
     case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
-    case EV_SET_TEMPO: chandas_set_tempo(&p->chandas, ev.u.f); break;
+    case EV_SET_TEMPO: plug_set_tempo(p, ev.u.f); break;
+    case EV_SET_PITCH: pitch_seq_set_params(&p->pitch, ev.u.pitch); break;
     case EV_SET_TRANSPORT:
         p->transport_running = ev.u.flag;
         chandas_set_transport(&p->chandas, ev.u.flag);
@@ -421,7 +434,6 @@ static void apply_gui_event(Plug *p, Event ev) {
             setv(p, P_ATTACK, ev.u.chain.amp.env.attack_s);
             setv(p, P_ENV_DECAY, ev.u.chain.amp.env.decay_s);
             setv(p, P_SUSTAIN, ev.u.chain.amp.env.sustain);
-            setv(p, P_CURVE, ev.u.chain.amp.env.curve);
             setv(p, P_RELEASE, ev.u.chain.amp.env.release_s);
         }
         break;
@@ -501,12 +513,25 @@ static bool host_holding(const Plug *p) {
     return false;
 }
 
+/* plays whatever the pitch sequencer has due now, leaving keys the host
+   holds alone */
+static void pitch_run_due(Plug *p) {
+    size_t until;
+    while (pitch_seq_samples_until(&p->pitch, &until) && until == 0) {
+        if (!p->transport_running && !p->pitch.held) break;
+        PitchEvent e = pitch_seq_fire(&p->pitch);
+        if (e.kind == PITCH_EV_NONE) break;
+        if (!host_holding(p)) pitch_event_play(e, &p->voice, &p->chandas, &p->mod);
+    }
+}
+
 static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
                         uint32_t count) {
     uint32_t done = 0;
     while (done < count) {
         size_t until;
-        if (p->transport_running
+        pitch_run_due(p);
+        if (p->transport_running && !p->pitch.params.enabled
             && melody_samples_until_fire(&p->melody, &until) && until == 0) {
             float hz = melody_fire(&p->melody);
             voice_bank_note_off_all(&p->voice);
@@ -518,15 +543,18 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
         if (p->transport_running
             && melody_samples_until_fire(&p->melody, &until) && until < run)
             run = (uint32_t)until;
+        if ((p->transport_running || p->pitch.held)
+            && pitch_seq_samples_until(&p->pitch, &until) && until < run)
+            run = (uint32_t)until;
         bool modulating = mod_any_seq(&p->mod) || p->mod.groups_prev;
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(p, run);
-        if (mod_take_retrigger(&p->mod, p->melody.params.enabled || host_holding(p)))
-            seq_retrigger(&p->voice, &p->chandas);
         Emit e = {p, gapp, l, r, base + done};
         voice_bank_render_frames(&p->voice, run, emit_frame, &e);
         if (p->transport_running) melody_advance(&p->melody, run);
+        if (p->transport_running || p->pitch.held)
+            pitch_seq_advance(&p->pitch, run);
         done += run;
     }
 }
@@ -610,7 +638,7 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
     float *r = pr->audio_outputs[0].data32[1];
 
     if (pr->transport && (pr->transport->flags & CLAP_TRANSPORT_HAS_TEMPO))
-        chandas_set_tempo(&p->chandas, (float)pr->transport->tempo);
+        plug_set_tempo(p, (float)pr->transport->tempo);
 
     App *gapp = atomic_load_explicit(&p->gui_app, memory_order_acquire);
     Event ev;
@@ -644,6 +672,8 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
     if (gapp) {
         voices_store(gapp, &p->voice);
         seq_meter_store(&gapp->seq_meter, &p->mod);
+        atomic_store_explicit(&gapp->seq_meter.pitch_step, p->pitch.step,
+                              memory_order_relaxed);
     }
     return CLAP_PROCESS_CONTINUE;
 }
@@ -791,6 +821,7 @@ static bool state_save(const clap_plugin_t *pl, const clap_ostream_t *stream) {
     Session s = plug_session_of_vals(p);
     App *g = atomic_load_explicit(&p->gui_app, memory_order_acquire);
     s.mods = g ? g->mods : p->mods_main;
+    if (g) s.pitch = g->shadow_pitch;
     s = session_sanitize(s);
     char *json = session_to_json(&s);
     if (!json) return false;
@@ -839,8 +870,12 @@ static bool state_load(const clap_plugin_t *pl, const clap_istream_t *stream) {
     bool ok = session_from_json(buf, &s);
     free(buf);
     if (!ok) return false;
+    p->mel_sync = s.melody.sync;
+    p->mel_division = s.melody.division;
     vals_of_session(p, &s);
     p->mods_main = s.mods;
+    p->pitch_main = s.pitch;
+    EventRing_push(&p->mod_ev, (Event){.kind = EV_SET_PITCH, .u.pitch = s.pitch});
     for (int i = 0; i < SEQS; i++)
         EventRing_push(&p->mod_ev,
                        (Event){.kind = EV_SET_SEQ, .u.seq = {i, s.mods.seq[i]}});
@@ -848,7 +883,10 @@ static bool state_load(const clap_plugin_t *pl, const clap_istream_t *stream) {
         EventRing_push(&p->mod_ev, (Event){.kind = EV_SET_ROUTE,
                                            .u.route = {i, s.mods.route[i]}});
     App *g = atomic_load_explicit(&p->gui_app, memory_order_acquire);
-    if (g) g->mods = s.mods;
+    if (g) {
+        g->mods = s.mods;
+        g->shadow_pitch = s.pitch;
+    }
     const clap_host_params_t *hp =
         p->host ? p->host->get_extension(p->host, CLAP_EXT_PARAMS) : NULL;
     if (hp) hp->rescan(p->host, CLAP_PARAM_RESCAN_VALUES);
@@ -880,6 +918,8 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     voice_bank_set_drone_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     verb_set_drone_hz(&p->verb, (float)getv(p, P_DRONE_HZ));
     melody_init(&p->melody, (float)sr, melody_params_default());
+    pitch_seq_init(&p->pitch, (float)sr);
+    pitch_seq_set_params(&p->pitch, p->pitch_main);
     p->transport_running = true;
     chandas_init(&p->chandas, (float)sr);
     tape_init(&p->tape, (float)sr);
@@ -996,6 +1036,8 @@ static const clap_plugin_t *factory_create(const clap_plugin_factory_t *f,
     p->plugin.plugin_data = p;
     p->host = host;
     p->sr = 48000.0;
+    p->mel_division = MELODY_DEFAULT_DIVISION;
+    p->pitch_main = pitch_seq_params_default();
     for (int i = 0; i < P_COUNT; i++)
         atomic_store_explicit(&p->vals[i], SPEC[i].def, memory_order_relaxed);
     return &p->plugin;

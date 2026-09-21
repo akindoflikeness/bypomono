@@ -397,6 +397,7 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
     g->app->channels = 2;
     refresh_shadows(g->app, p);
     g->app->mods = p->mods_main;
+    g->app->shadow_pitch = p->pitch_main;
 
     canvas_init(&g->canvas, (int)DESIGN_W, (int)DESIGN_H);
     memset(&g->ui, 0, sizeof g->ui);
@@ -443,6 +444,7 @@ static void gui_destroy(const clap_plugin_t *pl) {
        renderer can never race a free */
     atomic_store_explicit(&p->gui_app, NULL, memory_order_release);
     p->mods_main = g->app->mods;
+    p->pitch_main = g->app->shadow_pitch;
     stop_native_timer(g);
     const clap_host_timer_support_t *ht =
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);

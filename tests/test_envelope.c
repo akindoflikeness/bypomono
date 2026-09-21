@@ -39,23 +39,19 @@ static void sustain_is_a_literal_envelope_level(void) {
           "sustain %.3f settled at %g", (double)p.sustain, (double)envelope_level(&e));
 }
 
-static float decay_shape_at(float curve) {
+/* the gap left to close, as a fraction, frac of the way through the decay */
+static float decay_gap_at(float frac) {
     EnvParams p = env_params_default();
-    p.curve = curve;
     p.sustain = 0.25f;
-    Envelope e = held(p.attack_s + p.decay_s * 0.5f, &p);
+    Envelope e = held(p.attack_s + p.decay_s * frac, &p);
     return (envelope_level(&e) - 0.25f) / (1.0f - 0.25f);
 }
 
-static void the_decay_follows_the_field_s_own_curve_control(void) {
-    float log_ = decay_shape_at(0.0f);
-    float lin = decay_shape_at(0.5f);
-    float exp_ = decay_shape_at(1.0f);
-    CHECK(fabsf(lin - 0.5f) < 0.02f, "linear should be halfway, was %g", lin);
-    CHECK(log_ > lin, "log %g should hold above linear %g", log_, lin);
-    CHECK(exp_ < lin, "exp %g should have plucked below linear %g", exp_, lin);
-    CHECK(log_ > 0.7f && log_ < 0.82f, "log at half was %g", log_);
-    CHECK(exp_ > 0.12f && exp_ < 0.2f, "exp at half was %g", exp_);
+static void the_decay_falls_evenly_in_db(void) {
+    float half = decay_gap_at(0.5f), quarter = decay_gap_at(0.25f);
+    CHECK_NEAR(20.0f * log10f(half), -40.0f, 0.3f, "half the decay left %g", half);
+    CHECK_NEAR(20.0f * log10f(quarter), -20.0f, 0.3f, "a quarter in left %g",
+               quarter);
 }
 
 static void a_retrigger_arrives_over_the_attack(void) {
@@ -118,7 +114,6 @@ static void rendered_release_follows_the_envelope_not_the_master_curve(void) {
     Chain chain = chain_default();
     chain.amp.kind = AMP_ENVELOPE;
     chain.amp.env = env_params_default();
-    chain.amp.env.curve = 0.5f;
     voice_set_chain(&voice, chain);
     voice_note_on(&voice, 110.0f, 0.5f);
 
@@ -131,8 +126,9 @@ static void rendered_release_follows_the_envelope_not_the_master_curve(void) {
     voice_note_off(&voice);
     voice_render_frames(&voice, (size_t)(SR * chain.amp.env.release_s * 0.5f),
                         capture_gain, &capture);
-    CHECK_NEAR(capture.gain / held, 0.5f, 1e-3f,
-               "halfway through a linear release the audible gain is %g",
+    /* 80 dB over the release, so halfway is 40 dB down */
+    CHECK_NEAR(capture.gain / held, 0.01f, 1e-3f,
+               "halfway through the release the audible gain is %g",
                (double)(capture.gain / held));
     voice_free(&voice);
 }
@@ -194,7 +190,7 @@ void test_envelope(void) {
     zero_sustain_stays_held();
     the_envelope_is_normalized();
     sustain_is_a_literal_envelope_level();
-    the_decay_follows_the_field_s_own_curve_control();
+    the_decay_falls_evenly_in_db();
     a_retrigger_arrives_over_the_attack();
     a_retrigger_does_not_punch_a_hole();
     a_released_note_ends();

@@ -21,7 +21,7 @@ const Control PARAMS[PARAM_COUNT] = {
     [PARAM_FIELD] = {"field", "field", 0, 1, CURVE_LINEAR, 1, false, "%.2f",
                      NULL, NULL, PG_PATCH},
     [PARAM_CURVE] = {"curve", "curve", 0, 1, CURVE_LINEAR, 1, false, "%+.2f",
-                     NULL, NULL, PG_PATCH | PG_ENV},
+                     NULL, NULL, PG_PATCH},
     [PARAM_LEVEL] = {"level", "level", 0, 1, CURVE_LINEAR, 1, false, "%.2f",
                      NULL, NULL, PG_PATCH},
     /* squared, so the narrow beating end gets most of the travel */
@@ -264,7 +264,6 @@ void params_send(App *a, int groups) {
         a->chain.amp.env.decay_s = a->shadow_decay_s;
         a->chain.amp.env.sustain = a->shadow_sustain;
         a->chain.amp.env.release_s = a->shadow_release_s;
-        a->chain.amp.env.curve = a->shadow.curve;
         app_send(a, (Event){.kind = EV_SET_CHAIN, .u.chain = a->chain});
     }
 }

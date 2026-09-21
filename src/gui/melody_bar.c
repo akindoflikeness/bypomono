@@ -38,6 +38,37 @@ static void pitch_readout(App *a, Ui *ui, Flow *flow, bool driving) {
     }
 }
 
+/* SYNC puts the notes on the clock, one per division; otherwise rate hz.
+   Returns true when a press was refused because midi owns the notes. */
+static bool rate_control(App *a, Ui *ui, Rct r, bool driving) {
+    MelodyParams *m = &a->shadow_melody;
+    FontId body = ui_font(12.0f);
+    Rct chip = cut_left(&r, text_width(body, "SYNC", 0.0f) + 2.0f * GAP);
+    cut_left(&r, GROUP);
+    if (driving) {
+        chip_button(ui, ui_id("melody sync"), chip, "SYNC", m->sync);
+        return param_fader_veiled(a, ui, r, PARAM_MEL_RATE) && press_on(ui, r);
+    }
+    if (chip_button(ui, ui_id("melody sync"), chip, "SYNC", m->sync)) {
+        m->sync = !m->sync;
+        params_send(a, PG_MELODY);
+    }
+    if (!m->sync) {
+        param_fader(a, ui, r, PARAM_MEL_RATE);
+        return false;
+    }
+    char text[32];
+    snprintf(text, sizeof text, "note %s", CHANDAS_DIVISIONS[m->division].name);
+    int step = stepper(ui, ui_id("melody division"), r, text, true);
+    /* the divisions run long to short, so the left arrow moves down it */
+    int d = m->division - step;
+    if (step && d >= 0 && d < CHANDAS_DIVISIONS_LEN) {
+        m->division = (int8_t)d;
+        params_send(a, PG_MELODY);
+    }
+    return false;
+}
+
 void draw_melody_page(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     FontId body = ui_font(12.0f);
@@ -57,7 +88,7 @@ void draw_melody_page(App *a, Ui *ui, Rct r) {
                                         70.0f));
         if (chip_button(ui, ui_id("melody sh"), br, lbl, m->enabled)) {
             if (driving) refused = true;
-            else m->enabled = !m->enabled, changed = true;
+            else melody_set_enabled(a, !m->enabled);
         }
     }
     for (int src = 0; src < 2; src++) {
@@ -108,6 +139,10 @@ void draw_melody_page(App *a, Ui *ui, Rct r) {
     for (int i = 0; i < n; i++) {
         Rct fr = rct_xywh(faders.x0 + (float)i * (w + GROUP), faders.y0, w,
                           FADER_H);
+        if (i == 0) {
+            refused |= rate_control(a, ui, fr, driving);
+            continue;
+        }
         if (!driving) param_fader(a, ui, fr, FADERS[i]);
         else refused |= param_fader_veiled(a, ui, fr, FADERS[i]) && press_on(ui, fr);
     }

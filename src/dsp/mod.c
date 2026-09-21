@@ -216,10 +216,6 @@ void mod_advance(Mod *m, size_t samples, float bpm) {
                 next = (float)SEQ_STEPS;
                 s->done = true;
             }
-            int from = (int)floorf(s->pos), to = (int)floorf(next);
-            if (to != from && !s->done && p->gate[to % SEQ_STEPS]
-                && seq_has_pitch_route(&m->bank, i))
-                m->retrigger = true;
             if (p->mode == SEQ_LOOP) next = fmodf(next, (float)SEQ_STEPS);
             s->pos = next;
         }
@@ -293,17 +289,4 @@ int mod_apply(Mod *m, const ModBase *base, ModBase *out) {
     m->groups_prev = groups;
     m->groups = groups;
     return write;
-}
-
-bool mod_take_retrigger(Mod *m, bool notes_elsewhere) {
-    bool fire = m->retrigger && !notes_elsewhere;
-    m->retrigger = false;
-    return fire;
-}
-
-void seq_retrigger(VoiceBank *v, Chandas *h) {
-    float hz = voice_bank_target_hz(v);
-    voice_bank_note_off_all(v);
-    voice_bank_note_on(v, -1, hz, 1.0f);
-    chandas_note_pulse(h);
 }

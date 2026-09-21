@@ -220,27 +220,16 @@ bool seq_parse(Command *c, char *err, size_t n) {
             }
             m->set_values = true;
             i += SEQ_STEPS;
-        } else if (strcasecmp(w, "step") == 0 || strcasecmp(w, "gate") == 0) {
-            bool gate = strcasecmp(w, "gate") == 0;
+        } else if (strcasecmp(w, "step") == 0) {
             int step;
             if (!next || !whole(next, 1, SEQ_STEPS, &step) || i + 2 >= c->nwords)
-                return reason(err, n, "%s wants a step, 1 to 16, then %s", w,
-                              gate ? "on or off" : "a value");
+                return reason(err, n, "step wants a step, 1 to 16, then a value");
             const char *val = c->words[i + 2];
-            if (gate) {
-                bool on = strcasecmp(val, "on") == 0;
-                if (!on && strcasecmp(val, "off") != 0)
-                    return reason(err, n, "gate wants on or off, not '%s'", val);
-                m->gates[m->ngates].step = (uint8_t)(step - 1);
-                m->gates[m->ngates].on = on;
-                m->ngates++;
-            } else {
-                if (!number(val, &v) || v < 0.0f || v > 1.0f)
-                    return reason(err, n, "a step value goes 0 to 1, not '%s'", val);
-                m->steps[m->nsteps].step = (uint8_t)(step - 1);
-                m->steps[m->nsteps].v = v;
-                m->nsteps++;
-            }
+            if (!number(val, &v) || v < 0.0f || v > 1.0f)
+                return reason(err, n, "a step value goes 0 to 1, not '%s'", val);
+            m->steps[m->nsteps].step = (uint8_t)(step - 1);
+            m->steps[m->nsteps].v = v;
+            m->nsteps++;
             i += 2;
         } else if (strcasecmp(w, "to") == 0) {
             if (!parse_route_words(c, &i, err, n)) return false;
@@ -267,7 +256,6 @@ static bool apply_seq_cmd(const SeqCmd *m, ModBank *bank, char *err, size_t n) {
     if (m->set_fill) seq_fill(&p, (SeqFill)m->fill, (uint32_t)s + 1u);
     if (m->set_values) memcpy(p.value, m->values, sizeof p.value);
     for (int i = 0; i < m->nsteps; i++) p.value[m->steps[i].step] = m->steps[i].v;
-    for (int i = 0; i < m->ngates; i++) p.gate[m->gates[i].step] = m->gates[i].on;
     if (m->set_mode) p.mode = m->mode;
     if (m->set_smooth) p.smooth = m->smooth;
     if (m->set_rate) {
@@ -379,7 +367,7 @@ bool seq_run(App *a, const Command *c, char *err, size_t n) {
     const SeqCmd *m = &c->seq;
     View v;
     bool sets = m->set_mode || m->set_smooth || m->set_rate || m->set_fill
-                || m->set_values || m->nsteps || m->ngates || m->nroutes;
+                || m->set_values || m->nsteps || m->nroutes;
     if (m->slot >= 0 && !sets && !m->rm && !a->mods.seq[m->slot].used)
         return reason(err, n, "there is no seq %d yet; seq %d fill flat makes it",
                       m->slot + 1, m->slot + 1);
@@ -433,9 +421,9 @@ int seq_complete(char *const words[], int nwords, const char *prefix,
             n = add(out, n, max, prefix, MOD_TARGETS[t].name);
         return n;
     }
-    static const char *const KEYS[] = {"fill", "set",  "step",  "gate",
-                                       "loop", "once", "smooth", "steps",
-                                       "rate", "to",   "rm"};
+    static const char *const KEYS[] = {"fill", "set",  "step",  "loop",
+                                       "once", "smooth", "steps", "rate",
+                                       "to",   "rm"};
     for (size_t i = 0; i < sizeof KEYS / sizeof KEYS[0]; i++)
         n = add(out, n, max, prefix, KEYS[i]);
     return n;

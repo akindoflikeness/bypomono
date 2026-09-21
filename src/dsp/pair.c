@@ -185,7 +185,6 @@ static bool chain_eq(const Chain *a, const Chain *b) {
         return a->amp.env.attack_s == b->amp.env.attack_s &&
                a->amp.env.decay_s == b->amp.env.decay_s &&
                a->amp.env.release_s == b->amp.env.release_s &&
-               a->amp.env.curve == b->amp.env.curve &&
                a->amp.env.sustain == b->amp.env.sustain;
     }
     return true;

@@ -203,7 +203,6 @@ static void rig_make(void *ctx) {
             c.amp.env.decay_s = 0.296f;
             c.amp.env.sustain = 0.427f;
             c.amp.env.release_s = 0.368f;
-            c.amp.env.curve = 0.74f;
         }
         voice_bank_set_chain_now(&r->bank, c);
         if (!r->melody_on) voice_bank_note_on(&r->bank, 45, HZ, 0.9f);

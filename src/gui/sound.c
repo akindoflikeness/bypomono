@@ -84,6 +84,7 @@ void draw_sound_column(App *a, Ui *ui, Rct r) {
         }
     }
     param_fader(a, ui, stack_row(&s, FADER_H), PARAM_FIELD);
+    param_fader(a, ui, stack_row(&s, FADER_H), PARAM_CURVE); /* field's shape */
 
     stack_space(&s, GROUP);
     inverted_strip(c, stack_row(&s, strip_h), "VOICES");

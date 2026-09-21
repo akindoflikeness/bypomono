@@ -18,6 +18,7 @@ Session session_default(void) {
     s.release_s = env.release_s;
     s.drone = false;
     s.mods = mod_bank_default();
+    s.pitch = pitch_seq_params_default();
     return s;
 }
 
@@ -85,6 +86,11 @@ Session session_sanitize(Session s) {
     s.decay_s = clampf(s.decay_s, 0.0f, ENV_TIME_MAX);
     s.sustain = clampf(s.sustain, 0.0f, 1.0f);
     s.release_s = clampf(s.release_s, ENV_RELEASE_MIN, ENV_TIME_MAX);
+    if (s.melody.division < 0 || s.melody.division >= CHANDAS_DIVISIONS_LEN)
+        s.melody.division = MELODY_DEFAULT_DIVISION;
     s.mods = mod_bank_sanitize(s.mods);
+    s.pitch = pitch_seq_sanitize(s.pitch);
+    /* one of them plays the notes */
+    if (s.pitch.enabled) s.melody.enabled = false;
     return s;
 }

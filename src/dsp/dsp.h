@@ -168,10 +168,10 @@ void patch_apply_ratio_mode(Patch *patch, RatioMode ratio_mode);
 /* ---------- envelope ---------- */
 
 typedef struct {
-    float attack_s, decay_s, release_s, curve;
+    float attack_s, decay_s, release_s;
     float sustain;
 } EnvParams;
-EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5, 1.0 */
+EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 1.0 */
 
 #define ENV_TIME_MAX 8.0f
 #define ENV_RELEASE_MIN 0.05f
@@ -277,6 +277,7 @@ typedef struct {
     float rot_k;
     float lp;
     float fb;
+    float in_gain, in_k; /* the input fades in after a clear */
 } RipLine;
 
 typedef struct {
@@ -543,12 +544,16 @@ typedef struct {
     uint8_t range_degrees;
     float rate_hz;
     HoldSource source;
+    bool sync;       /* notes on the clock instead of at rate_hz */
+    int8_t division; /* CHANDAS_DIVISIONS index, one note's length */
 } MelodyParams;
 MelodyParams melody_params_default(void);
+#define MELODY_DEFAULT_DIVISION 18 /* 1/8 */
 
 typedef struct {
     MelodyParams params;
     float sample_rate;
+    float bpm;
     size_t countdown;
     float weyl;
     uint32_t rng;
@@ -557,9 +562,61 @@ typedef struct {
 
 void melody_init(Melody *m, float sample_rate, MelodyParams params);
 void melody_set_params(Melody *m, MelodyParams params);
+void melody_set_tempo(Melody *m, float bpm);
 bool melody_samples_until_fire(const Melody *m, size_t *out);
 void melody_advance(Melody *m, size_t samples);
 float melody_fire(Melody *m);
+
+/* ---------- pitch sequencer ---------- */
+
+#define PITCH_STEPS 16
+#define PITCH_RANGE_ST 24.0f /* each step reaches this far above or below root */
+#define PITCH_DEFAULT_DIVISION 21 /* 1/16 */
+#define PITCH_GATE_LEN_MIN 0.05f
+
+/* A note sequencer on the clock: each step has a pitch, a gate and a
+   velocity. A gated step plays a note that lasts gate_len of the step. */
+typedef struct {
+    bool enabled;
+    int8_t division;   /* CHANDAS_DIVISIONS index, one step's length */
+    uint8_t length;    /* steps played, 1..16 */
+    uint8_t root_midi;
+    bool snap;         /* round each step to whole semitones */
+    float gate_len;    /* fraction of a step the note is held */
+    float pitch[PITCH_STEPS]; /* semitones from the root */
+    bool gate[PITCH_STEPS];
+    float velocity[PITCH_STEPS]; /* 0..1 */
+} PitchSeqParams;
+PitchSeqParams pitch_seq_params_default(void); /* off, every step gated at root */
+PitchSeqParams pitch_seq_sanitize(PitchSeqParams p);
+/* the semitones a step plays, snapped when snap is on */
+float pitch_seq_semitones(const PitchSeqParams *p, int step);
+float pitch_seq_step_seconds(const PitchSeqParams *p, float bpm);
+
+typedef enum { PITCH_EV_NONE, PITCH_EV_ON, PITCH_EV_OFF } PitchEventKind;
+typedef struct {
+    PitchEventKind kind;
+    float hz, velocity; /* PITCH_EV_ON */
+} PitchEvent;
+
+typedef struct {
+    PitchSeqParams params;
+    float sample_rate, bpm;
+    int step;             /* the step playing now, -1 before the first */
+    size_t until_step;    /* samples until the next step starts */
+    size_t until_off;     /* samples until the held note ends */
+    bool held;
+} PitchSeq;
+
+void pitch_seq_init(PitchSeq *s, float sample_rate);
+void pitch_seq_set_params(PitchSeq *s, PitchSeqParams p);
+void pitch_seq_set_tempo(PitchSeq *s, float bpm);
+/* samples until something is due; false while it is off */
+bool pitch_seq_samples_until(const PitchSeq *s, size_t *out);
+/* the next thing due now: a note ending comes before a step starting. Call
+   until it returns PITCH_EV_NONE. */
+PitchEvent pitch_seq_fire(PitchSeq *s);
+void pitch_seq_advance(PitchSeq *s, size_t samples);
 
 /* ---------- reverb ---------- */
 
@@ -796,8 +853,7 @@ Stereo chandas_process(Chandas *h, Stereo dry);
 
 typedef enum { SEQ_LOOP = 0, SEQ_ONCE, SEQ_MODE_COUNT } SeqMode;
 
-/* Sixteen values played in time. Pointed at pitch they are a melody; pointed
-   anywhere else they move that control. */
+/* Sixteen values played in time, moving whatever they are routed to. */
 typedef struct {
     bool used;
     uint8_t mode;    /* SeqMode; ONCE restarts on every note */
@@ -805,7 +861,6 @@ typedef struct {
     int8_t division; /* one step's length: CHANDAS_DIVISIONS index, or -1 */
     float length_s;  /* all sixteen steps, when division is -1 */
     float value[SEQ_STEPS]; /* 0..1; 0.5 leaves the target where it is */
-    bool gate[SEQ_STEPS];   /* retrigger the note on this step (pitch only) */
 } SeqParams;
 
 typedef enum {
@@ -882,7 +937,6 @@ typedef struct {
     float sample_rate;
     int groups;      /* MOD_G_* touched by live routes */
     int groups_prev; /* touched on the previous tick */
-    bool retrigger;  /* a gated step on a pitch sequence was just reached */
 } Mod;
 
 void mod_init(Mod *m, float sample_rate);
@@ -891,17 +945,15 @@ void mod_set_route(Mod *m, int slot, ModRoute r);
 /* restarts every ONCE sequence */
 void mod_note_on(Mod *m);
 bool mod_any_seq(const Mod *m);
-/* advances every sequence by samples; sets retrigger when a gate is crossed */
+/* advances every sequence by samples */
 void mod_advance(Mod *m, size_t samples, float bpm);
 /* base plus every route; returns the groups that need writing to the engine,
    including groups a route just left so they go back to base */
 int mod_apply(Mod *m, const ModBase *base, ModBase *out);
-/* true once for each gate crossed, unless something else is playing the
-   notes (the melody or midi) */
-bool mod_take_retrigger(Mod *m, bool notes_elsewhere);
-/* a gated step: the note starts again at the pitch it has now. It leaves the
-   sequences alone, so a ONCE sequence is not restarted by its own gate. */
-void seq_retrigger(VoiceBank *v, Chandas *h);
+
+/* plays a pitch sequencer event on the voices, the way the melody's notes
+   are played: one note at a time, the last one let go first */
+void pitch_event_play(PitchEvent e, VoiceBank *v, Chandas *h, Mod *m);
 
 /* ---------- session ---------- */
 
@@ -917,11 +969,11 @@ typedef struct {
     float warmth;
     bool limiter_enabled;
     float limiter_ceiling_db;
-    /* the note envelope (Chain.amp.env), which lives outside Patch; its
-       curve is Patch.curve */
+    /* the note envelope (Chain.amp.env), which lives outside Patch */
     float attack_s, decay_s, sustain, release_s;
     bool drone;
     ModBank mods;
+    PitchSeqParams pitch;
 } Session;
 
 Session session_default(void);

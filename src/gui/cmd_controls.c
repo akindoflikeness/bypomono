@@ -233,6 +233,8 @@ static int scale_of(const char *word) {
     return -1;
 }
 
+static int division_of(const char *word);
+
 bool control_parse_mel(Command *c, char *err, size_t n) {
     if (c->nwords == 0) return true;
     bool state;
@@ -241,6 +243,14 @@ bool control_parse_mel(Command *c, char *err, size_t n) {
         return reason(err, n, "mel %s stands alone", c->words[0]);
     }
     const char *key = c->words[0];
+    if (strcasecmp(key, "sync") == 0) {
+        if (c->nwords == 2 && on_off(c->words[1], &state)) return true;
+        return reason(err, n, "mel sync wants on or off");
+    }
+    /* a division puts the notes on the clock */
+    if (strcasecmp(key, "rate") == 0 && c->nwords == 2
+        && division_of(c->words[1]) >= 0)
+        return true;
     if (strcasecmp(key, "src") == 0) {
         if (c->nwords == 2
             && (strcasecmp(c->words[1], "weyl") == 0
@@ -271,13 +281,25 @@ bool control_run_mel(App *a, const Command *c, char *err, size_t n) {
         push_log(a, "mel %s  src %s  tuning %s  scale %s", m->enabled ? "on" : "off",
                  m->source == HOLD_GOLDEN_WEYL ? "weyl" : "xorshift",
                  tuning_name(m->tuning), scale_name(m->scale));
-        push_log(a, "mel root %d  range %d  rate %.3g hz", m->root_midi,
-                 m->range_degrees, (double)m->rate_hz);
+        if (m->sync)
+            push_log(a, "mel root %d  range %d  sync %s", m->root_midi,
+                     m->range_degrees, CHANDAS_DIVISIONS[m->division].name);
+        else
+            push_log(a, "mel root %d  range %d  rate %.3g hz", m->root_midi,
+                     m->range_degrees, (double)m->rate_hz);
         return true;
     }
     bool state;
+    int d;
     if (on_off(c->words[0], &state)) {
-        m->enabled = state;
+        melody_set_enabled(a, state);
+        return true;
+    } else if (strcasecmp(c->words[0], "sync") == 0) {
+        on_off(c->words[1], &m->sync);
+    } else if (strcasecmp(c->words[0], "rate") == 0
+               && (d = division_of(c->words[1])) >= 0) {
+        m->sync = true;
+        m->division = (int8_t)d;
     } else if (strcasecmp(c->words[0], "src") == 0) {
         m->source = strcasecmp(c->words[1], "weyl") == 0 ? HOLD_GOLDEN_WEYL
                                                           : HOLD_XORSHIFT;
@@ -299,7 +321,7 @@ bool control_run_mel(App *a, const Command *c, char *err, size_t n) {
 int control_complete_mel(char *const words[], int nwords, const char *prefix,
                          char out[][CAND_LEN], int max) {
     static const char *const KEYS[] = {
-        "on", "off", "src", "tuning", "scale", "root", "range", "rate"};
+        "on", "off", "src", "tuning", "scale", "root", "range", "rate", "sync"};
     int n = 0;
     if (nwords == 0) {
         for (size_t i = 0; i < sizeof KEYS / sizeof KEYS[0]; i++)
@@ -310,6 +332,10 @@ int control_complete_mel(char *const words[], int nwords, const char *prefix,
     if (strcasecmp(words[0], "src") == 0) {
         n = add(out, n, max, prefix, "weyl");
         return add(out, n, max, prefix, "xorshift");
+    }
+    if (strcasecmp(words[0], "sync") == 0) {
+        n = add(out, n, max, prefix, "on");
+        return add(out, n, max, prefix, "off");
     }
     if (strcasecmp(words[0], "tuning") == 0) {
         for (int i = 0; i < NUM_TUNINGS; i++)

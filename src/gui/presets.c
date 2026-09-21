@@ -944,6 +944,7 @@ Session app_session(const App *a) {
     s.release_s = a->shadow_release_s;
     s.drone = a->engaged;
     s.mods = a->mods;
+    s.pitch = a->shadow_pitch;
     return s;
 }
 
@@ -977,6 +978,8 @@ void app_apply_session(App *a, Session s) {
     app_send(a, (Event){.kind = EV_GLIDE_TO, .u.f = a->drone_hz});
     a->mods = s.mods;
     app_send_mods(a);
+    a->shadow_pitch = s.pitch;
+    pitch_send(a);
 }
 
 void app_save_state(App *a) {

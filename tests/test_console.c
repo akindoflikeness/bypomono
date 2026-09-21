@@ -46,6 +46,7 @@ CcTarget cc_target_from_name(const char *s) {
 }
 
 static App app;
+static bool run_ok(const char *line, char *err, size_t cap);
 
 /* ---------- files ---------- */
 
@@ -164,6 +165,11 @@ static void every_verb_parses_its_forms(void) {
             parses("help presets", CMD_HELP);
             continue;
         }
+        if (strcmp(v->name, "op") == 0) {
+            parses("op 1", CMD_RUN);
+            parses("op 5 off", CMD_RUN);
+            continue;
+        }
         if (v->required == 0) parses(v->name, CMD_RUN);
         if (v->nargs >= 1) {
             snprintf(line, sizeof line, "%s some_name", v->name);
@@ -276,6 +282,95 @@ static void two_line_errors(void) {
     CHECK(!parse_line("bind 7 loudness", &c, err, sizeof err),
           "unknown control parsed");
     CHECK(strstr(err, "index") != NULL, "unknown control lists the controls");
+}
+
+/* ---------- completion ---------- */
+
+static bool has_candidate(const LineState *s, const char *want) {
+    for (int i = 0; i < s->ncand; i++)
+        if (strcmp(s->cand[i], want) == 0) return true;
+    return false;
+}
+
+static void completion_uses_live_preset_state(void) {
+    app.preset_count = 2;
+    snprintf(app.preset_names[0].bank, sizeof app.preset_names[0].bank,
+             "%s", STOCK_BANK);
+    snprintf(app.preset_names[0].name, sizeof app.preset_names[0].name,
+             "tokyo_ghost");
+    app.preset_names[1].bank[0] = 0;
+    snprintf(app.preset_names[1].name, sizeof app.preset_names[1].name,
+             "drift");
+    app.folder_count = 2;
+    snprintf(app.preset_folders[0], sizeof app.preset_folders[0], "%s",
+             STOCK_BANK);
+    snprintf(app.preset_folders[1], sizeof app.preset_folders[1], "lab");
+
+    LineState s;
+    line_state(&app, "load BYPO/to", &s);
+    CHECK(has_candidate(&s, "BYPO/tokyo_ghost"),
+          "load did not complete a qualified preset");
+    line_state(&app, "cd l", &s);
+    CHECK(has_candidate(&s, "lab"), "cd did not complete a live folder");
+    line_state(&app, "ls ", &s);
+    CHECK(has_candidate(&s, "ALL") && has_candidate(&s, "USER")
+              && has_candidate(&s, "mod"),
+          "ls did not complete its views");
+    line_state(&app, "mv USER/drift ", &s);
+    CHECK(has_candidate(&s, "USER") && has_candidate(&s, "lab"),
+          "mv did not complete writable destinations");
+    CHECK(!has_candidate(&s, "BYPO"), "mv offered its read-only destination");
+    line_state(&app, "rm -r l", &s);
+    CHECK(has_candidate(&s, "lab"), "rm -r did not complete a folder");
+    line_state(&app, "bind 7 in", &s);
+    CHECK(has_candidate(&s, "index"), "bind did not complete controls");
+    line_state(&app, "unbind ", &s);
+    CHECK(has_candidate(&s, "all"), "unbind did not complete all");
+
+    char completed[256];
+    line_state(&app, "load BYPO/to", &s);
+    CHECK(line_take("load BYPO/to", &s, 0, completed, sizeof completed)
+              && strcmp(completed, "load BYPO/tokyo_ghost ") == 0,
+          "completion produced '%s'", completed);
+
+    line_state(&app, "drone o", &s);
+    CHECK(has_candidate(&s, "on") && has_candidate(&s, "off"),
+          "drone did not complete on/off");
+    line_state(&app, "op 3 ", &s);
+    CHECK(has_candidate(&s, "on") && has_candidate(&s, "off"),
+          "op did not complete on/off");
+}
+
+static void switches_query_and_take_explicit_state(void) {
+    char err[768];
+    app.engaged = true;
+    app.shadow_melody.enabled = false;
+    app.shadow_melody.rate_hz = PHI;
+    app.shadow.ops[1].enabled = true;
+    app.shadow.ops[1].ratio = 2.0f;
+    app.shadow.ops[1].level = 0.75f;
+
+    CHECK(run_ok("drone", err, sizeof err), "drone query: %s", err);
+    CHECK(app.engaged, "drone query changed its state");
+    CHECK(run_ok("mel", err, sizeof err), "mel query: %s", err);
+    CHECK(!app.shadow_melody.enabled, "mel query changed its state");
+    CHECK(run_ok("op 2", err, sizeof err), "op query: %s", err);
+    CHECK(app.shadow.ops[1].enabled, "op query changed its state");
+
+    CHECK(run_ok("drone off", err, sizeof err), "drone off: %s", err);
+    CHECK(!app.engaged, "drone off left it on");
+    CHECK(run_ok("mel on", err, sizeof err), "mel on: %s", err);
+    CHECK(app.shadow_melody.enabled, "mel on left it off");
+    CHECK(run_ok("op 2 off", err, sizeof err), "op off: %s", err);
+    CHECK(!app.shadow.ops[1].enabled, "op 2 off left it on");
+
+    Command c;
+    CHECK(!parse_line("drone toggle", &c, err, sizeof err)
+              && strstr(err, "wants on or off"),
+          "drone accepted an implicit toggle: %s", err);
+    CHECK(!parse_line("op 0 on", &c, err, sizeof err)
+              && strstr(err, "1 to 5"),
+          "op accepted zero: %s", err);
 }
 
 /* ---------- history ---------- */
@@ -453,6 +548,8 @@ void test_console(void) {
     every_verb_parses_its_forms();
     help_on_every_verb();
     two_line_errors();
+    completion_uses_live_preset_state();
+    switches_query_and_take_explicit_state();
     history_records_every_submitted_line();
     trash_and_undo_round_trip();
     /* the temp home is two levels up: <home>/bypo/presets */

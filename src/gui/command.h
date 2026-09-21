@@ -54,7 +54,7 @@ typedef struct {
 } Flag;
 
 typedef enum {
-    G_PRESETS, G_MODULATION, G_MIDI, G_RECORDING, G_CONSOLE, G_COUNT
+    G_PRESETS, G_SOUND, G_MODULATION, G_MIDI, G_RECORDING, G_CONSOLE, G_COUNT
 } VerbGroup;
 
 /* false leaves a one-line reason in err; the caller adds the usage line */
@@ -70,7 +70,7 @@ typedef bool (*VerbPreview)(App *a, const Command *c, View *out);
 /* the words that could follow what is typed so far; prefix is the word being
    typed, and may be empty */
 #define CAND_MAX 40
-#define CAND_LEN 32
+#define CAND_LEN 192
 typedef int (*VerbComplete)(char *const words[], int nwords, const char *prefix,
                             char out[][CAND_LEN], int max);
 

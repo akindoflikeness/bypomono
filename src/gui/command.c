@@ -91,6 +91,14 @@ static bool run_undo(App *a, const Command *c, char *err, size_t n);
 static bool run_bind(App *a, const Command *c, char *err, size_t n);
 static bool run_unbind(App *a, const Command *c, char *err, size_t n);
 static bool run_help(App *a, const Command *c, char *err, size_t n);
+static bool parse_switch(Command *c, char *err, size_t n);
+static bool run_switch(App *a, const Command *c, char *err, size_t n);
+static bool parse_op(Command *c, char *err, size_t n);
+static bool run_op(App *a, const Command *c, char *err, size_t n);
+static int switch_complete(char *const words[], int nwords, const char *prefix,
+                           char out[][CAND_LEN], int max);
+static int op_complete(char *const words[], int nwords, const char *prefix,
+                       char out[][CAND_LEN], int max);
 static bool run_pins(App *a, const Command *c, char *err, size_t n);
 static bool parse_pins(Command *c, char *err, size_t n);
 static int pins_complete(char *const words[], int nwords, const char *prefix,
@@ -137,6 +145,28 @@ static const Verb VERBS[] = {
     {"undo", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
      "put back the last trashed, renamed, moved or overwritten item", run_undo, NULL, NULL, NULL,
      NULL, NULL, NULL},
+    {.name = "drone",
+     .group = G_SOUND,
+     .about = "show or set whether the drone is sounding",
+     .run = run_switch,
+     .parse = parse_switch,
+     .complete = switch_complete,
+     .form = "[on|off]"},
+    {.name = "mel",
+     .group = G_SOUND,
+     .about = "show or set whether the melody sequencer is running",
+     .run = run_switch,
+     .parse = parse_switch,
+     .complete = switch_complete,
+     .form = "[on|off]"},
+    {.name = "op",
+     .group = G_SOUND,
+     .about = "show an operator, or set its power",
+     .run = run_op,
+     .parse = parse_op,
+     .complete = op_complete,
+     .form = "<1-5> [on|off]",
+     .extra = "with no state word, prints power, ratio, detune in cents and level"},
     {"bind", {NULL}, G_MIDI, {"cc", "control"}, 2, 2, true, NULL, 0,
      "point a controller at a control", run_bind, NULL, NULL, NULL,
      NULL, NULL, NULL},
@@ -185,7 +215,7 @@ static const Verb VERBS[] = {
 #define NVERBS ((int)(sizeof VERBS / sizeof VERBS[0]))
 
 static const char *const GROUP_TITLES[G_COUNT] = {
-    "presets", "modulation", "midi", "recording", "console"};
+    "presets", "sound", "modulation", "midi", "recording", "console"};
 
 int verb_count(void) { return NVERBS; }
 const Verb *verb_at(int i) { return i >= 0 && i < NVERBS ? &VERBS[i] : NULL; }
@@ -758,6 +788,193 @@ static int add_cand(char out[][CAND_LEN], int n, int max, const char *prefix,
     return n + 1;
 }
 
+static bool switch_word(const char *word, bool *out) {
+    if (strcasecmp(word, "on") == 0) {
+        *out = true;
+        return true;
+    }
+    if (strcasecmp(word, "off") == 0) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_switch(Command *c, char *err, size_t n) {
+    if (c->nwords == 0) return true;
+    bool on;
+    if (c->nwords > 1)
+        return reason(err, n, "%s takes one state word", c->verb->name);
+    if (!switch_word(c->words[0], &on))
+        return reason(err, n, "%s wants on or off, not '%s'", c->verb->name,
+                      c->words[0]);
+    return true;
+}
+
+static bool run_switch(App *a, const Command *c, char *err, size_t n) {
+    (void)err;
+    (void)n;
+    bool *state;
+    Event ev;
+    if (strcmp(c->verb->name, "drone") == 0) {
+        state = &a->engaged;
+        ev.kind = EV_ENGAGE;
+    } else {
+        state = &a->shadow_melody.enabled;
+        ev.kind = EV_SET_MELODY;
+    }
+    if (c->nwords == 0) {
+        if (strcmp(c->verb->name, "drone") == 0)
+            push_log(a, "drone %s at %.1f hz", *state ? "on" : "off",
+                     (double)a->drone_hz);
+        else
+            push_log(a, "mel %s at %.3g hz", *state ? "on" : "off",
+                     (double)a->shadow_melody.rate_hz);
+        return true;
+    }
+    bool on;
+    switch_word(c->words[0], &on);
+    *state = on;
+    if (strcmp(c->verb->name, "drone") == 0) {
+        ev.u.flag = on;
+    } else {
+        ev.u.melody = a->shadow_melody;
+    }
+    app_send(a, ev);
+    push_log(a, "%s %s", c->verb->name, on ? "on" : "off");
+    return true;
+}
+
+static bool parse_op(Command *c, char *err, size_t n) {
+    if (c->nwords == 0)
+        return reason(err, n, "op wants its number first, 1 to %d", NUM_OPS);
+    if (c->nwords > 2) return reason(err, n, "op takes a number and a state");
+    char *end = NULL;
+    long op = strtol(c->words[0], &end, 10);
+    if (!end || *end || op < 1 || op > NUM_OPS)
+        return reason(err, n, "op wants its number first, 1 to %d, not '%s'",
+                      NUM_OPS, c->words[0]);
+    if (c->nwords == 2) {
+        bool on;
+        if (!switch_word(c->words[1], &on))
+            return reason(err, n, "op wants on or off, not '%s'", c->words[1]);
+    }
+    return true;
+}
+
+static bool run_op(App *a, const Command *c, char *err, size_t n) {
+    (void)err;
+    (void)n;
+    int at = (int)strtol(c->words[0], NULL, 10) - 1;
+    OpParams *op = &a->shadow.ops[at];
+    if (c->nwords == 1) {
+        push_log(a, "op %d %s  ratio %.3g  detune %.3g cents  level %.3g",
+                 at + 1, op->enabled ? "on" : "off", (double)op->ratio,
+                 (double)op->detune_cents, (double)op->level);
+        return true;
+    }
+    bool on;
+    switch_word(c->words[1], &on);
+    op->enabled = on;
+    app_send(a, (Event){.kind = EV_SET_PATCH, .u.patch = a->shadow});
+    push_log(a, "op %d %s", at + 1, on ? "on" : "off");
+    return true;
+}
+
+static int switch_complete(char *const words[], int nwords, const char *prefix,
+                           char out[][CAND_LEN], int max) {
+    (void)words;
+    if (nwords > 0) return 0;
+    int n = add_cand(out, 0, max, prefix, "on");
+    return add_cand(out, n, max, prefix, "off");
+}
+
+static int op_complete(char *const words[], int nwords, const char *prefix,
+                       char out[][CAND_LEN], int max) {
+    int n = 0;
+    if (nwords == 0) {
+        for (int i = 1; i <= NUM_OPS; i++) {
+            char number[4];
+            snprintf(number, sizeof number, "%d", i);
+            n = add_cand(out, n, max, prefix, number);
+        }
+        return n;
+    }
+    if (nwords == 1) return switch_complete(words, 0, prefix, out, max);
+    return 0;
+}
+
+static int complete_paths(const App *a, const char *prefix,
+                          char out[][CAND_LEN], int n, int max) {
+    n = add_cand(out, n, max, prefix, SELECTED_WORD);
+    for (int i = 0; i < a->preset_count; i++) {
+        const PresetRef *p = &a->preset_names[i];
+        if (strcmp(p->bank, TRASH_DIR) == 0) continue;
+        char path[256];
+        preset_qualified(p, path, sizeof path);
+        n = add_cand(out, n, max, prefix, path);
+    }
+    return n;
+}
+
+static int complete_folders(const App *a, const char *prefix, bool views,
+                            bool writable, char out[][CAND_LEN], int n,
+                            int max) {
+    if (views) {
+        n = add_cand(out, n, max, prefix, "ALL");
+        n = add_cand(out, n, max, prefix, MINE_BANK);
+    } else if (!writable) {
+        n = add_cand(out, n, max, prefix, MINE_BANK);
+    }
+    for (int i = 0; i < a->folder_count; i++) {
+        const char *folder = a->preset_folders[i];
+        if (strcasecmp(folder, TRASH_DIR) == 0) continue;
+        if (writable && strcasecmp(folder, STOCK_BANK) == 0) continue;
+        n = add_cand(out, n, max, prefix, folder);
+    }
+    return n;
+}
+
+static int complete_generic(const App *a, const Verb *v,
+                            char *const words[], int nwords,
+                            const char *prefix, char out[][CAND_LEN], int max) {
+    int positional = 0;
+    bool recursive = false;
+    for (int i = 0; i < nwords; i++) {
+        if (strcmp(words[i], "-r") == 0 || strcmp(words[i], "--r") == 0)
+            recursive = true;
+        else if (!is_flag(words[i]))
+            positional++;
+    }
+    int n = 0;
+    if (strcmp(v->name, "load") == 0 || strcmp(v->name, "ow") == 0
+        || (strcmp(v->name, "rm") == 0 && !recursive)
+        || (strcmp(v->name, "mv") == 0 && positional == 0))
+        return complete_paths(a, prefix, out, n, max);
+    if (strcmp(v->name, "cd") == 0)
+        return complete_folders(a, prefix, true, false, out, n, max);
+    if (strcmp(v->name, "ls") == 0) {
+        n = add_cand(out, n, max, prefix, "mod");
+        return complete_folders(a, prefix, true, false, out, n, max);
+    }
+    if (strcmp(v->name, "mv") == 0 && positional == 1) {
+        n = add_cand(out, n, max, prefix, MINE_BANK);
+        return complete_folders(a, prefix, false, true, out, n, max);
+    }
+    if (strcmp(v->name, "rmdir") == 0
+        || (strcmp(v->name, "rm") == 0 && recursive))
+        return complete_folders(a, prefix, false, true, out, n, max);
+    if (strcmp(v->name, "bind") == 0 && positional == 1) {
+        for (int t = CC_INDEX; t <= CC_LAST; t++)
+            n = add_cand(out, n, max, prefix,
+                         cc_target_name((CcTarget)t));
+        return n;
+    }
+    if (strcmp(v->name, "unbind") == 0 && positional == 0)
+        return add_cand(out, n, max, prefix, "all");
+    return 0;
+}
+
 void line_state(App *a, const char *line, LineState *out) {
     memset(out, 0, sizeof *out);
     char buf[LOG_LINE_LEN * 2];
@@ -776,9 +993,14 @@ void line_state(App *a, const char *line, LineState *out) {
                                   verb_at(i)->name);
     } else {
         const Verb *v = verb_lookup(words[0]);
-        if (v && v->complete)
-            out->ncand = v->complete(words + 1, given - 1, prefix, out->cand,
-                                     CAND_MAX);
+        if (v) {
+            if (v->complete)
+                out->ncand = v->complete(words + 1, given - 1, prefix,
+                                         out->cand, CAND_MAX);
+            else
+                out->ncand = complete_generic(a, v, words + 1, given - 1,
+                                              prefix, out->cand, CAND_MAX);
+        }
     }
 
     if (n == 0) return;

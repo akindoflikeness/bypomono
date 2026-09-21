@@ -273,17 +273,18 @@ static void two_line_errors(void) {
 
 /* ---------- history ---------- */
 
-/* what the console does with a line: run it, and remember it only if it ran */
+/* what the console does with a line: remember every submitted non-empty line,
+   then try to parse and run it */
 static bool run_line(App *a, History *h, const char *line) {
+    history_push(h, line);
     Command c;
     char err[768];
     if (!parse_line(line, &c, err, sizeof err)) return false;
     if (c.kind == CMD_RUN && !command_run(a, &c, err, sizeof err)) return false;
-    if (c.kind != CMD_NOP) history_push(h, line);
     return true;
 }
 
-static void history_records_only_lines_that_ran(void) {
+static void history_records_every_submitted_line(void) {
     History h;
     memset(&h, 0, sizeof h);
     h.cursor = -1;
@@ -296,11 +297,16 @@ static void history_records_only_lines_that_ran(void) {
     CHECK(unbind_calls == 1 && last_unbind == -1, "unbind all reached the rig");
     CHECK(run_line(&app, &h, "unbind all"), "repeat ran");
     CHECK(run_line(&app, &h, "   "), "blank ran");
-    CHECK(h.len == 2, "history holds %d lines, wanted 2", h.len);
+    CHECK(h.len == 4, "history holds %d lines, wanted 4", h.len);
     CHECK(strcmp(history_up(&h), "unbind all") == 0, "up 1");
-    CHECK(strcmp(history_up(&h), "bind 7 - index") == 0, "up 2");
-    CHECK(strcmp(history_up(&h), "bind 7 - index") == 0, "up stays on oldest");
-    CHECK(strcmp(history_down(&h), "unbind all") == 0, "down 1");
+    CHECK(strcmp(history_up(&h), "delete nothere") == 0, "up 2");
+    CHECK(strcmp(history_up(&h), "bind 900 - index") == 0, "up 3");
+    CHECK(strcmp(history_up(&h), "bind 7 - index") == 0, "up 4");
+    CHECK(strcmp(history_up(&h), "bind 7 - index") == 0,
+          "up stays on oldest");
+    CHECK(strcmp(history_down(&h), "bind 900 - index") == 0, "down 1");
+    CHECK(strcmp(history_down(&h), "delete nothere") == 0, "down 2");
+    CHECK(strcmp(history_down(&h), "unbind all") == 0, "down 3");
     CHECK(history_down(&h) == NULL, "down off the newest end");
     CHECK(history_up(&h) != NULL && strcmp(h.line[h.cursor], "unbind all") == 0,
           "up after leaving starts at the newest");
@@ -426,7 +432,7 @@ void test_console(void) {
     every_verb_parses_its_forms();
     help_on_every_verb();
     two_line_errors();
-    history_records_only_lines_that_ran();
+    history_records_every_submitted_line();
     trash_and_undo_round_trip();
     /* the temp home is two levels up: <home>/bypo/presets */
     char root[1024];

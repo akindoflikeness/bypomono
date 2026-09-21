@@ -113,6 +113,9 @@ static History history;
 void console_run_line(App *a, const char *line) {
     /* nothing arms any more; the field stays for the icons panes.c draws */
     a->preset_armed = 0;
+    /* Failed input is the most useful input to recover with Up: one typo
+       should cost one edit, not retyping the whole command. */
+    history_push(&history, line);
     Command c;
     char err[768];
     if (!parse_line(line, &c, err, sizeof err)) {
@@ -123,7 +126,6 @@ void console_run_line(App *a, const char *line) {
     case CMD_NOP: break;
     case CMD_HELP:
         log_lines(a, c.text);
-        history_push(&history, line);
         break;
     case CMD_RUN: {
         char echo[512];
@@ -133,7 +135,6 @@ void console_run_line(App *a, const char *line) {
             log_lines(a, err);
             break;
         }
-        history_push(&history, line);
         break;
     }
     }
@@ -272,16 +273,6 @@ void draw_footer(App *a, Ui *ui, Rct r) {
     FontId small = ui_font(11.0f), body = ui_font(12.0f);
     float cy = roundf(0.5f * (r.y0 + r.y1));
 
-    char cnt[16];
-    snprintf(cnt, sizeof cnt, "%d", a->log_len);
-    float chw = roundf(text_width(body, cnt, 0.0f) + 2.0f * GAP);
-    float chh = roundf(text_row_height(body) + 2.0f * TIGHT);
-    Rct chip = rct_xywh(roundf(r.x1 - GROUP - chw), roundf(cy - 0.5f * chh),
-                        chw, chh);
-    draw_rect_stroke(c, chip, 1.0f, PAPER);
-    text_draw(c, body, rct_center(chip), ALIGN_CENTER_CENTER, cnt, PAPER,
-              0.0f);
-
     const char *tab_label = "console";
     float bw = roundf(text_width(body, tab_label, 0.0f) + 2.0f * GAP);
     float bh = 21.0f;
@@ -294,7 +285,7 @@ void draw_footer(App *a, Ui *ui, Rct r) {
     if (tr.hovered) ui->cursor = CURSOR_POINTER;
 
     float x = tab.x1 + GROUP;
-    float right_limit = chip.x0 - GROUP;
+    float right_limit = r.x1 - GROUP;
     UiId fid = ui_id("console input");
 
     if (!open) {

@@ -172,6 +172,13 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
     UiId buttons_id = ui_id("preset buttons");
     bool on_buttons = ui->focus == buttons_id;
 
+    if (a->preset_armed == ARMED_DELETE && a->have_delete_armed
+        && a->last_frame_time - a->preset_delete_armed_at
+               > PRESET_DELETE_ARM_S) {
+        a->preset_armed = 0;
+        a->have_delete_armed = false;
+    }
+
     {
         float w = roundf(text_width(f12, "▷", 0.0f) + 14.0f);
         float h = roundf(row12 + 8.0f);
@@ -336,7 +343,6 @@ void draw_title_bar(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     FontId f12 = ui_font(12.0f);
     FontId f11 = ui_font(11.0f);
-    FontId f26 = ui_font(26.0f);
     Rct content = rct(r.x0 + GROUP, r.y0 + GAP, r.x1 - GROUP, r.y1 - GAP);
     float cy = 0.5f * (content.y0 + content.y1);
     float x = content.x1;
@@ -387,8 +393,6 @@ void draw_title_bar(App *a, Ui *ui, Rct r) {
 
     draw_preset_bar(a, ui, rct(content.x0, content.y0, x, content.y1));
 
-    text_draw(c, f26, (P2){r.x0 + GAP, roundf(cy)}, ALIGN_LEFT_CENTER,
-              "BLOW YOUR PHASE OFF", PAPER, 1.2f);
 }
 
 /* ---------- presets pane ---------- */
@@ -600,16 +604,14 @@ void draw_info_pane(App *a, Ui *ui) {
              (double)(load * 100.0f), (double)(peak * 100.0f));
     snprintf(fps_v, sizeof fps_v, "%.0f", (double)a->fps);
 
-    const char *labels[7] = {"audio out", "sample rate", "buffer", "dsp load",
-                             "fps",       "version",     "midi in"};
-    const char *values[7] = {
-        "default",       rate_v, buffer_v,
-        load_v,          fps_v,  "v" APP_VERSION,
-        a->midi_open ? a->midi_port : "none"};
+    const char *labels[6] = {"audio out", "sample rate", "buffer",
+                             "dsp load",  "fps",         "midi in"};
+    const char *values[6] = {"default", rate_v, buffer_v, load_v, fps_v,
+                             a->midi_open ? a->midi_port : "none"};
 
     float chrome_h = roundf(row12 + 2.0f * SNUG);
     float strip_h = chrome_h;
-    float rows_h = 7.0f * 13.0f + 6.0f * GROUP;
+    float rows_h = 6.0f * 13.0f + 5.0f * GROUP;
     float ports_h;
     if (nports == 0)
         ports_h = row11;
@@ -633,7 +635,7 @@ void draw_info_pane(App *a, Ui *ui) {
     window_chrome_tagged(c, strip, "INFO", NULL);
     y += chrome_h + SECTION;
 
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 6; i++) {
         float rcy = roundf(y + 6.5f);
         text_draw(c, f11, (P2){inner.x0 + 44.5f, rcy}, ALIGN_CENTER_CENTER,
                   labels[i], PAPER, 0.0f);

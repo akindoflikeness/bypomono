@@ -42,12 +42,6 @@ static SeamAct seam(Ui *ui, const char *id, Rct grab, bool upright) {
 }
 
 static void handle_keys(App *a, Ui *ui) {
-    /* any key dismisses the splash */
-    bool any_key = ui->in.text[0] != '\0';
-    for (int i = 0; i < 512 && !any_key; i++)
-        if (ui->in.key_pressed[i]) any_key = true;
-    if (!a->splash_over && (any_key || ui->in.pressed)) a->splash_over = true;
-
     UiId bar_id = ui_id("preset bar");
     UiId list_id = ui_id("preset list");
     UiId buttons_id = ui_id("preset buttons");
@@ -177,7 +171,7 @@ void app_frame(App *a, Ui *ui) {
     draw_stage(a, ui, cell_y);
     canvas_set_clip(c, saved);
 
-    draw_keyboard_cell(a, ui, rct_shrink(cell_w, 2.0f));
+    draw_display_cell(a, ui, rct_shrink(cell_w, 2.0f));
     draw_controls_house(a, ui, rct_shrink(cell_x, 2.0f));
 
     /* seams */
@@ -220,11 +214,6 @@ void app_frame(App *a, Ui *ui) {
     if (a->show_fps) draw_fps_counter(a, ui, footer_h);
     if (a->console_open) draw_console_drawer(a, ui, footer);
 
-    /* splash on top of everything */
-    if (!a->splash_over) {
-        float elapsed = (float)ui->time;
-        if (!splash_draw(a, c, full, elapsed)) a->splash_over = true;
-    }
 }
 
 void app_init_defaults(App *a) {
@@ -247,4 +236,6 @@ void app_init_defaults(App *a) {
     a->cc_bind[1] = CC_GLIDE; /* modwheel */
     a->preset_filter.kind = FILTER_ALL;
     a->ops_tab = 0;
+    a->display_tab = 0;
+    push_log(a, "BLOW YOUR PHASE OFF v%s", APP_VERSION);
 }

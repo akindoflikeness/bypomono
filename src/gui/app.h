@@ -57,6 +57,7 @@
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
 #define APP_VERSION "1.1.2"
+#define PRESET_DELETE_ARM_S 0.8
 
 /* scale.c */
 /* largest quarter step whose magnified grid fits avail_w x avail_h less
@@ -295,6 +296,7 @@ typedef struct App {
     int preset_armed; /* console Command id or 0 */
     PresetRef preset_delete_armed; /* the row the DELETE button armed on */
     bool have_delete_armed;
+    double preset_delete_armed_at;
     bool preset_searching, preset_focus, presets_open, presets_were_open;
     int preset_button_at; /* bar button the keyboard walk is on */
     double preset_click_at;
@@ -324,7 +326,7 @@ typedef struct App {
 
     /* panes */
     bool info_open, show_fps;
-    int ops_tab;
+    int ops_tab, display_tab;
     UiScroll left_scroll, right_scroll;
 
     /* recording */
@@ -471,7 +473,7 @@ void draw_right_rail(App *a, Ui *ui, Rct r);
 /* centre.c */
 void draw_controls_house(App *a, Ui *ui, Rct r);
 void draw_stage(App *a, Ui *ui, Rct r);    /* starfield + monolith */
-void draw_keyboard_cell(App *a, Ui *ui, Rct r);
+void draw_display_cell(App *a, Ui *ui, Rct r);
 void centre_prelayout(App *a, Ui *ui);     /* phase integrators, dread */
 
 /* visuals.c: logalith + splash */

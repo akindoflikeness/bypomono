@@ -119,30 +119,8 @@ void app_set_engaged(App *a, bool on) {
 #define FADER_TEXT 13.0f
 #define FADER_HOVER_SLOP 2.0f
 
-#define KB_KEY_W 40.0f
-#define KB_KEY_MIN_W 22.0f
-#define KB_WHITES 7
-#define KB_LIT 0.55f
-#define KB_LIT_BLACK 0.75f
-#define KB_IN_SCALE 0.18f
-#define KB_IN_SCALE_BLACK 0.3f
-#define KB_READOUT_W 6
-#define KB_HZ_W 12
-#define KB_LABEL_PX 11.0f
-#define KB_LABEL_MIN_W 13.0f
-#define KB_LABEL_INSET 9.0f
-#define KB_MIN_H 44.0f
-#define KB_MAX_H 180.0f
-#define KB_READOUT 22.0f
-#define ENV_PLOT_H 55.0f
 #define ENV_KNOB_H 62.0f
 #define ENV_KNOBS 5
-
-static const uint8_t KB_WHITE[7] = {0, 2, 4, 5, 7, 9, 11};
-static const uint8_t KB_BLACK_SEMI[5] = {1, 3, 6, 8, 10};
-static const uint8_t KB_BLACK_AFTER[5] = {0, 1, 3, 4, 5};
-static const char *const KB_NAMES[12] = {"C",  "C#", "D",  "D#", "E",  "F",
-                                         "F#", "G",  "G#", "A",  "A#", "B"};
 
 static const float BAYER[4][4] = {
     {0.0f / 16.0f, 8.0f / 16.0f, 2.0f / 16.0f, 10.0f / 16.0f},
@@ -678,32 +656,6 @@ static void paint_phase(const App *a, Canvas *c, Rct rect) {
     canvas_set_clip(c, saved);
 }
 
-static void paint_waveform(const App *a, Canvas *c, Rct rect) {
-    draw_rect_stroke(c, rect, 2.0f, PAPER);
-    Rct inner = rct_shrink(rect, 4.0f);
-    Rct saved = canvas_clip(c);
-    canvas_set_clip(c, rct_intersect(inner, saved));
-    draw_graticule(c, inner, 6, 4);
-    int n = a->lissa_len;
-    if (n < 2) {
-        canvas_set_clip(c, saved);
-        return;
-    }
-    float cy = rct_center(inner).y;
-    float scale = rct_h(inner) * 0.5f;
-    P2 prev = {0, 0};
-    for (int i = 0; i < n; i++) {
-        int idx = (a->lissa_head - n + i + 512) % 512;
-        float l = a->lissa_x[idx], r = a->lissa_y[idx];
-        float x = inner.x0 + rct_w(inner) * (float)i / (float)(n - 1);
-        float y = cy - (l + r) * FRAC_1_SQRT_2 * scale;
-        P2 p = {x, y};
-        if (i > 0) beam_segment(c, prev, p, i, i < n / 3);
-        prev = p;
-    }
-    canvas_set_clip(c, saved);
-}
-
 /* ---------- envelope ---------- */
 
 static EnvParams shadow_env(const App *a) {
@@ -852,173 +804,125 @@ static void envelope_knobs(App *a, Ui *ui, Rct r) {
     }
 }
 
-/* ---------- keyboard cell ---------- */
-
-static int hz_to_midi(float hz) {
-    if (hz <= 0.0f) return -1;
-    return (int)roundf(69.0f + 12.0f * log2f(hz / 440.0f));
-}
-
-static void kb_note_label(int note, char *out, size_t cap) {
-    if (note < 0) {
-        snprintf(out, cap, "\xe2\x80\x94"); /* em dash */
-        return;
-    }
-    int pc = note % 12;
-    snprintf(out, cap, "%s%d", KB_NAMES[pc], note / 12 - 1);
-}
-
-static uint16_t kb_scale_mask(const MelodyParams *m) {
-    if (!m->enabled || m->tuning != TUNING_SCALE) return 0;
-    size_t n = 0;
-    const uint8_t *iv = scale_intervals(m->scale, &n);
-    uint16_t mask = 0;
-    for (size_t i = 0; i < n; i++)
-        mask |= (uint16_t)(1u << (((uint16_t)m->root_midi + iv[i]) % 12));
-    return mask;
-}
-
-/* pad by display columns (codepoints), not bytes */
-static void pad_cols(char *dst, size_t cap, const char *s, int cols) {
-    size_t len = strlen(s);
-    if (len >= cap - 1) len = cap - 1;
-    memcpy(dst, s, len);
-    int seen = 0;
-    for (size_t i = 0; i < len; i++)
-        if (((uint8_t)s[i] & 0xC0) != 0x80) seen++;
-    size_t at = len;
-    while (seen < cols && at + 1 < cap) {
-        dst[at++] = ' ';
-        seen++;
-    }
-    dst[at] = '\0';
-}
-
-void draw_keyboard_cell(App *a, Ui *ui, Rct r) {
+static void draw_envelope_view(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     Rct saved = canvas_clip(c);
     canvas_set_clip(c, r);
     Rct content = rct_shrink(r, 6.0f);
-
-    float hz = pitch_load(&a->pitch);
-    int sounding = hz_to_midi(hz);
-    int midi_held = midi_note_get(&a->midi_note);
-    bool driving = midi_driving(a);
-    const char *source;
-    if (driving)
-        source = "key";
-    else if (a->shadow_melody.enabled)
-        source = "seq";
-    else if (!a->engaged)
-        source = "";
-    else
-        source = "drone";
-    bool is_board = strcmp(source, "key") == 0 || strcmp(source, "seq") == 0;
-
-    float y = content.y0 + GROUP;
-    float avail = rct_w(content);
-    /* the envelope takes the bottom of the cell; a short cell drops the
-       plot first, then the knobs */
-    float room = content.y1 - y - KB_READOUT - KB_MIN_H;
-    bool knobs = room >= GROUP + ENV_KNOB_H;
-    bool plot = room >= 2.0f * GROUP + ENV_KNOB_H + ENV_PLOT_H;
-    float env_h = (knobs ? GROUP + ENV_KNOB_H : 0.0f)
-                  + (plot ? GROUP + ENV_PLOT_H : 0.0f);
-    float h = clampf(content.y1 - y - KB_READOUT - env_h, KB_MIN_H, KB_MAX_H);
-    Rct band = rct(content.x0, y, content.x1, y + h);
-
-    uint32_t held = atomic_load_explicit(&a->held_pcs, memory_order_relaxed);
-    bool sounding_now = a->engaged || midi_held >= 0 || (driving && held != 0)
-                        || (a->shadow_melody.enabled && !driving);
-
-    if (is_board) {
-        uint32_t lit = 0;
-        if (sounding_now) {
-            lit = held;
-            if (lit == 0) {
-                int pc = sounding % 12;
-                if (pc < 0) pc += 12;
-                lit = 1u << pc;
-            }
-        }
-        uint16_t scale = kb_scale_mask(&a->shadow_melody);
-        int root = a->shadow_melody.enabled ? a->shadow_melody.root_midi % 12 : -1;
-
-        float kw = fminf(avail / (float)KB_WHITES, KB_KEY_W);
-        kw = fmaxf(kw, fminf(KB_KEY_MIN_W, avail / (float)KB_WHITES));
-        float w = floorf(kw * (float)KB_WHITES);
-        P2 origin = {roundf(rct_center(band).x - w * 0.5f), band.y0};
-        float bw = kw * 0.62f;
-        float bh = h * 0.6f;
-
-        FontId font = ui_font(KB_LABEL_PX);
-        for (int i = 0; i < KB_WHITES; i++) {
-            Rct kr = rct_xywh(roundf(origin.x + (float)i * kw), origin.y,
-                              fmaxf(floorf(kw), 1.0f), h);
-            int pc = KB_WHITE[i];
-            if (lit >> pc & 1u)
-                dither_rect(c, rct_shrink(kr, 2.0f), KB_LIT, 3.0f);
-            else if (scale & (1u << pc))
-                dither_rect(c, rct_shrink(kr, 2.0f), KB_IN_SCALE, 3.0f);
-            hard_rect(c, kr, root == pc ? 2.0f : 1.0f);
-            if (kw >= KB_LABEL_MIN_W) {
-                const char *text = KB_NAMES[pc];
-                float tw = text_width(font, text, 0.0f);
-                float th = text_row_height(font);
-                P2 at = {rct_center(kr).x, kr.y1 - KB_LABEL_INSET};
-                draw_rect_filled(c,
-                                 rct(at.x - (tw + 4.0f) * 0.5f,
-                                     at.y - (th + 1.0f) * 0.5f,
-                                     at.x + (tw + 4.0f) * 0.5f,
-                                     at.y + (th + 1.0f) * 0.5f),
-                                 INK_BLACK);
-                text_draw(c, font, at, ALIGN_CENTER_CENTER, text, PAPER, 0.0f);
-            }
-        }
-        for (int i = 0; i < 5; i++) {
-            int after = KB_BLACK_AFTER[i];
-            Rct kr = rct_xywh(roundf(origin.x + (float)(after + 1) * kw - bw * 0.5f),
-                              origin.y, fmaxf(floorf(bw), 1.0f), bh);
-            int pc = KB_BLACK_SEMI[i];
-            draw_rect_filled(c, kr, INK_BLACK);
-            hard_rect(c, kr, root == pc ? 2.0f : 1.0f);
-            if (lit >> pc & 1u)
-                dither_rect(c, rct_shrink(kr, 3.0f), KB_LIT_BLACK, 3.0f);
-            else if (scale & (1u << pc))
-                dither_rect(c, rct_shrink(kr, 3.0f), KB_IN_SCALE_BLACK, 3.0f);
-        }
-    } else {
-        paint_waveform(a, c, band);
-    }
-
-    y = band.y1 + GROUP + GAP;
-    char name[16], value[32];
-    if (sounding_now) {
-        kb_note_label(sounding, name, sizeof name);
-        snprintf(value, sizeof value, "%.2f hz", hz);
-    } else {
-        snprintf(name, sizeof name, "\xe2\x80\x94");
-        snprintf(value, sizeof value, "silent");
-    }
-    char pname[32], pvalue[48], label[96];
-    pad_cols(pname, sizeof pname, name, KB_READOUT_W);
-    pad_cols(pvalue, sizeof pvalue, value, KB_HZ_W);
-    snprintf(label, sizeof label, "%s%s%s", pname, pvalue, source);
-    text_draw(c, ui_font(12.0f), (P2){content.x0, y}, ALIGN_LEFT_TOP, label,
-              PAPER, 0.0f);
-
-    float ey = content.y1 - env_h;
-    if (plot) {
-        ey += GROUP;
-        paint_envelope(a, c, rct(content.x0, ey, content.x1, ey + ENV_PLOT_H));
-        ey += ENV_PLOT_H;
-    }
-    if (knobs) {
-        ey += GROUP;
-        envelope_knobs(a, ui, rct(content.x0, ey, content.x1, ey + ENV_KNOB_H));
-    }
+    float knobs_h = fminf(ENV_KNOB_H, rct_h(content));
+    float plot_bottom = fmaxf(content.y0, content.y1 - knobs_h - GROUP);
+    paint_envelope(a, c, rct(content.x0, content.y0, content.x1, plot_bottom));
+    envelope_knobs(a, ui,
+                   rct(content.x0, plot_bottom + GROUP, content.x1,
+                       content.y1));
 
     canvas_set_clip(c, saved);
+}
+
+/* ---------- contextual display ---------- */
+
+static void display_level_value(char *out, size_t cap, float value) {
+    snprintf(out, cap, "%.2f", (double)clampf(value, 0.0f, 1.0f));
+    if (out[0] == '0') memmove(out, out + 1, strlen(out));
+}
+
+static void draw_operator_view(App *a, Ui *ui, Rct r) {
+    Canvas *c = ui->canvas;
+    Rct saved = canvas_clip(c);
+    canvas_set_clip(c, r);
+    Rct content = rct_shrink(r, 6.0f);
+    FontId heading = ui_font(9.0f);
+    float y = content.y0;
+
+    /* The algorithm bench proved that five oscillators are easier to read as
+       one table. Here the table is part of the instrument, so its values are
+       controls instead of diagnostics. */
+    float op_w = 25.0f;
+    float controls_x = content.x0 + op_w + GROUP;
+    float controls_w = content.x1 - controls_x;
+    float ratio_w = floorf((controls_w - GROUP) * GOLDEN_MAJOR);
+    float level_w = controls_w - GROUP - ratio_w;
+
+    text_draw(c, heading, (P2){content.x0, y}, ALIGN_LEFT_TOP, "OP", PAPER,
+              1.0f);
+    text_draw(c, heading, (P2){controls_x, y}, ALIGN_LEFT_TOP, "RATIO", PAPER,
+              1.0f);
+    text_draw(c, heading, (P2){controls_x + ratio_w + GROUP, y}, ALIGN_LEFT_TOP,
+              "LEVEL", PAPER, 1.0f);
+    y += text_row_height(heading) + TIGHT;
+
+    Patch defaults = patch_init(a->shadow.algorithm, a->shadow.ratio_mode);
+    bool changed = false;
+    for (int i = 0; i < NUM_OPS; i++) {
+        bool enabled = a->shadow.ops[i].enabled;
+        char op[8], value[32];
+        snprintf(op, sizeof op, "%d", i + 1);
+        if (chip_button(ui, ui_id_n("display.op", i),
+                        rct_xywh(content.x0, y, op_w, FADER_H), op, enabled)) {
+            a->shadow.ops[i].enabled = !enabled;
+            changed = true;
+        }
+
+        Rct ratio_r = rct_xywh(controls_x, y, ratio_w, FADER_H);
+        snprintf(value, sizeof value, "%.2f", (double)a->shadow.ops[i].ratio);
+        FaderAct ratio = fader_track(ui, ui_id_n("display.ratio", i), ratio_r,
+                                     "", value,
+                                     position_of_log(a->shadow.ops[i].ratio,
+                                                     OP_RATIO_MIN,
+                                                     OP_RATIO_MAX));
+        if (ratio.kind == FADER_SET) {
+            float next = log_position(ratio.t, OP_RATIO_MIN, OP_RATIO_MAX);
+            if (next != a->shadow.ops[i].ratio) {
+                a->shadow.ops[i].ratio = next;
+                changed = true;
+            }
+        } else if (ratio.kind == FADER_RESET
+                   && a->shadow.ops[i].ratio != defaults.ops[i].ratio) {
+            a->shadow.ops[i].ratio = defaults.ops[i].ratio;
+            changed = true;
+        }
+
+        Rct level_r = rct_xywh(controls_x + ratio_w + GROUP, y, level_w,
+                               FADER_H);
+        display_level_value(value, sizeof value, a->shadow.ops[i].level);
+        FaderAct level = fader_track(ui, ui_id_n("display.level", i), level_r,
+                                     "", value,
+                                     clampf(a->shadow.ops[i].level, 0.0f, 1.0f));
+        if (level.kind == FADER_SET) {
+            if (level.t != a->shadow.ops[i].level) {
+                a->shadow.ops[i].level = level.t;
+                changed = true;
+            }
+        } else if (level.kind == FADER_RESET
+                   && a->shadow.ops[i].level != 1.0f) {
+            /* Level is relative operator gain: its neutral/default value is
+               unity, independent of the algorithm's initial depth trim. */
+            a->shadow.ops[i].level = 1.0f;
+            changed = true;
+        }
+        y += FADER_H + GROUP;
+    }
+    if (changed) {
+        Event ev = {.kind = EV_SET_PATCH, .u.patch = a->shadow};
+        app_send(a, ev);
+    }
+    canvas_set_clip(c, saved);
+}
+
+void draw_display_cell(App *a, Ui *ui, Rct r) {
+    static const char *const TABS[2] = {"OPERATORS", "ENVELOPE"};
+    float tab_h = text_row_height(ui_font(12.0f * 1.3f)) + 2.0f * 2.0f
+                  + 2.0f * SNUG;
+    int hit = wave_tabs(ui, ui_id("display.tabs"),
+                        rct_xywh(r.x0, r.y0, rct_w(r), tab_h), TABS, 2,
+                        a->display_tab);
+    if (hit >= 0) a->display_tab = hit;
+
+    Rct page = rct(r.x0, r.y0 + tab_h + CELL_GUTTER, r.x1, r.y1);
+    if (a->display_tab == 0)
+        draw_operator_view(a, ui, page);
+    else
+        draw_envelope_view(a, ui, page);
 }
 
 /* ---------- the controls house ---------- */

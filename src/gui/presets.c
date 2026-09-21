@@ -1223,11 +1223,15 @@ void preset_delete_highlighted(App *a) {
     char q[256];
     preset_qualified(&a->preset_selected, q, sizeof q);
     bool armed_here = a->preset_armed == ARMED_DELETE && a->have_delete_armed
-                      && refs_equal(&a->preset_delete_armed, &a->preset_selected);
+                      && a->last_frame_time - a->preset_delete_armed_at
+                             <= PRESET_DELETE_ARM_S
+                      && refs_equal(&a->preset_delete_armed,
+                                    &a->preset_selected);
     if (!armed_here) {
         a->preset_delete_armed = a->preset_selected;
         a->have_delete_armed = true;
         a->preset_armed = ARMED_DELETE;
+        a->preset_delete_armed_at = a->last_frame_time;
         push_log(a, "delete '%s' — again to confirm.", q);
         return;
     }

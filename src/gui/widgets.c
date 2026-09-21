@@ -66,6 +66,7 @@ void bubble_chain(Canvas *c, Ui *ui, P2 a, P2 b, bool active, float index,
 /* ---------- faders ---------- */
 
 static void backed_text(Canvas *c, P2 at, bool right, const char *s, FontId f) {
+    if (!s || !s[0]) return;
     float w = text_width(f, s, 0.0f);
     float h = text_row_height(f);
     P2 min;
@@ -99,6 +100,10 @@ FaderAct fader_track(Ui *ui, UiId id, Rct r, const char *label,
     backed_text(c, (P2){inner.x1 - 3.0f, cy}, true, value, vf);
     FaderAct act = {FADER_NONE, 0.0f};
     if (resp.double_clicked && resp.hovered) {
+        /* Reset happens on the second press. Consume the active drag now so
+           its later release cannot arrive as a normal click and overwrite
+           the default with the pointer position. */
+        if (ui->active == id) ui->active = 0;
         act.kind = FADER_RESET;
     } else if (resp.dragged || resp.clicked) {
         float denom = iw > 1.0f ? iw : 1.0f;
@@ -238,6 +243,8 @@ FaderAct knob_track(Ui *ui, UiId id, Rct r, const char *label,
     FaderAct act = {FADER_NONE, t};
     if (resp.hovered) ui->cursor = CURSOR_RESIZE_V;
     if (resp.double_clicked && resp.hovered) {
+        /* As with a fader, the release belongs to the reset gesture. */
+        if (ui->active == id) ui->active = 0;
         act.kind = FADER_RESET;
     } else if (resp.dragged && resp.drag_delta.y != 0.0f) {
         bool fine = ui->in.key_down[SDL_SCANCODE_LSHIFT]
@@ -571,4 +578,3 @@ void draw_block_caret(Canvas *c, Ui *ui, FontId f, P2 text_pos,
     uint8_t ink = (bg == INK_BLACK) ? PAPER : INK_BLACK;
     draw_rect_filled(c, rct_xywh(x, y, roundf(w), h), ink);
 }
-

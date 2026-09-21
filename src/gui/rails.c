@@ -562,10 +562,7 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
     y += strip_h + GROUP;
     y += TIGHT;
 
-    Compiled compiled = compile(a->shadow.algorithm);
-    Patch defaults = patch_init(a->shadow.algorithm, a->shadow.ratio_mode);
     int toggled = -1;
-    bool operator_changed = false;
     for (int i = 0; i < NUM_OPS; i++) {
         float row_h = th + 2.0f * SNUG;
         if (row_h < 22.0f) row_h = 22.0f;
@@ -580,13 +577,8 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
             toggled = i;
         float bx = x + bw + GROUP;
 
-        char ratio[32];
-        snprintf(ratio, sizeof ratio, "\xC3\x97%-6.3f", a->shadow.ops[i].ratio);
-        text_draw(c, body, (P2){bx, y + row_h * 0.5f}, ALIGN_LEFT_CENTER,
-                  ratio, PAPER, 0.0f);
-        bx += text_width(body, ratio, 0.0f) + GROUP;
-
-        Rct mr = rct_xywh(bx, y + (row_h - 12.0f) * 0.5f, 70.0f, 12.0f);
+        Rct mr = rct(bx, y + (row_h - 12.0f) * 0.5f, x + w,
+                     y + (row_h + 12.0f) * 0.5f);
         draw_rect_stroke(c, mr, 2.0f, PAPER);
         Rct mi = rct_shrink(mr, 2.0f);
         dither_rect(c,
@@ -594,42 +586,12 @@ void draw_right_rail(App *a, Ui *ui, Rct r) {
                              rct_w(mi) * fminf(a->env[i] * 1.4f, 1.0f),
                              rct_h(mi)),
                     0.9f, 2.0f);
-        bx += 70.0f + GROUP;
-
-        bool carrier = (compiled.carriers >> i & 1) == 1;
-        char tag[16];
-        snprintf(tag, sizeof tag, "%-3s %-2s", carrier ? "car" : "mod",
-                 compiled.feedback_op == i ? "fb" : "");
-        text_draw(c, body, (P2){bx, y + row_h * 0.5f}, ALIGN_LEFT_CENTER, tag,
-                  PAPER, 0.0f);
         y += row_h + GROUP;
-
-        /* Ratio and level are direct operator controls. The graph above can
-           turn this oscillator into a carrier or a modulator, but it never
-           gets to replace either value. The logarithmic range gives useful
-           resolution around 1x while retaining deliberately extreme FM. */
-        char label[24], value[32];
-        snprintf(label, sizeof label, "op %d ratio", i + 1);
-        snprintf(value, sizeof value, "x%.4f", (double)a->shadow.ops[i].ratio);
-        operator_changed |=
-            fad_log(ui, ui_id_n("rrail.ratio", i), rct_xywh(x, y, w, FADER_H),
-                    label, &a->shadow.ops[i].ratio, OP_RATIO_MIN, OP_RATIO_MAX,
-                    defaults.ops[i].ratio, value);
-        y += FADER_H + GROUP;
-
-        snprintf(label, sizeof label, "op %d level", i + 1);
-        snprintf(value, sizeof value, "%.3f", (double)a->shadow.ops[i].level);
-        operator_changed |=
-            fad_lin(ui, ui_id_n("rrail.level", i), rct_xywh(x, y, w, FADER_H),
-                    label, &a->shadow.ops[i].level, 0.0f, 1.0f,
-                    defaults.ops[i].level, value);
-        y += FADER_H + GROUP;
     }
     if (toggled >= 0) {
         a->shadow.ops[toggled].enabled = !a->shadow.ops[toggled].enabled;
-        operator_changed = true;
+        send_patch(a);
     }
-    if (operator_changed) send_patch(a);
     y += GROUP;
 
     {

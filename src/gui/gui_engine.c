@@ -628,14 +628,10 @@ void gui_run_unbind(App *a, int cc) {
 /* ---------- log ---------- */
 
 void push_log(App *a, const char *fmt, ...) {
-    double now = a->last_frame_time;
-    long t = (long)now;
     char line[LOG_LINE_LEN];
-    int n = snprintf(line, sizeof line, "[%02ld:%02ld:%02ld] ", t / 3600,
-                     t / 60 % 60, t % 60);
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(line + n, sizeof line - (size_t)n, fmt, ap);
+    vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
     a->log_head = (a->log_head + 1) % LOG_LINES;
     snprintf(a->log[a->log_head], LOG_LINE_LEN, "%s", line);
@@ -649,11 +645,7 @@ void push_log(App *a, const char *fmt, ...) {
 
 void push_log_view(App *a, const View *v) {
     for (int i = 0; i < v->n; i++) {
-        /* the timestamp goes on the first line; the rest indent under it */
-        if (i == 0)
-            push_log(a, "%s", v->line[i].text);
-        else
-            push_log(a, "           %s", v->line[i].text);
+        push_log(a, "%s", v->line[i].text);
         a->log_place[a->log_head] = v->line[i].place;
         a->log_graph[a->log_head] = v->line[i].graph;
     }

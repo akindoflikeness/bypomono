@@ -8,7 +8,6 @@
 
 #define FADER_TEXT 13.0f
 #define FADER_HOVER_SLOP 2.0f
-#define MARGIN_TICK SECTION
 
 #define WAVE_AMP 2.0f
 #define WAVE_RATE_HZ 0.9f
@@ -24,13 +23,6 @@ float tab_width(float available, float gap, int n) {
     float nf = (float)(n < 1 ? 1 : n);
     float w = floorf((available - gap * (nf - 1.0f)) / nf);
     return w < 0.0f ? 0.0f : w;
-}
-
-void draw_margin_bar(Canvas *c, Rct bar, bool inner_edge_on_left) {
-    float ox = inner_edge_on_left ? bar.x1 - MARGIN_TICK : bar.x0;
-    float ys[2] = {bar.y0, bar.y1 - 1.0f};
-    for (int i = 0; i < 2; i++)
-        draw_rect_filled(c, rct_xywh(ox, ys[i], MARGIN_TICK, 1.0f), PAPER);
 }
 
 void hard_rect(Canvas *c, Rct r, float width) {
@@ -479,49 +471,16 @@ int wave_tabs(Ui *ui, UiId id, Rct r, const char *const *labels, int n,
 
 /* ---------- icons ---------- */
 
-const char *const ICON_SAVE[9] = {
-    "#########",
-    "#.......#",
-    "#.:::::.#",
-    "#.:::::.#",
-    "#.......#",
-    "#.#####.#",
-    "#.#...#.#",
-    "#.#...#.#",
-    "#########",
-};
-const char *const ICON_DELETE[9] = {
+const char *const ICON_COG[9] = {
     "...###...",
-    ".#######.",
-    ".........",
-    ".#######.",
-    ".#:#:#:#.",
-    ".#:#:#:#.",
-    ".#:#:#:#.",
-    ".#:#:#:#.",
-    "..#####..",
-};
-const char *const ICON_FOLDER[9] = {
-    ".........",
-    "####.....",
-    "#...####.",
-    "#.......#",
-    "#.:::::.#",
-    "#.:::::.#",
-    "#.:::::.#",
-    "#.:::::.#",
-    "#########",
-};
-const char *const ICON_RECORD[9] = {
-    ".........",
-    "..#####..",
-    ".#######.",
-    "#########",
-    "#########",
-    "#########",
-    ".#######.",
-    "..#####..",
-    ".........",
+    ".##...##.",
+    ".#..#..#.",
+    "#..###..#",
+    "#.#.#.#.#",
+    "#..###..#",
+    ".#..#..#.",
+    ".##...##.",
+    "...###...",
 };
 
 void draw_icon(Canvas *c, const char *const rows[9], P2 at, uint8_t ink,

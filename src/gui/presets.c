@@ -1244,34 +1244,6 @@ void preset_run_delete(App *a, const char *args) {
     delete_preset(a, &preset);
 }
 
-void preset_delete_highlighted(App *a) {
-    if (!a->have_selected) {
-        push_log(a, "no preset highlighted to delete.");
-        a->preset_armed = 0;
-        a->have_delete_armed = false;
-        return;
-    }
-    char q[256];
-    preset_qualified(&a->preset_selected, q, sizeof q);
-    bool armed_here = a->preset_armed == ARMED_DELETE && a->have_delete_armed
-                      && a->last_frame_time - a->preset_delete_armed_at
-                             <= PRESET_DELETE_ARM_S
-                      && refs_equal(&a->preset_delete_armed,
-                                    &a->preset_selected);
-    if (!armed_here) {
-        a->preset_delete_armed = a->preset_selected;
-        a->have_delete_armed = true;
-        a->preset_armed = ARMED_DELETE;
-        a->preset_delete_armed_at = a->last_frame_time;
-        push_log(a, "delete '%s' — again to confirm.", q);
-        return;
-    }
-    a->preset_armed = 0;
-    a->have_delete_armed = false;
-    PresetRef preset = a->preset_selected;
-    delete_preset(a, &preset);
-}
-
 void preset_run_overwrite(App *a, const char *args) {
     char name[256];
     if (!clean_arg(a, args, name, sizeof name)) return;

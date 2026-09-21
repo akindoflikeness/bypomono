@@ -31,13 +31,12 @@
 #define GAP 5.0f
 #define GROUP 8.0f
 #define SECTION 13.0f
-#define MARGIN_BAR_W 21.0f
 #define FADER_H 23.0f
 #define FOOTER_LINE_H 23.0f
+#define PRESET_STRIP_H 23.0f /* top of column three; fits the 21px preset bar */
 #define ROOM_ART_H 144.0f
 #define TREE_H 150.0f
 #define ENGAGE_H 34.0f
-#define TITLE_BAR_H 34.0f
 #define CELL_GUTTER GAP
 #define HINT_CHIP_H 15.0f
 #define HINT_ROW_H 21.0f
@@ -49,15 +48,17 @@
 #define OPS_COL_W 250.0f
 #define STATS_COL_W 233.0f
 #define CONTROLS_HOUSE_W 325.0f
-#define REFERENCE_ROW_W (DESIGN_W - 2.0f * MARGIN_BAR_W)
+#define REFERENCE_ROW_W DESIGN_W
 #define REFERENCE_CENTRE_W (REFERENCE_ROW_W - STATS_COL_W - OPS_COL_W)
 #define OPS_COL_SHARE (OPS_COL_W / REFERENCE_ROW_W)
 #define STATS_COL_SHARE (STATS_COL_W / REFERENCE_ROW_W)
 #define CONTROLS_SHARE (CONTROLS_HOUSE_W / REFERENCE_CENTRE_W)
+#define PRESET_NAME_W 178.0f /* design-grid pixels; room for preset names/search */
+#define INFO_BUTTON_SIDE 9.0f /* source pixels of the built-in 9x9 cog */
+#define INFO_BUTTON_W (INFO_BUTTON_SIDE + 2.0f * GAP)
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
 #define APP_VERSION "1.1.2"
-#define PRESET_DELETE_ARM_S 0.8
 
 /* scale.c */
 /* largest quarter step whose magnified grid fits avail_w x avail_h less
@@ -173,11 +174,8 @@ typedef struct {
     char bank[64];
 } PresetFilter;
 
-/* preset_armed values the bar icons show as armed */
-#define ARMED_SAVE 2
-#define ARMED_DELETE 4
-/* keyboard walk over the preset bar buttons, left to right */
-#define PRESET_BUTTONS 5
+/* keyboard walk over the compact previous/next preset buttons */
+#define PRESET_BUTTONS 2
 
 /* json_session.c */
 /* a preset or state document larger than this is refused unread */
@@ -284,7 +282,7 @@ typedef struct App {
 
     /* layout */
     Splits splits;
-    Rct header_rect, preset_bar_rect;
+    Rct preset_bar_rect;
     bool have_preset_bar_rect;
 
     /* preset bank */
@@ -296,10 +294,6 @@ typedef struct App {
     PresetFilter preset_filter;
     PresetRef preset_loaded, preset_selected;
     bool have_loaded, have_selected;
-    int preset_armed; /* console Command id or 0 */
-    PresetRef preset_delete_armed; /* the row the DELETE button armed on */
-    bool have_delete_armed;
-    double preset_delete_armed_at;
     bool preset_searching, preset_focus, presets_open, presets_were_open;
     int preset_button_at; /* bar button the keyboard walk is on */
     double preset_click_at;
@@ -404,12 +398,10 @@ bool chip_button(Ui *ui, UiId id, Rct r, const char *text, bool selected);
 bool bookmark(Ui *ui, UiId id, Rct r, const char *label, bool selected);
 int wave_tabs(Ui *ui, UiId id, Rct r, const char *const *labels, int n,
               int active);
-void draw_margin_bar(Canvas *c, Rct bar, bool inner_edge_on_left);
 void draw_graticule(Canvas *c, Rct r, int cols, int rows);
 void beam_segment(Canvas *c, P2 a, P2 b, int k, bool decayed);
 void dotted_rect(Canvas *c, Rct r, uint8_t ink);
-extern const char *const ICON_SAVE[9], *const ICON_DELETE[9],
-    *const ICON_FOLDER[9], *const ICON_RECORD[9];
+extern const char *const ICON_COG[9];
 void draw_icon(Canvas *c, const char *const rows[9], P2 at, uint8_t ink, float k);
 bool icon_button(Ui *ui, UiId id, Rct r, const char *const rows[9],
                  const char *label, bool armed, float k);
@@ -424,9 +416,6 @@ void preset_save_in(App *a, const char *bank, const char *name);
 bool preset_run_save(App *a, const char *name);
 void preset_run_overwrite(App *a, const char *args);
 void preset_run_delete(App *a, const char *args);
-/* first call arms on the highlighted row, the next call on the same row
-   deletes it */
-void preset_delete_highlighted(App *a);
 void preset_run_rename(App *a, const char *args);
 void preset_run_move(App *a, const char *args);
 void preset_run_add(App *a, const char *args);
@@ -463,7 +452,6 @@ void app_set_engaged(App *a, bool on);
 /* panes.c */
 /* Tab walks search -> list -> buttons, Left/Right pick a bar button */
 void presets_walk_keys(App *a, Ui *ui);
-void draw_title_bar(App *a, Ui *ui, Rct r);
 void draw_preset_bar(App *a, Ui *ui, Rct r);
 void draw_presets_pane(App *a, Ui *ui);
 void draw_info_pane(App *a, Ui *ui);

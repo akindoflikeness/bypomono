@@ -111,8 +111,6 @@ static void set_input(App *a, const char *text) {
 static History history;
 
 void console_run_line(App *a, const char *line) {
-    /* nothing arms any more; the field stays for the icons panes.c draws */
-    a->preset_armed = 0;
     /* Failed input is the most useful input to recover with Up: one typo
        should cost one edit, not retyping the whole command. */
     history_push(&history, line);

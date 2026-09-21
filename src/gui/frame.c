@@ -69,13 +69,11 @@ static void handle_keys(App *a, Ui *ui) {
             a->preset_name.text[0] = '\0';
             a->preset_searching = false;
             a->have_selected = false;
-            a->preset_armed = 0;
         } else if (a->console_open && console_escape(a)) {
         } else if (a->console_open) {
             a->console_open = false;
             a->console_input.len = 0;
             a->console_input.text[0] = '\0';
-            a->preset_armed = 0;
             if (ui->focus == console_id) ui->focus = 0;
         } else if (a->presets_open) {
             a->presets_open = false;
@@ -114,22 +112,12 @@ void app_frame(App *a, Ui *ui) {
     /* ---- carve the frame ---- */
     Rct full = rct(0, 0, DESIGN_W, DESIGN_H);
 
-    Rct top = rct(full.x0, full.y0, full.x1, full.y0 + TITLE_BAR_H);
-    draw_title_bar(a, ui, top);
-    a->header_rect = top;
-
-    float footer_h = fminf(FOOTER_LINE_H, DESIGN_H - TITLE_BAR_H);
+    float footer_h = fminf(FOOTER_LINE_H, DESIGN_H);
     Rct footer = rct(full.x0, full.y1 - footer_h, full.x1, full.y1);
     draw_footer(a, ui, footer);
 
-    Rct band = rct(full.x0, top.y1, full.x1, footer.y0);
-
-    Rct lbar = rct(band.x0, band.y0, band.x0 + MARGIN_BAR_W, band.y1);
-    Rct rbar = rct(band.x1 - MARGIN_BAR_W, band.y0, band.x1, band.y1);
-    draw_margin_bar(c, lbar, false);
-    draw_margin_bar(c, rbar, true);
-
-    Rct row = rct(lbar.x1, band.y0, rbar.x0, band.y1);
+    Rct band = rct(full.x0, full.y0, full.x1, footer.y0);
+    Rct row = band;
     float row_w = rct_w(row);
     float stats_share = a->splits.tree >= 0.0f ? a->splits.tree : STATS_COL_SHARE;
     float ops_share = a->splits.ops >= 0.0f ? a->splits.ops : OPS_COL_SHARE;
@@ -145,6 +133,8 @@ void app_frame(App *a, Ui *ui) {
 
     draw_left_rail(a, ui, stats);
     draw_right_rail(a, ui, ops);
+    draw_rect_stroke(c, stats, 2.0f, PAPER);
+    draw_rect_stroke(c, ops, 2.0f, PAPER);
 
     /* central cells */
     float centre_w = rct_w(centre);
@@ -170,6 +160,10 @@ void app_frame(App *a, Ui *ui) {
     canvas_set_clip(c, stage_clip);
     draw_stage(a, ui, cell_y);
     canvas_set_clip(c, saved);
+
+    /* The command line remains the preset interface while the compact
+       preset/info controls have no settled home outside the display. */
+    // draw_preset_bar(a, ui, compact_preset_strip);
 
     draw_display_cell(a, ui, rct_shrink(cell_w, 2.0f));
     draw_controls_house(a, ui, rct_shrink(cell_x, 2.0f));

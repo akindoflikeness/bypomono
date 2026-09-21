@@ -7,7 +7,6 @@
 #include "app.h"
 
 #define PRESET_DOUBLE_CLICK_S 1.0
-#define ICON_SCALE 2.0f
 #define PRESET_ROW_GAP GROUP
 
 static UiScroll s_bank_scroll, s_midi_scroll;
@@ -91,7 +90,6 @@ static void save_from_bar(App *a, Ui *ui) {
     sanitise_segment(typed, name, sizeof name);
     if (!name[0]) {
         push_log(a, "a preset needs a name. type one in the bar.");
-        a->preset_armed = 0;
         a->preset_searching = true;
         a->preset_focus = true;
         (void)ui;
@@ -116,8 +114,8 @@ static void std_button_draw(Canvas *c, Rct r, const char *text, FontId f,
 
 /* ---------- keyboard walk ---------- */
 
-/* bar buttons in walk order, left to right on screen */
-enum { PB_FOLDER, PB_SAVE, PB_DELETE, PB_PREV, PB_NEXT };
+/* compact-bar buttons in left-to-right screen order */
+enum { PB_PREV, PB_NEXT };
 
 static void focus_ring(Canvas *c, Rct r) {
     draw_rect_stroke(c, rct_expand(r, 2.0f), 1.0f, PAPER);
@@ -162,38 +160,60 @@ void presets_walk_keys(App *a, Ui *ui) {
     if (ui->focus == list_id && !a->presets_open) ui->focus = 0;
 }
 
-/* ---------- title bar + preset bar ---------- */
+/* ---------- preset bar ---------- */
+
+static float preset_nav_width(FontId f) {
+    float arrows = fmaxf(text_width(f, "◁", 0.0f), text_width(f, "▷", 0.0f));
+    return roundf(arrows + 14.0f);
+}
+
+typedef struct {
+    Rct info, previous, name, next;
+} PresetBarLayout;
+
+/* Keep the compact controls centred as one named group.  Drawing code below
+   uses these rectangles directly, so adding or reordering controls does not
+   depend on a right-edge cursor and reverse placement. */
+static PresetBarLayout preset_bar_layout(Rct area, FontId f, float cy) {
+    float nav_w = preset_nav_width(f);
+    float nav_h = roundf(text_row_height(f) + 8.0f);
+    float group_w = INFO_BUTTON_W + 3.0f * GROUP + 2.0f * nav_w
+                    + PRESET_NAME_W;
+    float x = roundf(rct_center(area).x - 0.5f * group_w);
+    PresetBarLayout layout = {
+        .info = rct_xywh(x, roundf(cy - 0.5f * INFO_BUTTON_W), INFO_BUTTON_W,
+                          INFO_BUTTON_W),
+    };
+    x = layout.info.x1 + GROUP;
+    layout.previous = rct_xywh(x, roundf(cy - 0.5f * nav_h), nav_w, nav_h);
+    x = layout.previous.x1 + GROUP;
+    layout.name = rct_xywh(x, roundf(cy - 10.5f), PRESET_NAME_W, 21.0f);
+    x = layout.name.x1 + GROUP;
+    layout.next = rct_xywh(x, roundf(cy - 0.5f * nav_h), nav_w, nav_h);
+    return layout;
+}
 
 void draw_preset_bar(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     FontId f12 = ui_font(12.0f);
     float row12 = text_row_height(f12);
-    float cy = 0.5f * (r.y0 + r.y1);
-    float x = r.x1;
+    float cy = 0.7f * (r.y0 + r.y1);
+    PresetBarLayout layout = preset_bar_layout(r, f12, cy);
     UiId bar_id = ui_id("preset bar");
     UiId buttons_id = ui_id("preset buttons");
     bool on_buttons = ui->focus == buttons_id;
 
-    if (a->preset_armed == ARMED_DELETE && a->have_delete_armed
-        && a->last_frame_time - a->preset_delete_armed_at
-               > PRESET_DELETE_ARM_S) {
-        a->preset_armed = 0;
-        a->have_delete_armed = false;
-    }
-
+    if (icon_button(ui, ui_id("info tab"), layout.info, ICON_COG, NULL, a->info_open,
+                    1.0f))
+        a->info_open = !a->info_open;
     {
-        float w = roundf(text_width(f12, "▷", 0.0f) + 14.0f);
-        float h = roundf(row12 + 8.0f);
-        Rct br = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        if (pane_button(ui, ui_id("preset next"), br, "▷", false)
+        if (pane_button(ui, ui_id("preset next"), layout.next, "▷", false)
             || key_hit(a, ui, PB_NEXT))
             preset_cycle(a, true);
-        if (on_buttons && a->preset_button_at == PB_NEXT) focus_ring(c, br);
-        x = br.x0 - GROUP;
+        if (on_buttons && a->preset_button_at == PB_NEXT) focus_ring(c, layout.next);
     }
 
-    Rct bar = rct(roundf(x - 178.0f), roundf(cy - 10.5f), roundf(x),
-                  roundf(cy - 10.5f) + 21.0f);
+    Rct bar = layout.name;
     a->preset_bar_rect = bar;
     a->have_preset_bar_rect = true;
 
@@ -220,8 +240,7 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
                 if (*p != '/') *w++ = *p;
             *w = '\0';
         }
-        if (ui_text_edit(ui, bar_id, &a->preset_name)) a->preset_armed = 0;
-
+        ui_text_edit(ui, bar_id, &a->preset_name);
         draw_rect_filled(c, bar, INK_BLACK);
         draw_rect_stroke(c, bar, fr.hovered ? 2.0f : 1.0f, PAPER);
         Rct saved = canvas_clip(c);
@@ -246,9 +265,7 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
                 a->preset_name.len = 0;
                 a->preset_name.text[0] = '\0';
                 console_run_line(a, line);
-            } else if (query_matches_any(a)) {
-                a->preset_armed = 0;
-            } else {
+            } else if (!query_matches_any(a)) {
                 save_from_bar(a, ui);
             }
         }
@@ -287,114 +304,13 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
             }
         }
     }
-    x = bar.x0 - GROUP;
-
     {
-        float w = roundf(text_width(f12, "◁", 0.0f) + 14.0f);
-        float h = roundf(row12 + 8.0f);
-        Rct br = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        if (pane_button(ui, ui_id("preset prev"), br, "◁", false)
+        if (pane_button(ui, ui_id("preset prev"), layout.previous, "◁", false)
             || key_hit(a, ui, PB_PREV))
             preset_cycle(a, false);
-        if (on_buttons && a->preset_button_at == PB_PREV) focus_ring(c, br);
-        x = br.x0 - GROUP;
+        if (on_buttons && a->preset_button_at == PB_PREV)
+            focus_ring(c, layout.previous);
     }
-
-    float side = 9.0f * ICON_SCALE;
-    float iw = side + 2.0f * GAP;
-    float ih = side + 2.0f * GAP;
-    {
-        Rct ir = rct(roundf(x - iw), roundf(cy - ih * 0.5f), roundf(x),
-                     roundf(cy - ih * 0.5f) + ih);
-        if (icon_button(ui, ui_id("preset delete"), ir, ICON_DELETE, NULL,
-                        a->preset_armed == ARMED_DELETE, ICON_SCALE)
-            || key_hit(a, ui, PB_DELETE))
-            preset_delete_highlighted(a);
-        if (on_buttons && a->preset_button_at == PB_DELETE) focus_ring(c, ir);
-        x = ir.x0 - GROUP;
-    }
-    {
-        Rct ir = rct(roundf(x - iw), roundf(cy - ih * 0.5f), roundf(x),
-                     roundf(cy - ih * 0.5f) + ih);
-        if (icon_button(ui, ui_id("preset save"), ir, ICON_SAVE, NULL,
-                        a->preset_armed == ARMED_SAVE, ICON_SCALE)
-            || key_hit(a, ui, PB_SAVE))
-            save_from_bar(a, ui);
-        if (on_buttons && a->preset_button_at == PB_SAVE) focus_ring(c, ir);
-        x = ir.x0 - GROUP;
-    }
-    {
-        Rct ir = rct(roundf(x - iw), roundf(cy - ih * 0.5f), roundf(x),
-                     roundf(cy - ih * 0.5f) + ih);
-        if (on_buttons && a->preset_button_at == PB_FOLDER) focus_ring(c, ir);
-        if (icon_button(ui, ui_id("preset folder"), ir, ICON_FOLDER, NULL,
-                        false, ICON_SCALE)
-            || key_hit(a, ui, PB_FOLDER)) {
-            snprintf(a->console_input.text, sizeof a->console_input.text,
-                     "mkdir ");
-            a->console_input.len = (int)strlen(a->console_input.text);
-            a->console_open = true;
-            a->console_focus = true;
-            ui->focus = ui_id("console input");
-            push_log(a, "name the bank, then enter.");
-        }
-    }
-}
-
-void draw_title_bar(App *a, Ui *ui, Rct r) {
-    Canvas *c = ui->canvas;
-    FontId f12 = ui_font(12.0f);
-    FontId f11 = ui_font(11.0f);
-    Rct content = rct(r.x0 + GROUP, r.y0 + GAP, r.x1 - GROUP, r.y1 - GAP);
-    float cy = 0.5f * (content.y0 + content.y1);
-    float x = content.x1;
-
-    {
-        const char *v = "v" APP_VERSION;
-        float row = text_row_height(f12);
-        float w = roundf(text_width(f12, v, 0.0f) + 2.0f * GAP);
-        float h = roundf(row + 2.0f * TIGHT);
-        Rct cr = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        draw_rect_stroke(c, cr, 1.0f, PAPER);
-        text_draw(c, f12, rct_center(cr), ALIGN_CENTER_CENTER, v, PAPER, 0.0f);
-        x = cr.x0 - GROUP;
-    }
-
-    {
-        float w = roundf(text_width(f12, "info", 0.0f) + 2.0f * GAP);
-        float h = 21.0f;
-        Rct br = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        Resp resp = ui_interact(ui, ui_id("info tab"), br, 0.0f);
-        std_button_draw(c, br, "info", f12, a->info_open, resp.hovered);
-        if (resp.clicked) a->info_open = !a->info_open;
-        x = br.x0 - GROUP;
-    }
-
-    {
-        char elapsed[16];
-        const char *label = NULL;
-        if (a->recording && a->recorder.sample_rate > 0.0f) {
-            uint32_t s =
-                (uint32_t)((float)a->recorder.frames / a->recorder.sample_rate);
-            snprintf(elapsed, sizeof elapsed, "%02u:%02u", s / 60, s % 60);
-            label = elapsed;
-        }
-        float side = 9.0f;
-        float lw = label ? GAP + text_width(f11, label, 0.0f) : 0.0f;
-        float lh = label ? text_row_height(f11) : 0.0f;
-        float w = roundf(side + lw + 2.0f * GAP);
-        float h = roundf(fmaxf(side, lh) + 2.0f * GAP);
-        Rct ir = rct(x - w, roundf(cy - h * 0.5f), x, roundf(cy - h * 0.5f) + h);
-        if (!a->hosted) {
-            if (icon_button(ui, ui_id("record button"), ir, ICON_RECORD, label,
-                            a->recording, 1.0f))
-                console_run_line(a, "rec");
-            x = ir.x0 - GROUP;
-        }
-    }
-
-    draw_preset_bar(a, ui, rct(content.x0, content.y0, x, content.y1));
-
 }
 
 /* ---------- presets pane ---------- */
@@ -410,9 +326,9 @@ void draw_presets_pane(App *a, Ui *ui) {
     Rct anchor = a->have_preset_bar_rect ? a->preset_bar_rect
                                          : rct(0, 0, DESIGN_W, DESIGN_H);
     float right_limit = fmaxf(DESIGN_W - pane_w - GROUP, GROUP);
-    float top = a->header_rect.y1;
     float px = clampf(rct_center(anchor).x - pane_w * 0.5f, GROUP, right_limit);
-    float py = fminf(top, fmaxf(DESIGN_H - pane_h, 0.0f));
+    float pane_top_limit = fmaxf(DESIGN_H - FOOTER_LINE_H - pane_h, 0.0f);
+    float py = clampf(anchor.y1 + GROUP, 0.0f, pane_top_limit);
     Rct pane = rct_xywh(roundf(px), roundf(py), pane_w, pane_h);
 
     draw_rect_filled(c, pane, INK_BLACK);
@@ -512,7 +428,6 @@ void draw_presets_pane(App *a, Ui *ui) {
             if (want != at) {
                 a->preset_selected = a->preset_names[shown[want]];
                 a->have_selected = true;
-                a->preset_armed = 0;
                 at = want;
                 float top = (float)at * pitch, bottom = top + rh;
                 if (top < a->preset_scroll.offset)
@@ -548,7 +463,6 @@ void draw_presets_pane(App *a, Ui *ui) {
                 } else {
                     a->preset_selected = *p;
                     a->have_selected = true;
-                    a->preset_armed = 0;
                 }
             }
             y += pitch;
@@ -630,8 +544,8 @@ void draw_info_pane(App *a, Ui *ui) {
     float info_w = fmaxf(fminf(340.0f, DESIGN_W - 2.0f * GROUP), GROUP);
     float info_h = GAP + chrome_h + SECTION + rows_h + SECTION + 21.0f + 16.0f
                    + strip_h + SECTION + ports_h + GAP;
-    Rct pane = rct(roundf(DESIGN_W - GROUP - info_w), 34.0f,
-                   roundf(DESIGN_W - GROUP), 34.0f + roundf(info_h));
+    Rct pane = rct(roundf(DESIGN_W - GROUP - info_w), GROUP,
+                   roundf(DESIGN_W - GROUP), GROUP + roundf(info_h));
 
     draw_rect_filled(c, pane, INK_BLACK);
     draw_rect_stroke(c, pane, 2.0f, PAPER);

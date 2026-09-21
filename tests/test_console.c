@@ -17,6 +17,17 @@ static int rec_calls, bind_calls, unbind_calls, last_cc, last_unbind;
 void gui_run_record(App *a, const char *args) { (void)a; (void)args; rec_calls++; }
 void gui_run_bind(App *a, int cc, CcTarget t) { (void)a; (void)t; bind_calls++; last_cc = cc; }
 void gui_run_unbind(App *a, int cc) { (void)a; unbind_calls++; last_unbind = cc; }
+void midi_note_clear(MidiNoteAtom *m) { memset(m, 0, sizeof *m); }
+int midi_port_names(char names[][128], int max) {
+    if (max < 1) return 0;
+    snprintf(names[0], 128, "Test MIDI");
+    return 1;
+}
+bool gui_set_midi_port(App *a, const char *name) {
+    a->midi_open = name != NULL;
+    snprintf(a->midi_port, sizeof a->midi_port, "%s", name ? name : "");
+    return !name || strcmp(name, "Test MIDI") == 0;
+}
 const char *cc_target_name(CcTarget t) {
     switch (t) {
     case CC_INDEX: return "index";
@@ -143,19 +154,25 @@ static void error_lines(const char *line, const char *first,
 }
 
 static void every_verb_parses_its_forms(void) {
+    CHECK(verb_lookup("lfo") == NULL && verb_lookup("mods") == NULL
+              && verb_lookup("bind") == NULL && verb_lookup("unbind") == NULL,
+          "old modulation verbs are still exposed");
     for (int i = 0; i < verb_count(); i++) {
         const Verb *v = verb_at(i);
         char line[256];
-        if (strcmp(v->name, "bind") == 0) {
-            parses("bind 7 index", CMD_RUN);
-            parses("bind cc7 index", CMD_RUN);
-            parses("bind CC7 Index", CMD_RUN);
+        if (strcmp(v->name, "mod") == 0) {
+            parses("mod cc 7 index", CMD_RUN);
+            parses("mod cc cc7 off", CMD_RUN);
+            parses("mod cc all off", CMD_RUN);
+            parses("mod lfo 1 tri", CMD_RUN);
             continue;
         }
-        if (strcmp(v->name, "unbind") == 0) {
-            parses("unbind all", CMD_RUN);
-            parses("unbind cc3", CMD_RUN);
-            parses("unbind 3", CMD_RUN);
+        if (strcmp(v->name, "tempo") == 0) {
+            parses("tempo 120", CMD_RUN);
+            continue;
+        }
+        if (strcmp(v->name, "bend") == 0) {
+            parses("bend -1", CMD_RUN);
             continue;
         }
         if (strcmp(v->name, "help") == 0) {
@@ -226,11 +243,11 @@ static void every_verb_parses_its_forms(void) {
     parse_line("rec a_take --end 30", &c, err, sizeof err);
     CHECK(c.has_end && c.end == 30.0f && strcmp(c.arg[0], "a_take") == 0,
           "rec flag: end=%g name='%s'", (double)c.end, c.arg[0]);
-    parse_line("bind cc7 index", &c, err, sizeof err);
-    CHECK(c.cc == 7 && c.target == CC_INDEX, "bind parsed cc%d target %d", c.cc,
+    parse_line("mod cc cc7 index", &c, err, sizeof err);
+    CHECK(c.cc == 7 && c.target == CC_INDEX, "mod cc parsed cc%d target %d", c.cc,
           c.target);
-    parse_line("unbind all", &c, err, sizeof err);
-    CHECK(c.cc_all, "unbind all");
+    parse_line("mod cc all off", &c, err, sizeof err);
+    CHECK(c.cc_all, "mod cc all off");
     parse_line("   ", &c, err, sizeof err);
     CHECK(c.kind == CMD_NOP, "blank line is a no-op");
     char echo[256];
@@ -287,10 +304,10 @@ static void two_line_errors(void) {
                 "usage: rec");
     error_lines("save --loud x", "save has no flag --loud", "usage: save");
     error_lines("mv drift - lab", "mv takes 2 arguments", "usage: mv");
-    error_lines("bind 300 index", "'300' is not a controller: cc wants 0 to 127",
-                "usage: bind <cc> <control>");
-    error_lines("unbind x", "'x' is not a controller: cc wants 0 to 127, or all",
-                "usage: unbind <cc>");
+    error_lines("mod cc 300 index", "'300' is not a controller: cc wants 0 to 127",
+                "usage: mod");
+    error_lines("mod cc x off", "'x' is not a controller: cc wants 0 to 127",
+                "usage: mod");
     error_lines("save ../x", "'../x' is not a name or one-level preset path",
                 "usage: save");
     error_lines("delet drift", "no verb called delet; did you mean rm?",
@@ -300,7 +317,7 @@ static void two_line_errors(void) {
     error_lines("xqzvwp", "no verb called xqzvwp", "help lists every verb");
     Command c;
     char err[768];
-    CHECK(!parse_line("bind 7 loudness", &c, err, sizeof err),
+    CHECK(!parse_line("mod cc 7 loudness", &c, err, sizeof err),
           "unknown control parsed");
     CHECK(strstr(err, "index") != NULL, "unknown control lists the controls");
 }
@@ -343,10 +360,17 @@ static void completion_uses_live_preset_state(void) {
     CHECK(!has_candidate(&s, "BYPO"), "mv offered its read-only destination");
     line_state(&app, "rm -r l", &s);
     CHECK(has_candidate(&s, "lab"), "rm -r did not complete a folder");
-    line_state(&app, "bind 7 in", &s);
-    CHECK(has_candidate(&s, "index"), "bind did not complete controls");
-    line_state(&app, "unbind ", &s);
-    CHECK(has_candidate(&s, "all"), "unbind did not complete all");
+    line_state(&app, "mod cc 7 in", &s);
+    CHECK(has_candidate(&s, "index"), "mod cc did not complete controls");
+    line_state(&app, "mod cc ", &s);
+    CHECK(has_candidate(&s, "all"), "mod cc did not complete all");
+    line_state(&app, "clock ", &s);
+    CHECK(has_candidate(&s, "host") && has_candidate(&s, "set"),
+          "clock did not complete its sources");
+    line_state(&app, "where ", &s);
+    CHECK(has_candidate(&s, "presets") && has_candidate(&s, "recordings")
+              && has_candidate(&s, "assets"),
+          "where did not complete its folders");
 
     char completed[256];
     line_state(&app, "load BYPO/to", &s);
@@ -539,34 +563,86 @@ static void history_records_every_submitted_line(void) {
     memset(&h, 0, sizeof h);
     h.cursor = -1;
     CHECK(history_up(&h) == NULL, "empty history walks");
-    CHECK(run_line(&app, &h, "bind 7 index"), "bind ran");
-    CHECK(bind_calls == 1 && last_cc == 7, "bind reached the rig");
-    CHECK(!run_line(&app, &h, "bind 900 index"), "bad bind ran");
+    CHECK(run_line(&app, &h, "mod cc 7 index"), "mod cc ran");
+    CHECK(bind_calls == 1 && last_cc == 7, "mod cc reached the rig");
+    CHECK(!run_line(&app, &h, "mod cc 900 index"), "bad mod cc ran");
     CHECK(!run_line(&app, &h, "rm nothere"), "delete of nothing ran");
-    CHECK(run_line(&app, &h, "unbind all"), "unbind ran");
-    CHECK(unbind_calls == 1 && last_unbind == -1, "unbind all reached the rig");
-    CHECK(run_line(&app, &h, "unbind all"), "repeat ran");
+    CHECK(run_line(&app, &h, "mod cc all off"), "mod cc all off ran");
+    CHECK(unbind_calls == 1 && last_unbind == -1, "mod cc all off reached the rig");
+    CHECK(run_line(&app, &h, "mod cc all off"), "repeat ran");
     CHECK(run_line(&app, &h, "   "), "blank ran");
     CHECK(h.len == 4, "history holds %d lines, wanted 4", h.len);
-    CHECK(strcmp(history_up(&h), "unbind all") == 0, "up 1");
+    CHECK(strcmp(history_up(&h), "mod cc all off") == 0, "up 1");
     CHECK(strcmp(history_up(&h), "rm nothere") == 0, "up 2");
-    CHECK(strcmp(history_up(&h), "bind 900 index") == 0, "up 3");
-    CHECK(strcmp(history_up(&h), "bind 7 index") == 0, "up 4");
-    CHECK(strcmp(history_up(&h), "bind 7 index") == 0,
+    CHECK(strcmp(history_up(&h), "mod cc 900 index") == 0, "up 3");
+    CHECK(strcmp(history_up(&h), "mod cc 7 index") == 0, "up 4");
+    CHECK(strcmp(history_up(&h), "mod cc 7 index") == 0,
           "up stays on oldest");
-    CHECK(strcmp(history_down(&h), "bind 900 index") == 0, "down 1");
+    CHECK(strcmp(history_down(&h), "mod cc 900 index") == 0, "down 1");
     CHECK(strcmp(history_down(&h), "rm nothere") == 0, "down 2");
-    CHECK(strcmp(history_down(&h), "unbind all") == 0, "down 3");
+    CHECK(strcmp(history_down(&h), "mod cc all off") == 0, "down 3");
     CHECK(history_down(&h) == NULL, "down off the newest end");
-    CHECK(history_up(&h) != NULL && strcmp(h.line[h.cursor], "unbind all") == 0,
+    CHECK(history_up(&h) != NULL && strcmp(h.line[h.cursor], "mod cc all off") == 0,
           "up after leaving starts at the newest");
     for (int i = 0; i < HISTORY_MAX + 5; i++) {
         char line[64];
-        snprintf(line, sizeof line, "unbind cc%d", i % 100);
+        snprintf(line, sizeof line, "mod cc cc%d off", i % 100);
         history_push(&h, line);
     }
     CHECK(h.len == HISTORY_MAX, "history capped at %d, is %d", HISTORY_MAX,
           h.len);
+}
+
+static void utility_clock_transport_and_midi_commands(void) {
+    char err[768];
+
+    app.shadow.index = 0.2f;
+    CHECK(run_ok("init", err, sizeof err), "init: %s", err);
+    CHECK(app.shadow.index == session_default().patch.index && !app.have_loaded
+              && app.tempo_source == TEMPO_INTERNAL,
+          "init did not restore the default session");
+
+    CHECK(run_ok("tempo 96", err, sizeof err), "tempo: %s", err);
+    CHECK(app.tempo_bpm == 96.0f && app.tempo_source == TEMPO_INTERNAL,
+          "tempo did not select the internal clock");
+    CHECK(run_ok("clock host", err, sizeof err), "clock host: %s", err);
+    CHECK(app.tempo_source == TEMPO_HOST, "clock host did not land");
+    CHECK(run_ok("clock set 123", err, sizeof err), "clock set: %s", err);
+    CHECK(app.tempo_source == TEMPO_INTERNAL && app.tempo_bpm == 123.0f,
+          "clock set did not land");
+    CHECK(!run_ok("tempo 301", err, sizeof err), "tempo accepted 301");
+
+    CHECK(run_ok("stop", err, sizeof err) && !app.transport_running,
+          "stop did not halt transport");
+    CHECK(run_ok("start", err, sizeof err) && app.transport_running,
+          "start did not run transport");
+    CHECK(run_ok("panic", err, sizeof err) && !app.transport_running,
+          "panic did not halt transport");
+    CHECK(run_ok("reset", err, sizeof err), "reset: %s", err);
+    CHECK(run_ok("bend -1.5", err, sizeof err), "bend: %s", err);
+    CHECK(!run_ok("bend 2.1", err, sizeof err), "bend accepted 2.1");
+
+    CHECK(run_ok("midi", err, sizeof err), "midi list: %s", err);
+    CHECK(run_ok("midi Test MIDI", err, sizeof err) && app.midi_open,
+          "midi port did not open");
+    CHECK(run_ok("midi none", err, sizeof err) && !app.midi_open,
+          "midi port did not close");
+    CHECK(!run_ok("midi Missing", err, sizeof err), "missing MIDI port opened");
+
+    CHECK(run_ok("where presets", err, sizeof err), "where presets: %s", err);
+    CHECK(!run_ok("where nowhere", err, sizeof err), "where accepted nowhere");
+    app.log_len = 3;
+    app.log_head = 3;
+    CHECK(run_ok("cls", err, sizeof err) && app.log_len == 0 && app.log_head == 0,
+          "cls did not clear the log");
+
+    app.hosted = true;
+    CHECK(!run_ok("quit", err, sizeof err) && !app.quit,
+          "quit ran in the plugin");
+    app.hosted = false;
+    CHECK(run_ok("quit", err, sizeof err) && app.quit,
+          "quit did not close the standalone");
+    app.quit = false;
 }
 
 /* ---------- trash and undo ---------- */
@@ -701,6 +777,7 @@ void test_console(void) {
     direct_controls_use_real_units();
     grouped_controls_query_and_set();
     history_records_every_submitted_line();
+    utility_clock_transport_and_midi_commands();
     trash_and_undo_round_trip();
     /* the temp home is two levels up: <home>/bypo/presets */
     char root[1024];

@@ -373,6 +373,11 @@ static void apply_gui_event(Plug *p, Event ev) {
         break;
     case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
     case EV_SET_TEMPO: chandas_set_tempo(&p->chandas, ev.u.f); break;
+    case EV_SET_TRANSPORT:
+        p->transport_running = ev.u.flag;
+        chandas_set_transport(&p->chandas, ev.u.flag);
+        break;
+    case EV_PANIC: voice_bank_note_off_all(&p->voice); break;
     case EV_GLIDE_TO:
         voice_bank_drone_to_hz(&p->voice, ev.u.f);
         voice_bank_set_drone_hz(&p->voice, ev.u.f);
@@ -477,7 +482,8 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
     uint32_t done = 0;
     while (done < count) {
         size_t until;
-        if (melody_samples_until_fire(&p->melody, &until) && until == 0) {
+        if (p->transport_running
+            && melody_samples_until_fire(&p->melody, &until) && until == 0) {
             float hz = melody_fire(&p->melody);
             voice_bank_note_off_all(&p->voice);
             float vel =
@@ -487,7 +493,8 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
             mod_note_on(&p->mod);
         }
         uint32_t run = count - done;
-        if (melody_samples_until_fire(&p->melody, &until) && until < run)
+        if (p->transport_running
+            && melody_samples_until_fire(&p->melody, &until) && until < run)
             run = (uint32_t)until;
         bool modulating = mod_any_lfo(&p->mod) || p->mod.groups_prev;
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
@@ -495,7 +502,7 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
         if (modulating) mod_tick(p, run);
         Emit e = {p, gapp, l, r, base + done};
         voice_bank_render_frames(&p->voice, run, emit_frame, &e);
-        melody_advance(&p->melody, run);
+        if (p->transport_running) melody_advance(&p->melody, run);
         done += run;
     }
 }
@@ -844,6 +851,7 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     voice_bank_set_drone_hz(&p->voice, (float)getv(p, P_DRONE_HZ));
     verb_set_drone_hz(&p->verb, (float)getv(p, P_DRONE_HZ));
     melody_init(&p->melody, (float)sr, melody_params_default());
+    p->transport_running = true;
     chandas_init(&p->chandas, (float)sr);
     tape_init(&p->tape, (float)sr);
     engage_gate_init(&p->gate, (float)sr, false);

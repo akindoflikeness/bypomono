@@ -53,6 +53,7 @@ typedef struct Plug {
     ModBase base; /* what the params say, before modulation */
     bool engine_alive;
     bool engaged;
+    bool transport_running;
     float applied_drone_hz;
     /* main thread: the lfos and routes host state saves; state_load hands
        them to the audio thread through mod_ev */

@@ -182,6 +182,7 @@ static void chandas_place(Chandas *h) {
 void chandas_init(Chandas *h, float sample_rate) {
     size_t n = (size_t)ceilf(CHANDAS_BUFFER_SECONDS * sample_rate) + 4;
     h->params = chandas_params_default();
+    h->transport_running = true;
     h->sample_rate = sample_rate;
     h->bpm = CHANDAS_DEFAULT_BPM;
     h->buf_l = (float *)calloc(n, sizeof(float));
@@ -227,6 +228,10 @@ ChandasParams chandas_params(const Chandas *h) { return h->params; }
 void chandas_set_params(Chandas *h, ChandasParams p) {
     h->params = p;
     chamber_set(&h->chamber, p.dimension, p.tail);
+}
+
+void chandas_set_transport(Chandas *h, bool running) {
+    h->transport_running = running;
 }
 
 void chandas_set_tempo(Chandas *h, float bpm) {
@@ -342,7 +347,8 @@ Stereo chandas_process(Chandas *h, Stereo dry) {
         float entry = fmaxf(base / chandas_subdivisions[k], 8.0f);
         if (h->countdown[k] <= 0.0f) {
             /* no new grains once it is switched off; the ones in the air finish */
-            if (h->params.enabled) chandas_spawn(h, k, entry);
+            if (h->params.enabled && h->transport_running)
+                chandas_spawn(h, k, entry);
             h->countdown[k] += entry;
         }
         h->countdown[k] -= 1.0f;

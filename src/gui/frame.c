@@ -229,6 +229,8 @@ void app_init_defaults(App *a) {
     a->shadow_sustain = s.sustain;
     a->shadow_release_s = s.release_s;
     a->tempo_bpm = s.tempo_bpm;
+    a->tempo_source = TEMPO_INTERNAL;
+    a->transport_running = true;
     a->drone_hz = s.drone_hz;
     a->chain = chain_default();
     a->engaged = true;

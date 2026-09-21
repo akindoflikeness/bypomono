@@ -1,4 +1,4 @@
-/* The modulation verbs: lfo and mods. */
+/* LFO parsing, routing and views used by the mod namespace. */
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -207,7 +207,7 @@ bool mod_parse_lfo(Command *c, char *err, size_t n) {
     float slot;
     if (!number_word(c->words[0], NULL, &slot) || slot != floorf(slot)
         || slot < 1.0f || slot > (float)MOD_LFOS)
-        return reason(err, n, "lfo wants its number first, 1 to %d, not '%s'",
+        return reason(err, n, "mod lfo wants its number first, 1 to %d, not '%s'",
                       MOD_LFOS, c->words[0]);
     m->slot = (int)slot - 1;
 
@@ -217,7 +217,7 @@ bool mod_parse_lfo(Command *c, char *err, size_t n) {
         int k;
         if (strcasecmp(w, "rm") == 0) {
             if (c->nwords != 2)
-                return reason(err, n, "rm stands alone: lfo %d rm", m->slot + 1);
+                return reason(err, n, "rm stands alone: mod lfo %d rm", m->slot + 1);
             m->rm = true;
         } else if (strcasecmp(w, "shape") == 0) {
             if (!next || shape_of(next) < 0)
@@ -285,7 +285,7 @@ bool mod_parse_lfo(Command *c, char *err, size_t n) {
                                   "no target called '%s'; did you mean %s?",
                                   next, near);
                 return reason(err, n,
-                              "no target called '%s'; help lfo lists them",
+                              "no target called '%s'; help mod lists them",
                               next);
             }
             int at = i + 1 + used;
@@ -310,9 +310,9 @@ bool mod_parse_lfo(Command *c, char *err, size_t n) {
         } else {
             const char *near = nearest(w, NULL, 0);
             if (near)
-                return reason(err, n, "lfo has no word '%s'; did you mean %s?",
+                return reason(err, n, "mod lfo has no word '%s'; did you mean %s?",
                               w, near);
-            return reason(err, n, "lfo has no word '%s'", w);
+            return reason(err, n, "mod lfo has no word '%s'", w);
         }
     }
     return true;
@@ -414,7 +414,7 @@ static bool apply_mod_cmd(const ModCmd *m, ModBank *bank, char *err,
                 if (bank->route[r].target == MT_NONE) at = r;
         if (at < 0)
             return reason(err, n,
-                          "all %d routes are in use; mods shows them, "
+                          "all %d routes are in use; ls mod shows them, "
                           "to <target> off frees one",
                           MOD_ROUTES);
         bank->route[at] = (ModRoute){(uint8_t)s, (uint8_t)t, m->route[i].depth};
@@ -574,7 +574,7 @@ bool mod_run_lfo(App *a, const Command *c, char *err, size_t n) {
     View v;
     if (m->slot < 0) {
         if (!mod_view_lfo(a, c, &v)) {
-            push_log(a, "no lfos yet. lfo 1 tri rate 2 to index 0.3 makes one");
+            push_log(a, "no lfos yet. mod lfo 1 tri rate 2 to index 0.3 makes one");
             return true;
         }
         if (!c->view) push_log_view(a, &v);
@@ -588,7 +588,7 @@ bool mod_run_lfo(App *a, const Command *c, char *err, size_t n) {
 
     if (!sets && !m->rm) {
         if (!used)
-            return reason(err, n, "there is no lfo %d yet; lfo %d sine makes it",
+            return reason(err, n, "there is no lfo %d yet; mod lfo %d sine makes it",
                           s + 1, s + 1);
         if (!c->view && mod_view_lfo(a, c, &v)) push_log_view(a, &v);
         return true;
@@ -636,10 +636,10 @@ bool mod_view_mods(App *a, const Command *c, View *out) {
     for (int r = 0; r < MOD_ROUTES; r++)
         routes += a->mods.route[r].target != MT_NONE;
     if (lfos == 0) {
-        view_add(out, "mods  no lfos yet. lfo 1 tri rate 2 to index 0.3 makes one");
+        view_add(out, "mod  no lfos yet. mod lfo 1 tri rate 2 to index 0.3 makes one");
         return true;
     }
-    view_add(out, "mods  %d lfo%s, %d route%s", lfos, lfos == 1 ? "" : "s",
+    view_add(out, "mod  %d lfo%s, %d route%s", lfos, lfos == 1 ? "" : "s",
              routes, routes == 1 ? "" : "s");
     char head[VIEW_TEXT];
     for (int s = 0; s < MOD_LFOS; s++) {

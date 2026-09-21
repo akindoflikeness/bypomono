@@ -726,6 +726,7 @@ typedef struct {
 
 typedef struct {
     ChandasParams params;
+    bool transport_running;
     float sample_rate;
     float bpm;
     float *buf_l, *buf_r;
@@ -750,6 +751,7 @@ void chandas_init(Chandas *h, float sample_rate);
 void chandas_free(Chandas *h);
 ChandasParams chandas_params(const Chandas *h);
 void chandas_set_params(Chandas *h, ChandasParams p);
+void chandas_set_transport(Chandas *h, bool running);
 void chandas_set_tempo(Chandas *h, float bpm);
 void chandas_note_pulse(Chandas *h);
 float chandas_tempo(const Chandas *h);

@@ -296,7 +296,7 @@ static bool parses(const char *line, Command *c, char *err, size_t cap) {
 static void lfo_line_reads_every_word(void) {
     Command c;
     char err[512];
-    CHECK(parses("lfo 2 tri rate 2hz phase 90 retrig uni to index 0.4 "
+    CHECK(parses("mod lfo 2 tri rate 2hz phase 90 retrig uni to index 0.4 "
                  "to chandas warp -0.5 -v",
                  &c, err, sizeof err),
           "did not parse: %s", err);
@@ -311,25 +311,25 @@ static void lfo_line_reads_every_word(void) {
     CHECK(m->nroutes == 2, "routes %d", m->nroutes);
     CHECK(m->route[1].target == MT_CH_WARP && m->route[1].depth == -0.5f,
           "two-word target");
-    CHECK(parses("lfo 1 1/8T", &c, err, sizeof err), "bare division: %s", err);
+    CHECK(parses("mod lfo 1 1/8T", &c, err, sizeof err), "bare division: %s", err);
     CHECK(c.mod.set_rate && c.mod.division >= 0, "division not read");
 }
 
 static void lfo_errors_name_the_word_and_what_it_wants(void) {
     Command c;
     char err[512];
-    CHECK(!parses("lfo 3 sqare", &c, err, sizeof err), "typo parsed");
+    CHECK(!parses("mod lfo 3 sqare", &c, err, sizeof err), "typo parsed");
     CHECK(strstr(err, "did you mean square") != NULL, "no suggestion: %s", err);
     CHECK(strchr(err, '\n') != NULL, "error lacks the usage line: %s", err);
-    CHECK(!parses("lfo 0", &c, err, sizeof err), "lfo 0 parsed");
+    CHECK(!parses("mod lfo 0", &c, err, sizeof err), "lfo 0 parsed");
     CHECK(strstr(err, "1 to 16") != NULL, "range missing: %s", err);
-    CHECK(!parses("lfo 1 to indx 0.3", &c, err, sizeof err), "bad target");
+    CHECK(!parses("mod lfo 1 to indx 0.3", &c, err, sizeof err), "bad target");
     CHECK(strstr(err, "did you mean index") != NULL, "target hint: %s", err);
-    CHECK(!parses("lfo 1 to index 3", &c, err, sizeof err), "depth 3 parsed");
+    CHECK(!parses("mod lfo 1 to index 3", &c, err, sizeof err), "depth 3 parsed");
     CHECK(strstr(err, "-1 to 1") != NULL, "depth range missing: %s", err);
-    CHECK(!parses("lfo 1 rate 99", &c, err, sizeof err), "rate 99 parsed");
-    CHECK(!parses("lfo 1 rm shape tri", &c, err, sizeof err), "rm with words");
-    CHECK(!parses("mods 3", &c, err, sizeof err), "mods took a word");
+    CHECK(!parses("mod lfo 1 rate 99", &c, err, sizeof err), "rate 99 parsed");
+    CHECK(!parses("mod lfo 1 rm shape tri", &c, err, sizeof err), "rm with words");
+    CHECK(!parses("ls mod 3", &c, err, sizeof err), "ls mod took a word");
 }
 
 static bool run(const char *line, char *err, size_t cap) {
@@ -343,20 +343,20 @@ static void lfo_runs_make_point_and_remove(void) {
     memset(a, 0, sizeof *a);
     a->mods = mod_bank_default();
     char err[512];
-    CHECK(!run("lfo 5", err, sizeof err), "query of a missing lfo ran");
-    CHECK(run("lfo 5 saw to mix 0.2 to pitch -0.1", err, sizeof err), "%s", err);
+    CHECK(!run("mod lfo 5", err, sizeof err), "query of a missing lfo ran");
+    CHECK(run("mod lfo 5 saw to mix 0.2 to pitch -0.1", err, sizeof err), "%s", err);
     CHECK(a->mods.lfo[4].used && a->mods.lfo[4].shape == LFO_SAW, "lfo 5 not made");
     CHECK(mod_bank_find_route(&a->mods, 4, MT_MIX) >= 0, "mix route missing");
-    CHECK(run("lfo 5 to mix 0.6", err, sizeof err), "%s", err);
+    CHECK(run("mod lfo 5 to mix 0.6", err, sizeof err), "%s", err);
     int r = mod_bank_find_route(&a->mods, 4, MT_MIX);
     CHECK(r >= 0 && a->mods.route[r].depth == 0.6f, "depth not replaced");
     int count = 0;
     for (int i = 0; i < MOD_ROUTES; i++) count += a->mods.route[i].target != MT_NONE;
     CHECK(count == 2, "replacing a depth made a new route: %d", count);
-    CHECK(!run("lfo 5 to warmth off", err, sizeof err), "removed a missing route");
-    CHECK(run("lfo 5 to mix off", err, sizeof err), "%s", err);
+    CHECK(!run("mod lfo 5 to warmth off", err, sizeof err), "removed a missing route");
+    CHECK(run("mod lfo 5 to mix off", err, sizeof err), "%s", err);
     CHECK(mod_bank_find_route(&a->mods, 4, MT_MIX) < 0, "mix route stayed");
-    CHECK(run("lfo 5 rm", err, sizeof err), "%s", err);
+    CHECK(run("mod lfo 5 rm", err, sizeof err), "%s", err);
     CHECK(!a->mods.lfo[4].used, "lfo 5 stayed");
     CHECK(mod_bank_find_route(&a->mods, 4, MT_PITCH) < 0, "orphan route stayed");
 }
@@ -368,12 +368,12 @@ static void a_failed_line_changes_nothing(void) {
     char err[512];
     for (int i = 0; i < MOD_ROUTES; i++) {
         char line[64];
-        snprintf(line, sizeof line, "lfo %d to %s 0.1", i % MOD_LFOS + 1,
+        snprintf(line, sizeof line, "mod lfo %d to %s 0.1", i % MOD_LFOS + 1,
                  MOD_TARGETS[MT_INDEX + i % (MT_COUNT - 1)].name);
         run(line, err, sizeof err);
     }
     ModBank before = a->mods;
-    CHECK(!run("lfo 16 tri to warmth 0.5 to mix 0.5", err, sizeof err),
+    CHECK(!run("mod lfo 16 tri to warmth 0.5 to mix 0.5", err, sizeof err),
           "ran with every route taken");
     CHECK(memcmp(&before, &a->mods, sizeof before) == 0,
           "a refused line still changed the bank");
@@ -384,16 +384,16 @@ static void minus_v_toggles_a_pin(void) {
     memset(a, 0, sizeof *a);
     a->mods = mod_bank_default();
     char err[512];
-    CHECK(run("lfo 1 tri -v", err, sizeof err), "%s", err);
-    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "lfo 1") == 0,
+    CHECK(run("mod lfo 1 tri -v", err, sizeof err), "%s", err);
+    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "mod lfo 1") == 0,
           "pin '%s' count %d", a->pins[0], a->pin_count);
     View v;
     CHECK(command_view(a, a->pins[0], &v) && v.n == 1
               && v.line[0].place == GRAPH_BELOW,
           "pinned view");
-    CHECK(run("mods -v", err, sizeof err), "%s", err);
-    CHECK(run("lfo 1 rate 3 -v", err, sizeof err), "%s", err);
-    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "mods") == 0,
+    CHECK(run("ls mod -v", err, sizeof err), "%s", err);
+    CHECK(run("mod lfo 1 rate 3 -v", err, sizeof err), "%s", err);
+    CHECK(a->pin_count == 1 && strcmp(a->pins[0], "ls mod") == 0,
           "second -v did not let lfo 1 go");
     CHECK(a->mods.lfo[0].rate_hz == 3.0f, "the unpinning line did not apply");
 }

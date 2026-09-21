@@ -644,6 +644,21 @@ static void sync_falls_back_to_the_transport_before_the_first_pulse(void) {
     chandas_free(&h);
 }
 
+static void stopped_transport_does_not_spawn_new_grains(void) {
+    Chandas h;
+    ChandasParams p = on_(0.75f, 0.35f);
+    eng(&h, p);
+    Stereo zero = {0.0f, 0.0f};
+    chandas_set_transport(&h, false);
+    for (int i = 0; i < 64; i++) chandas_process(&h, zero);
+    CHECK(h.spawned == 0, "stopped transport spawned %u grains", h.spawned);
+    chandas_set_transport(&h, true);
+    for (size_t k = 0; k < CHANDAS_STREAMS; k++) h.countdown[k] = 0.0f;
+    chandas_process(&h, zero);
+    CHECK(h.spawned > 0, "started transport did not resume spawning");
+    chandas_free(&h);
+}
+
 static void sync_locks_to_the_measured_harmony_interval(void) {
     Chandas h;
     chandas_init(&h, SR);
@@ -687,6 +702,7 @@ void test_chandas(void) {
     the_streams_are_three_and_polyrhythmic();
     a_reset_clears_the_memory_and_ramps_back();
     reenabling_after_a_sit_does_not_step();
+    stopped_transport_does_not_spawn_new_grains();
     sync_falls_back_to_the_transport_before_the_first_pulse();
     sync_locks_to_the_measured_harmony_interval();
 }

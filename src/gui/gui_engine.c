@@ -123,6 +123,7 @@ typedef struct {
     bool engaged;
     bool midi_driving;
     bool rec_on;
+    bool transport_running;
     float load_avg, load_peak;
 } AudioState;
 
@@ -181,6 +182,11 @@ static void engine_apply(AudioState *s, Event ev) {
         mod_set_route(&s->mod, ev.u.route.slot, ev.u.route.r);
         break;
     case EV_SET_TEMPO: chandas_set_tempo(&s->chandas, ev.u.f); break;
+    case EV_SET_TRANSPORT:
+        s->transport_running = ev.u.flag;
+        chandas_set_transport(&s->chandas, ev.u.flag);
+        break;
+    case EV_PANIC: voice_bank_note_off_all(&s->voice); break;
     case EV_GLIDE_TO:
         voice_bank_drone_to_hz(&s->voice, ev.u.f);
         voice_bank_set_drone_hz(&s->voice, ev.u.f);
@@ -281,7 +287,8 @@ static void render(void *ud, float *data, size_t frames, int channels) {
     size_t done = 0;
     while (done < frames) {
         size_t until;
-        if (melody_samples_until_fire(&s->melody, &until) && until == 0) {
+        if (s->transport_running
+            && melody_samples_until_fire(&s->melody, &until) && until == 0) {
             float hz = melody_fire(&s->melody);
             if (!s->midi_driving) {
                 voice_bank_note_off_all(&s->voice);
@@ -293,7 +300,8 @@ static void render(void *ud, float *data, size_t frames, int channels) {
             }
         }
         size_t run = frames - done;
-        if (melody_samples_until_fire(&s->melody, &until) && until < run)
+        if (s->transport_running
+            && melody_samples_until_fire(&s->melody, &until) && until < run)
             run = until;
         bool modulating = mod_any_lfo(&s->mod) || s->mod.groups_prev;
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
@@ -302,7 +310,7 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         RenderCtx ctx = {s, data, done, channels, rec_armed,
                          voice_bank_chain(&s->voice)->amp.kind == AMP_ENVELOPE};
         voice_bank_render_frames(&s->voice, run, emit_frame, &ctx);
-        melody_advance(&s->melody, run);
+        if (s->transport_running) melody_advance(&s->melody, run);
         done += run;
     }
     lfo_meter_store(&a->lfo_meter, &s->mod);
@@ -353,6 +361,7 @@ int gui_audio_start(App *a) {
     s->base.warmth = tape_warmth(&s->tape);
     s->base.bend = 0.0f;
     s->engaged = true;
+    s->transport_running = true;
     engage_gate_init(&s->gate, a->sample_rate, s->engaged);
     midi_note_clear(&a->midi_note);
     return audio_out_start(&a->audio, render, s);

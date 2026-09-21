@@ -89,8 +89,32 @@ static bool run_remove(App *a, const Command *c, char *err, size_t n);
 static bool run_rmdir(App *a, const Command *c, char *err, size_t n);
 static bool folder_ok(const char *folder, char *err, size_t n);
 static bool run_undo(App *a, const Command *c, char *err, size_t n);
-static bool run_bind(App *a, const Command *c, char *err, size_t n);
-static bool run_unbind(App *a, const Command *c, char *err, size_t n);
+static bool run_next(App *a, const Command *c, char *err, size_t n);
+static bool run_prev(App *a, const Command *c, char *err, size_t n);
+static bool run_init(App *a, const Command *c, char *err, size_t n);
+static bool run_where(App *a, const Command *c, char *err, size_t n);
+static bool run_clear(App *a, const Command *c, char *err, size_t n);
+static bool run_quit(App *a, const Command *c, char *err, size_t n);
+static bool run_transport(App *a, const Command *c, char *err, size_t n);
+static bool parse_clock(Command *c, char *err, size_t n);
+static bool run_clock(App *a, const Command *c, char *err, size_t n);
+static int complete_clock(char *const words[], int nwords, const char *prefix,
+                          char out[][CAND_LEN], int max);
+static bool parse_tempo(Command *c, char *err, size_t n);
+static bool run_tempo(App *a, const Command *c, char *err, size_t n);
+static bool parse_midi(Command *c, char *err, size_t n);
+static bool run_midi(App *a, const Command *c, char *err, size_t n);
+static int complete_midi(char *const words[], int nwords, const char *prefix,
+                         char out[][CAND_LEN], int max);
+static bool parse_bend(Command *c, char *err, size_t n);
+static bool run_bend(App *a, const Command *c, char *err, size_t n);
+static bool parse_mod(Command *c, char *err, size_t n);
+static bool run_mod(App *a, const Command *c, char *err, size_t n);
+static bool view_mod(App *a, const Command *c, View *out);
+static bool preview_mod(App *a, const Command *c, View *out);
+static int complete_mod(char *const words[], int nwords, const char *prefix,
+                        char out[][CAND_LEN], int max);
+static bool view_ls(App *a, const Command *c, View *out);
 static bool run_help(App *a, const Command *c, char *err, size_t n);
 static bool parse_set(Command *c, char *err, size_t n);
 static bool parse_meta(Command *c, char *err, size_t n);
@@ -120,14 +144,19 @@ static const Flag RM_FLAGS[] = {
     {"r", NULL, "move a folder and everything in it to the trash"},
 };
 
+static const Flag LS_FLAGS[] = {
+    {"v", NULL, "pin the modulation routing table above the log"},
+};
+
 #define CONTROL(NAME, FORM, ABOUT)                                           \
     {.name = NAME, .group = G_SOUND, .about = ABOUT, .run = control_run,     \
      .parse = control_parse, .form = FORM}
 
 static const Verb VERBS[] = {
-    {"ls", {NULL}, G_PRESETS, {"path or mod", NULL}, 1, 0, true, NULL, 0,
-     "list presets in a folder, the browser view, or modulation routes", run_ls,
-     NULL, NULL, NULL, NULL, NULL, NULL},
+    {.name = "ls", .group = G_PRESETS, .args = {"path or mod", NULL},
+     .nargs = 1, .words = true, .flags = LS_FLAGS, .nflags = 1,
+     .about = "list presets in a folder, the browser view, or modulation routes",
+     .run = run_ls, .view = view_ls},
     {"cd", {NULL}, G_PRESETS, {"folder", NULL}, 1, 0, true, NULL, 0,
      "set the preset browser view; no argument prints it", run_cd, NULL, NULL,
      NULL, NULL, NULL, NULL},
@@ -154,6 +183,15 @@ static const Verb VERBS[] = {
      NULL, NULL, NULL},
     {"undo", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
      "put back the last trashed, renamed, moved or overwritten item", run_undo, NULL, NULL, NULL,
+     NULL, NULL, NULL},
+    {"next", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "load the next preset in the current view", run_next, NULL, NULL, NULL,
+     NULL, NULL, NULL},
+    {"prev", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "load the previous preset in the current view", run_prev, NULL, NULL, NULL,
+     NULL, NULL, NULL},
+    {"init", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "return every sound parameter to its default", run_init, NULL, NULL, NULL,
      NULL, NULL, NULL},
     {.name = "drone",
      .group = G_SOUND,
@@ -224,34 +262,45 @@ static const Verb VERBS[] = {
     {.name = "set", .group = G_SOUND,
      .about = "set any parameter through its canonical command", .run = run_set,
      .parse = parse_set, .form = "<parameter> <value>"},
-    {"bind", {NULL}, G_MIDI, {"cc", "control"}, 2, 2, true, NULL, 0,
-     "point a controller at a control", run_bind, NULL, NULL, NULL,
-     NULL, NULL, NULL},
-    {"unbind", {NULL}, G_MIDI, {"cc", NULL}, 1, 1, true, NULL, 0,
-     "let a controller go, or 'all' of them", run_unbind, NULL, NULL, NULL,
-     NULL, NULL, NULL},
+    {.name = "mod", .group = G_MODULATION,
+     .about = "make and route a modulation source", .run = run_mod,
+     .parse = parse_mod, .view = view_mod, .preview = preview_mod,
+     .complete = complete_mod,
+     .form = "<lfo ...|cc <cc|all> <control|off>>",
+     .extra = "mod lfo uses the lfo grammar; mod cc 7 index binds; "
+              "mod cc 7 off unbinds"},
+    {.name = "clock", .group = G_SOUND,
+     .about = "show or set the tempo source", .run = run_clock,
+     .parse = parse_clock, .complete = complete_clock,
+     .form = "[host|midi|pulse|link|set [bpm]]"},
+    {.name = "tempo", .group = G_SOUND,
+     .about = "set the internal tempo in bpm", .run = run_tempo,
+     .parse = parse_tempo, .form = "<20-300>"},
+    {"start", {NULL}, G_SOUND, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "run the melody sequencer and Chandas spawning", run_transport, NULL,
+     NULL, NULL, NULL, NULL, NULL},
+    {"stop", {NULL}, G_SOUND, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "halt the melody sequencer and Chandas spawning", run_transport, NULL,
+     NULL, NULL, NULL, NULL, NULL},
+    {"reset", {NULL}, G_SOUND, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "flush the Chandas buffer and re-phase its streams", run_transport, NULL,
+     NULL, NULL, NULL, NULL, NULL},
+    {"panic", {NULL}, G_SOUND, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "release every note and halt the sequencer", run_transport, NULL,
+     NULL, NULL, NULL, NULL, NULL},
+    {.name = "midi", .group = G_MIDI,
+     .about = "list MIDI inputs, open one, or close it with none",
+     .run = run_midi, .parse = parse_midi, .complete = complete_midi,
+     .form = "[port|none]"},
+    {.name = "bend", .group = G_MIDI,
+     .about = "set pitch bend in semitones", .run = run_bend,
+     .parse = parse_bend, .form = "<-2..2>"},
     {"rec", {"record", NULL}, G_RECORDING, {"name", NULL}, 1, 0, false,
      REC_FLAGS, 1, "start a take, or finish the one running", run_rec, NULL, NULL, NULL,
      NULL, NULL, NULL},
     {"help", {NULL}, G_CONSOLE, {"verb or group", NULL}, 1, 0, false, NULL, 0,
      "list the verbs, or explain one", run_help, NULL, NULL, NULL,
      NULL, NULL, NULL},
-    {.name = "lfo",
-     .group = G_MODULATION,
-     .about = "make, shape and point an lfo; lfo alone lists them",
-     .run = mod_run_lfo,
-     .parse = mod_parse_lfo,
-     .view = mod_view_lfo,
-     .preview = mod_preview_lfo,
-     .complete = mod_complete_lfo,
-     .form = "[1-16] [shape] [rate <hz|1/4>] [phase <deg>] [free|retrig|once] "
-             "[bi|uni] [to <target> <depth|off>]... [rm] [-v]",
-     .extra = "shapes  sine tri saw ramp square exp sh drift\n"
-              "targets index rip fb field curve level pitch mix ghost decay "
-              "damp haunt warmth mel rate\n"
-              "        chandas mix|rate|spread|size|warp|dim|tail\n"
-              "depth   -1 to 1 of the target's range; pitch is +-12 semitones\n"
-              "-v      pin it above the log, live; -v again lets it go"},
     {.name = "pins",
      .group = G_CONSOLE,
      .about = "the views pinned above the log",
@@ -260,14 +309,14 @@ static const Verb VERBS[] = {
      .complete = pins_complete,
      .form = "[rm <n>|fold <n>|open <n>|clear]",
      .extra = "a click on a pinned view lets it go, as does -v on its line"},
-    {.name = "mods",
-     .group = G_MODULATION,
-     .about = "the routing table: every lfo and where it points",
-     .run = mod_run_mods,
-     .parse = mod_parse_mods,
-     .view = mod_view_mods,
-     .form = "[-v]",
-     .extra = "-v      pin the table above the log, live; -v again lets it go"},
+    {"where", {NULL}, G_RECORDING, {"presets, recordings or assets", NULL},
+     1, 0, true, NULL, 0, "print the folders the instrument uses", run_where,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"clear", {"cls", NULL}, G_CONSOLE, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "empty the console log", run_clear, NULL, NULL, NULL, NULL, NULL, NULL},
+    {"quit", {NULL}, G_CONSOLE, {NULL, NULL}, 0, 0, false, NULL, 0,
+     "save state and exit the standalone", run_quit, NULL, NULL, NULL, NULL,
+     NULL, NULL},
 };
 #undef CONTROL
 #define NVERBS ((int)(sizeof VERBS / sizeof VERBS[0]))
@@ -592,6 +641,8 @@ static bool parse_words(char *const words[], int n, Command *out, char *err,
             out->end = s;
         } else if (strcmp(f->name, "r") == 0) {
             out->recursive = true;
+        } else if (strcmp(f->name, "v") == 0) {
+            out->view = true;
         }
     }
 
@@ -615,36 +666,6 @@ static bool parse_words(char *const words[], int n, Command *out, char *err,
             return false;
     out->argc = ngiven;
 
-    if (v->run == run_bind) {
-        int cc = parse_cc_word(out->arg[0]);
-        if (cc < 0)
-            return reason(err, err_len,
-                          "'%s' is not a controller: cc wants 0 to 127",
-                          out->arg[0]);
-        char low[192];
-        lower_into(out->arg[1], low, sizeof low);
-        CcTarget t = cc_target_from_name(low);
-        if (t == CC_NONE) {
-            char list[256];
-            bindable_list(list, sizeof list);
-            return reason(err, err_len, "'%s' cannot be bound; the controls: %s",
-                          out->arg[1], list);
-        }
-        out->cc = cc;
-        out->target = t;
-    } else if (v->run == run_unbind) {
-        if (strcasecmp(out->arg[0], "all") == 0) {
-            out->cc_all = true;
-        } else {
-            int cc = parse_cc_word(out->arg[0]);
-            if (cc < 0)
-                return reason(err, err_len,
-                              "'%s' is not a controller: cc wants 0 to 127, "
-                              "or all",
-                              out->arg[0]);
-            out->cc = cc;
-        }
-    }
     out->kind = CMD_RUN;
     return true;
 }
@@ -687,17 +708,6 @@ void command_echo(const Command *c, char *out, size_t cap) {
         if (c->view) scat(out, cap, " -v");
         return;
     }
-    if (v->run == run_bind) {
-        scat(out, cap, " cc%d %s", c->cc, cc_target_name(c->target));
-        return;
-    }
-    if (v->run == run_unbind) {
-        if (c->cc_all)
-            scat(out, cap, " all");
-        else
-            scat(out, cap, " cc%d", c->cc);
-        return;
-    }
     if (c->argc > 0) scat(out, cap, " %s", c->arg[0]);
     if (c->argc > 1) scat(out, cap, " %s", c->arg[1]);
     if (c->has_end) scat(out, cap, " --end %g", (double)c->end);
@@ -711,11 +721,16 @@ bool command_run(App *a, const Command *c, char *err, size_t err_len) {
         return false;
     }
     if (c->view && c->verb->view) {
-        /* a pin keeps the verb and the number it names, so "lfo 3 rate 2 -v"
-           pins "lfo 3" and later edits to lfo 3 show in it */
+        /* A pin keeps the source it names, rather than the whole edit line. */
         char pin[LOG_LINE_LEN];
         snprintf(pin, sizeof pin, "%s", c->verb->name);
-        if (c->nwords > 0 && isdigit((unsigned char)c->words[0][0]))
+        if (strcmp(c->verb->name, "mod") == 0 && c->nwords > 1
+            && strcasecmp(c->words[0], "lfo") == 0)
+            scat(pin, sizeof pin, " lfo %s", c->words[1]);
+        else if (strcmp(c->verb->name, "ls") == 0 && c->argc > 0
+                 && strcasecmp(c->arg[0], "mod") == 0)
+            scat(pin, sizeof pin, " mod");
+        else if (c->nwords > 0 && isdigit((unsigned char)c->words[0][0]))
             scat(pin, sizeof pin, " %s", c->words[0]);
         if (console_toggle_pin(a, pin, err, err_len))
             push_log(a, "pinned. -v again lets it go");
@@ -1118,14 +1133,11 @@ static int complete_generic(const App *a, const Verb *v,
     if (strcmp(v->name, "rmdir") == 0
         || (strcmp(v->name, "rm") == 0 && recursive))
         return complete_folders(a, prefix, false, true, out, n, max);
-    if (strcmp(v->name, "bind") == 0 && positional == 1) {
-        for (int t = CC_INDEX; t <= CC_LAST; t++)
-            n = add_cand(out, n, max, prefix,
-                         cc_target_name((CcTarget)t));
-        return n;
+    if (strcmp(v->name, "where") == 0 && positional == 0) {
+        n = add_cand(out, n, max, prefix, "presets");
+        n = add_cand(out, n, max, prefix, "recordings");
+        return add_cand(out, n, max, prefix, "assets");
     }
-    if (strcmp(v->name, "unbind") == 0 && positional == 0)
-        return add_cand(out, n, max, prefix, "all");
     return 0;
 }
 
@@ -1207,6 +1219,113 @@ bool command_view(App *a, const char *line, View *out) {
     if (!parse_line(line, &c, err, sizeof err)) return false;
     if (c.kind != CMD_RUN || !c.verb || !c.verb->view) return false;
     return c.verb->view(a, &c, out);
+}
+
+/* ---------- modulation namespace ---------- */
+
+static void mod_lfo_inner(const Command *outer, Command *inner) {
+    *inner = *outer;
+    inner->nwords = outer->nwords - 1;
+    for (int i = 0; i < inner->nwords; i++)
+        snprintf(inner->words[i], sizeof inner->words[i], "%s",
+                 outer->words[i + 1]);
+}
+
+static bool parse_mod(Command *c, char *err, size_t n) {
+    if (c->nwords == 0)
+        return reason(err, n, "mod wants a source: lfo or cc");
+    if (strcasecmp(c->words[0], "lfo") == 0) {
+        Command inner;
+        mod_lfo_inner(c, &inner);
+        if (!mod_parse_lfo(&inner, err, n)) return false;
+        c->mod = inner.mod;
+        return true;
+    }
+    if (strcasecmp(c->words[0], "cc") != 0)
+        return reason(err, n, "no modulation source called %s", c->words[0]);
+    if (c->nwords != 3)
+        return reason(err, n, "mod cc wants a controller and a control or off");
+    if (strcasecmp(c->words[1], "all") == 0) {
+        if (strcasecmp(c->words[2], "off") != 0)
+            return reason(err, n, "mod cc all only takes off");
+        c->cc_all = true;
+        return true;
+    }
+    c->cc = parse_cc_word(c->words[1]);
+    if (c->cc < 0)
+        return reason(err, n, "'%s' is not a controller: cc wants 0 to 127",
+                      c->words[1]);
+    if (strcasecmp(c->words[2], "off") == 0) {
+        c->target = CC_NONE;
+        return true;
+    }
+    char low[64];
+    lower_into(c->words[2], low, sizeof low);
+    c->target = cc_target_from_name(low);
+    if (c->target == CC_NONE) {
+        char list[256];
+        bindable_list(list, sizeof list);
+        return reason(err, n, "'%s' cannot be bound; the controls: %s",
+                      c->words[2], list);
+    }
+    return true;
+}
+
+static bool run_mod(App *a, const Command *c, char *err, size_t n) {
+    if (strcasecmp(c->words[0], "lfo") == 0) {
+        Command inner;
+        mod_lfo_inner(c, &inner);
+        inner.mod = c->mod;
+        return mod_run_lfo(a, &inner, err, n);
+    }
+    if (c->cc_all || c->target == CC_NONE)
+        gui_run_unbind(a, c->cc_all ? -1 : c->cc);
+    else
+        gui_run_bind(a, c->cc, c->target);
+    return true;
+}
+
+static bool view_mod(App *a, const Command *c, View *out) {
+    if (c->nwords == 0 || strcasecmp(c->words[0], "lfo") != 0) return false;
+    Command inner;
+    mod_lfo_inner(c, &inner);
+    inner.mod = c->mod;
+    return mod_view_lfo(a, &inner, out);
+}
+
+static bool preview_mod(App *a, const Command *c, View *out) {
+    if (c->nwords == 0 || strcasecmp(c->words[0], "lfo") != 0) return false;
+    Command inner;
+    mod_lfo_inner(c, &inner);
+    inner.mod = c->mod;
+    return mod_preview_lfo(a, &inner, out);
+}
+
+static int complete_mod(char *const words[], int nwords, const char *prefix,
+                        char out[][CAND_LEN], int max) {
+    int n = 0;
+    if (nwords == 0) {
+        n = add_cand(out, n, max, prefix, "lfo");
+        return add_cand(out, n, max, prefix, "cc");
+    }
+    if (strcasecmp(words[0], "lfo") == 0)
+        return mod_complete_lfo(words + 1, nwords - 1, prefix, out, max);
+    if (strcasecmp(words[0], "cc") != 0) return 0;
+    if (nwords == 1) return add_cand(out, n, max, prefix, "all");
+    if (nwords == 2) {
+        n = add_cand(out, n, max, prefix, "off");
+        if (strcasecmp(words[1], "all") == 0) return n;
+        for (int t = CC_INDEX; t <= CC_LAST; t++)
+            n = add_cand(out, n, max, prefix,
+                         cc_target_name((CcTarget)t));
+    }
+    return n;
+}
+
+static bool view_ls(App *a, const Command *c, View *out) {
+    if (c->argc != 1 || strcasecmp(c->arg[0], "mod") != 0) return false;
+    Command mods = {0};
+    return mod_view_mods(a, &mods, out);
 }
 
 /* ---------- presets on disk ---------- */
@@ -1344,6 +1463,203 @@ static bool write_text(const char *path, const char *text) {
 
 /* ---------- handlers ---------- */
 
+static bool one_float(const char *word, float lo, float hi, float *out) {
+    char *end = NULL;
+    float v = strtof(word, &end);
+    if (end == word || *end || !isfinite(v) || v < lo || v > hi) return false;
+    *out = v;
+    return true;
+}
+
+static const char *clock_name(int source) {
+    static const char *const names[] = {"set", "host", "midi", "pulse", "link"};
+    return source >= TEMPO_INTERNAL && source <= TEMPO_LINK ? names[source]
+                                                               : "set";
+}
+
+static bool parse_clock(Command *c, char *err, size_t n) {
+    if (c->nwords == 0) return true;
+    const char *source = c->words[0];
+    if (strcasecmp(source, "set") == 0) {
+        if (c->nwords > 2)
+            return reason(err, n, "clock set takes at most one bpm value");
+        if (c->nwords == 2
+            && !one_float(c->words[1], CHANDAS_MIN_BPM, CHANDAS_MAX_BPM,
+                          &c->value))
+            return reason(err, n, "clock set wants 20 to 300 bpm, not '%s'",
+                          c->words[1]);
+        c->choice = TEMPO_INTERNAL;
+        return true;
+    }
+    if (c->nwords != 1)
+        return reason(err, n, "clock %s takes no bpm value", source);
+    if (strcasecmp(source, "host") == 0) c->choice = TEMPO_HOST;
+    else if (strcasecmp(source, "midi") == 0) c->choice = TEMPO_MIDI;
+    else if (strcasecmp(source, "pulse") == 0) c->choice = TEMPO_PULSE;
+    else if (strcasecmp(source, "link") == 0) c->choice = TEMPO_LINK;
+    else return reason(err, n, "clock wants host, midi, pulse, link or set");
+    return true;
+}
+
+static int complete_clock(char *const words[], int nwords, const char *prefix,
+                          char out[][CAND_LEN], int max) {
+    if (nwords != 0) return 0;
+    int n = 0;
+    n = add_cand(out, n, max, prefix, "host");
+    n = add_cand(out, n, max, prefix, "midi");
+    n = add_cand(out, n, max, prefix, "pulse");
+    n = add_cand(out, n, max, prefix, "link");
+    return add_cand(out, n, max, prefix, "set");
+}
+
+static bool run_clock(App *a, const Command *c, char *err, size_t n) {
+    if (c->nwords == 0) {
+        push_log(a, "clock %s, %.2f bpm", clock_name(a->tempo_source),
+                 (double)a->tempo_bpm);
+        return true;
+    }
+    a->tempo_source = c->choice;
+    if (c->choice == TEMPO_INTERNAL && c->nwords == 2) {
+        a->tempo_bpm = c->value;
+        app_send(a, (Event){.kind = EV_SET_TEMPO, .u.f = c->value});
+    }
+    push_log(a, "clock %s%s", clock_name(a->tempo_source),
+             a->tempo_source == TEMPO_INTERNAL ? " (internal)" : "");
+    return true;
+}
+
+static bool parse_tempo(Command *c, char *err, size_t n) {
+    if (c->nwords != 1
+        || !one_float(c->nwords ? c->words[0] : "", CHANDAS_MIN_BPM,
+                      CHANDAS_MAX_BPM, &c->value))
+        return reason(err, n, "tempo wants 20 to 300 bpm");
+    return true;
+}
+
+static bool run_tempo(App *a, const Command *c, char *err, size_t n) {
+    a->tempo_bpm = c->value;
+    a->tempo_source = TEMPO_INTERNAL;
+    app_send(a, (Event){.kind = EV_SET_TEMPO, .u.f = c->value});
+    push_log(a, "tempo %.2f bpm", (double)c->value);
+    return true;
+}
+
+static bool parse_bend(Command *c, char *err, size_t n) {
+    if (c->nwords != 1
+        || !one_float(c->nwords ? c->words[0] : "", -BEND_SEMITONES,
+                      BEND_SEMITONES, &c->value))
+        return reason(err, n, "bend wants -2 to 2 semitones");
+    return true;
+}
+
+static bool run_bend(App *a, const Command *c, char *err, size_t n) {
+    app_send(a, (Event){.kind = EV_BEND, .u.f = c->value});
+    push_log(a, "bend %+.2f semitones", (double)c->value);
+    return true;
+}
+
+static bool parse_midi(Command *c, char *err, size_t n) {
+    if (c->nwords >= CMD_WORDS)
+        return reason(err, n, "MIDI port name is too long");
+    return true;
+}
+
+static int complete_midi(char *const words[], int nwords, const char *prefix,
+                         char out[][CAND_LEN], int max) {
+    return nwords == 0 ? add_cand(out, 0, max, prefix, "none") : 0;
+}
+
+static bool run_midi(App *a, const Command *c, char *err, size_t n) {
+    if (c->nwords == 0) {
+        char names[64][128];
+        int count = midi_port_names(names, 64);
+        push_log(a, "midi: %s", a->midi_open ? a->midi_port : "none");
+        if (count == 0) push_log(a, "no MIDI inputs found");
+        for (int i = 0; i < count; i++) push_log(a, "%s", names[i]);
+        return true;
+    }
+    if (c->nwords == 1 && strcasecmp(c->words[0], "none") == 0) {
+        gui_set_midi_port(a, NULL);
+        push_log(a, "midi: none");
+        return true;
+    }
+    char port[128] = "";
+    for (int i = 0; i < c->nwords; i++)
+        scat(port, sizeof port, "%s%s", i ? " " : "", c->words[i]);
+    if (!gui_set_midi_port(a, port))
+        return reason(err, n, "no MIDI input called %s", port);
+    push_log(a, "midi: %s", port);
+    return true;
+}
+
+static bool run_transport(App *a, const Command *c, char *err, size_t n) {
+    const char *verb = c->verb->name;
+    if (strcmp(verb, "reset") == 0) {
+        app_send(a, (Event){.kind = EV_RESET_CHANDAS});
+        push_log(a, "reset");
+        return true;
+    }
+    bool running = strcmp(verb, "start") == 0;
+    if (strcmp(verb, "panic") == 0) {
+        running = false;
+        app_send(a, (Event){.kind = EV_PANIC});
+        app_send(a, (Event){.kind = EV_BEND, .u.f = 0.0f});
+        midi_note_clear(&a->midi_note);
+    }
+    a->transport_running = running;
+    app_send(a, (Event){.kind = EV_SET_TRANSPORT, .u.flag = running});
+    push_log(a, "%s", verb);
+    return true;
+}
+
+static bool run_next(App *a, const Command *c, char *err, size_t n) {
+    preset_cycle(a, true);
+    return true;
+}
+
+static bool run_prev(App *a, const Command *c, char *err, size_t n) {
+    preset_cycle(a, false);
+    return true;
+}
+
+static bool run_init(App *a, const Command *c, char *err, size_t n) {
+    app_apply_session(a, session_default());
+    a->tempo_source = TEMPO_INTERNAL;
+    a->have_loaded = false;
+    push_log(a, "init loaded");
+    return true;
+}
+
+static bool run_where(App *a, const Command *c, char *err, size_t n) {
+    if (c->argc == 0) {
+        push_log(a, "presets: %s", preset_dir());
+        push_log(a, "recordings: %s", recording_dir());
+        push_log(a, "assets: %s", asset_dir());
+        return true;
+    }
+    if (strcasecmp(c->arg[0], "presets") == 0)
+        push_log(a, "%s", preset_dir());
+    else if (strcasecmp(c->arg[0], "recordings") == 0)
+        push_log(a, "%s", recording_dir());
+    else if (strcasecmp(c->arg[0], "assets") == 0)
+        push_log(a, "%s", asset_dir());
+    else
+        return reason(err, n, "where wants presets, recordings or assets");
+    return true;
+}
+
+static bool run_clear(App *a, const Command *c, char *err, size_t n) {
+    a->log_len = 0;
+    a->log_head = 0;
+    return true;
+}
+
+static bool run_quit(App *a, const Command *c, char *err, size_t n) {
+    if (a->hosted) return reason(err, n, "quit is standalone only");
+    a->quit = true;
+    return true;
+}
+
 static const char *view_name(const App *a) {
     switch (a->preset_filter.kind) {
     case FILTER_ALL: return "ALL";
@@ -1381,7 +1697,7 @@ static bool run_cd(App *a, const Command *c, char *err, size_t n) {
 
 static bool run_ls(App *a, const Command *c, char *err, size_t n) {
     if (c->argc > 0 && strcasecmp(c->arg[0], "mod") == 0) {
-        Command mods = {0};
+        Command mods = {.view = c->view};
         return mod_run_mods(a, &mods, err, n);
     }
     PresetFilter filter = a->preset_filter;
@@ -1667,16 +1983,6 @@ static bool run_undo(App *a, const Command *c, char *err, size_t n) {
     prune_refs(a);
     push_log(a, "'%s' put back.", journal.what);
     journal.kind = J_NONE;
-    return true;
-}
-
-static bool run_bind(App *a, const Command *c, char *err, size_t n) {
-    gui_run_bind(a, c->cc, c->target);
-    return true;
-}
-
-static bool run_unbind(App *a, const Command *c, char *err, size_t n) {
-    gui_run_unbind(a, c->cc_all ? -1 : c->cc);
     return true;
 }
 

@@ -10,7 +10,7 @@ typedef enum { CMD_NOP, CMD_HELP, CMD_RUN } CommandKind;
 
 #define MOD_CMD_ROUTES 8
 
-/* lfo <n> [shape] [rate] [phase] [mode] [bi|uni] [to <target> <depth|off>]... */
+/* mod lfo <n> [shape] [rate] [phase] [mode] [bi|uni] [to <target> <depth|off>]... */
 typedef struct {
     int slot; /* 0-based; -1 = every lfo */
     bool rm;

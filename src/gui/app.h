@@ -72,7 +72,7 @@ typedef enum {
     EV_SET_PATCH, EV_SET_VERB, EV_SET_MELODY, EV_SET_CHANDAS, EV_SET_WARMTH,
     EV_RESET_CHANDAS, EV_SET_TEMPO, EV_GLIDE_TO, EV_RECORD, EV_NOTE_OFF,
     EV_ENGAGE, EV_BEND, EV_NOTE_ON, EV_SET_CHAIN, EV_SET_MIDI_DRIVING,
-    EV_SET_LFO, EV_SET_ROUTE
+    EV_SET_LFO, EV_SET_ROUTE, EV_SET_TRANSPORT, EV_PANIC
 } EventKind;
 
 typedef struct {
@@ -231,6 +231,9 @@ typedef struct App {
     float shadow_warmth;
     float shadow_attack_s, shadow_decay_s, shadow_sustain, shadow_release_s;
     float tempo_bpm;
+    enum { TEMPO_INTERNAL, TEMPO_HOST, TEMPO_MIDI, TEMPO_PULSE, TEMPO_LINK }
+        tempo_source;
+    bool transport_running;
     float drone_hz;
     ModBank mods;
     Chain chain;

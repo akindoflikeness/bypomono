@@ -5,11 +5,6 @@ EnvParams env_params_default(void) {
     return p;
 }
 
-float velocity_for_level(float position) {
-    float p = clampf(position, 0.0f, 1.0f);
-    return p / (VELOCITY_CEILING + (1.0f - VELOCITY_CEILING) * p);
-}
-
 /* A setting moved mid-note: hold the level where it is and move the clock
    to the point the new shape reaches it, so nothing steps. */
 static void env_reanchor(Envelope *e, const EnvParams *p) {
@@ -23,7 +18,7 @@ static void env_reanchor(Envelope *e, const EnvParams *p) {
             e->t = clampf(u, 0.0f, 1.0f) * a_new;
             return;
         }
-        float sustain = e->sustain * clampf(p->sustain, 0.0f, 1.0f);
+        float sustain = clampf(p->sustain, 0.0f, 1.0f);
         float span = e->peak - sustain;
         if (span > 1e-6f && e->level > sustain) {
             float remaining =
@@ -57,17 +52,14 @@ void envelope_init(Envelope *e, float sample_rate) {
     e->from = 0.0f;
     e->level = 0.0f;
     e->peak = 0.0f;
-    e->sustain = 0.0f;
     e->sample_rate = fmaxf(sample_rate, 1.0f);
 }
 
-void envelope_note_on(Envelope *e, float velocity) {
-    float v = clampf(velocity, 0.0f, 1.0f);
+void envelope_note_on(Envelope *e) {
     e->from = e->level;
     e->stage = ENV_HELD;
     e->t = 0.0f;
-    e->peak = v;
-    e->sustain = v * v;
+    e->peak = 1.0f;
 }
 
 void envelope_note_off(Envelope *e) {
@@ -84,10 +76,6 @@ bool envelope_active(const Envelope *e) {
 
 float envelope_level(const Envelope *e) {
     return e->level;
-}
-
-float envelope_amplitude(const Envelope *e, float trim) {
-    return e->level * (VELOCITY_CEILING + (1.0f - VELOCITY_CEILING) * clampf(trim, 0.0f, 1.0f));
 }
 
 float envelope_tick(Envelope *e, const EnvParams *p) {
@@ -108,7 +96,7 @@ float envelope_tick(Envelope *e, const EnvParams *p) {
         } else {
             float d = fmaxf(p->decay_s, 1e-4f);
             float remaining = 1.0f - clampf((e->t - a) / d, 0.0f, 1.0f);
-            float sustain = e->sustain * clampf(p->sustain, 0.0f, 1.0f);
+            float sustain = clampf(p->sustain, 0.0f, 1.0f);
             e->level = sustain + (e->peak - sustain) * powf(remaining, curve_exponent(p->curve));
         }
         e->t += dt;

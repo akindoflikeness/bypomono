@@ -141,7 +141,7 @@ void patch_apply_ratio_mode(Patch *patch, RatioMode ratio_mode);
 
 typedef struct {
     float attack_s, decay_s, release_s, curve;
-    float sustain; /* fraction of the velocity-derived sustain level */
+    float sustain;
 } EnvParams;
 EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5, 1.0 */
 
@@ -153,23 +153,19 @@ EnvParams env_params_default(void); /* 0.008, 2.0, 2.0, 0.5, 1.0 */
 #define ENV_ATTACK_MIN 0.002f
 
 #define ENV_FLOOR 1e-4f
-#define VELOCITY_CEILING 0.8f
-float velocity_for_level(float position);
-
 typedef enum { ENV_IDLE, ENV_HELD, ENV_RELEASED } EnvStage;
 
 typedef struct {
     EnvStage stage;
-    float t, from, level, peak, sustain, sample_rate;
+    float t, from, level, peak, sample_rate;
     EnvParams seen; /* the settings the clock below was measured against */
 } Envelope;
 
 void envelope_init(Envelope *e, float sample_rate);
-void envelope_note_on(Envelope *e, float velocity);
+void envelope_note_on(Envelope *e);
 void envelope_note_off(Envelope *e);
 bool envelope_active(const Envelope *e);
 float envelope_level(const Envelope *e);
-float envelope_amplitude(const Envelope *e, float trim);
 float envelope_tick(Envelope *e, const EnvParams *p);
 
 /* ---------- breath ---------- */
@@ -277,6 +273,9 @@ typedef struct {
     float field_smooth, curve_smooth, field_amount, field_pitch;
     float bend, bend_to;
     float detune, detune_to; /* frequency ratio from the unison spread */
+    /* Velocity is a gain outside the normalized envelope. It is smoothed on
+       a sounding voice so a different retrigger velocity cannot step the VCA. */
+    float velocity, velocity_to;
     /* the amplitude authority changing hands must not step the level, so the
        new one starts where the old one was and closes the gap over the house
        glide */
@@ -284,7 +283,6 @@ typedef struct {
     AmpKind amp_seen;
     Chain chain;
     Envelope env;
-    float master_pos;
 } Voice;
 
 void voice_init(Voice *v, float sample_rate, Patch patch); /* allocates rip buffer */

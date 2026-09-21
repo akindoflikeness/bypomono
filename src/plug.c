@@ -486,9 +486,7 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
             && melody_samples_until_fire(&p->melody, &until) && until == 0) {
             float hz = melody_fire(&p->melody);
             voice_bank_note_off_all(&p->voice);
-            float vel =
-                velocity_for_level(voice_bank_patch(&p->voice)->master_level);
-            voice_bank_note_on(&p->voice, -1, hz, vel);
+            voice_bank_note_on(&p->voice, -1, hz, 1.0f);
             chandas_note_pulse(&p->chandas);
             mod_note_on(&p->mod);
         }

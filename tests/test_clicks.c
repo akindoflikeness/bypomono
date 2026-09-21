@@ -252,8 +252,7 @@ static void rig_render(void *ctx, float *out, size_t n) {
             if (melody_samples_until_fire(&r->melody, &until) && until == 0) {
                 float hz = melody_fire(&r->melody);
                 voice_bank_note_off_all(&r->bank);
-                voice_bank_note_on(&r->bank, -1, hz,
-                                   velocity_for_level(voice_bank_patch(&r->bank)->master_level));
+                voice_bank_note_on(&r->bank, -1, hz, 1.0f);
                 chandas_note_pulse(&r->chandas);
             }
             if (melody_samples_until_fire(&r->melody, &until) && until < run)

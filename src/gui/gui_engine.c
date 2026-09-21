@@ -292,9 +292,7 @@ static void render(void *ud, float *data, size_t frames, int channels) {
             float hz = melody_fire(&s->melody);
             if (!s->midi_driving) {
                 voice_bank_note_off_all(&s->voice);
-                float vel =
-                    velocity_for_level(voice_bank_patch(&s->voice)->master_level);
-                voice_bank_note_on(&s->voice, -1, hz, vel);
+                voice_bank_note_on(&s->voice, -1, hz, 1.0f);
                 chandas_note_pulse(&s->chandas);
                 mod_note_on(&s->mod);
             }

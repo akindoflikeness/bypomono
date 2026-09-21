@@ -58,7 +58,8 @@ static void sync_copy(VoicePair *dst, const VoicePair *src) {
         v->target_freq = from->target_freq;
         v->steal_glide_seconds = from->steal_glide_seconds;
         v->master = from->master;
-        v->master_pos = from->master_pos;
+        v->velocity = from->velocity;
+        v->velocity_to = from->velocity_to;
         v->index = from->index;
         v->field_smooth = from->field_smooth;
         v->curve_smooth = from->curve_smooth;

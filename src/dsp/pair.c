@@ -41,7 +41,8 @@ static void pair_cross_to(VoicePair *p, State next, bool audible) {
     const Voice *live = &p->voices[1 - incoming];
     Voice *in = &p->voices[incoming];
     in->master = live->master;
-    in->master_pos = live->master_pos;
+    in->velocity = live->velocity;
+    in->velocity_to = live->velocity_to;
     in->index = live->index;
     in->fb_smooth = live->fb_smooth;
     in->field_smooth = live->field_smooth;

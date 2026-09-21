@@ -694,7 +694,7 @@ static void paint_envelope(const App *a, Canvas *c, Rct rect) {
 
     Envelope e;
     envelope_init(&e, (float)steps / span);
-    envelope_note_on(&e, 1.0f);
+    envelope_note_on(&e);
     P2 pts[1024];
     int n = steps + 1 < 1024 ? steps + 1 : 1024;
     bool released = false;

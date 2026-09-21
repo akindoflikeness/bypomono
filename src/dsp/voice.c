@@ -77,13 +77,14 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->bend_to = 1.0f;
     v->detune = 1.0f;
     v->detune_to = 1.0f;
+    v->velocity = 1.0f;
+    v->velocity_to = 1.0f;
     v->fb_smooth = patch.feedback;
     v->amp_bridge = 0.0f;
     v->floor_last = 0.0f;
     v->amp_seen = AMP_DRONE;
     v->chain = chain_default();
     envelope_init(&v->env, sample_rate);
-    v->master_pos = clampf(patch.master_level, 0.0f, 1.0f);
     v->field_amount = 0.0f;
     v->field_smooth = clampf(patch.field, 0.0f, 1.0f);
     v->curve_smooth = clampf(patch.curve, 0.0f, 1.0f);
@@ -120,7 +121,10 @@ void voice_set_chain(Voice *v, Chain chain) {
 
 void voice_note_on(Voice *v, float hz, float velocity) {
     voice_glide_to_hz(v, hz);
-    envelope_note_on(&v->env, velocity);
+    float target = clampf(velocity, 0.0f, 1.0f);
+    if (!envelope_active(&v->env)) v->velocity = target;
+    v->velocity_to = target;
+    envelope_note_on(&v->env);
 }
 
 void voice_note_steal(Voice *v, float hz, float velocity) {
@@ -130,7 +134,8 @@ void voice_note_steal(Voice *v, float hz, float velocity) {
        while reusing a sounding poly voice; the patch's normal glide remains
        the user's control for every other move. */
     v->steal_glide_seconds = STEAL_GLIDE_SECONDS;
-    envelope_note_on(&v->env, velocity);
+    v->velocity_to = clampf(velocity, 0.0f, 1.0f);
+    envelope_note_on(&v->env);
 }
 
 bool voice_note_sounding(const Voice *v) {
@@ -271,7 +276,6 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
     float fb_exp = 1.0f / PHI;
     float index_target = clampf(v->patch.index, 0.0f, 1.0f);
     float master_target = master_gain(v->patch.master_level);
-    float master_pos_target = clampf(v->patch.master_level, 0.0f, 1.0f);
     AmpSource amp = v->chain.amp;
     float field_target = clampf(v->patch.field, 0.0f, 1.0f);
     float curve_target = clampf(v->patch.curve, 0.0f, 1.0f);
@@ -295,6 +299,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         v->fb_smooth += (fb_target - v->fb_smooth) * param_k;
         v->bend += (v->bend_to - v->bend) * param_k;
         v->detune += (v->detune_to - v->detune) * param_k;
+        v->velocity += (v->velocity_to - v->velocity) * param_k;
         float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
         float eff_level[NUM_OPS];
         for (int i = 0; i < NUM_OPS; i++) {
@@ -362,12 +367,11 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         }
         v->rip_sig = rip_line_process(&v->rip_line, mix * inv_carriers);
         v->master += (master_target - v->master) * param_k;
-        v->master_pos += (master_pos_target - v->master_pos) * param_k;
         EnvParams env_params = amp.kind == AMP_ENVELOPE ? amp.env : env_params_default();
         (void)envelope_tick(&v->env, &env_params);
         float floor_ = amp.kind == AMP_DRONE
             ? v->master
-            : master_gain(envelope_amplitude(&v->env, v->master_pos));
+            : envelope_level(&v->env) * v->velocity * v->master;
         if (amp.kind != v->amp_seen) {
             v->amp_bridge = v->floor_last - floor_;
             v->amp_seen = amp.kind;

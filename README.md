@@ -366,21 +366,21 @@ The shipped bank lives in presets/BYPO/ beside the app. On first run the app cop
 
 <pre>
 BRUTALISM           drifting            minority            slinky
-Fermi               eddie the eagle     miopic              space battleships
+Fermi               eddie_the_eagle     miopic              space_battleships
 Fluffy              eleventeen          moaner              stellar_breeze
-GlassD              fall of rome        mr bojangles        storyteller
-Summon              fibbing             mustang ballaie     symmetriad
-Woofer              goodbye-            neo bass            test flip point
-barbershop          hexD                net terminal gene   the conch
+GlassD              fall_of_rome        mr_bojangles        storyteller
+Summon              fibbing             mustang_ballaie     symmetriad
+Woofer              goodbye-            neo_bass            test_flip_point
+barbershop          hexD                net_terminal_gene   the_conch
 bong                hexD_alt            one                 the_nine
 chakra              init                orthogonal          throaty
-church              instability         oslo                tokyo ghost
-cinematic           it had the power    phraze              unbeknownst
-click               jiggle physics      plinky              washed out
-crash               landoger            present             wet bong
-default             lil glider          pressure            wibbly
-discovered harmony  logarhythm          saturated woof
-drama               mathsmatic          shuffling a deck
+church              instability         oslo                tokyo_ghost
+cinematic           it_had_the_power    phraze              unbeknownst
+click               jiggle_physics      plinky              washed_out
+crash               landoger            present             wet_bong
+default             lil_glider          pressure            wibbly
+discovered_harmony  logarhythm          saturated_woof
+drama               mathsmatic          shuffling_a_deck
 </pre>
 
 ## Contributors
@@ -416,4 +416,3 @@ Without AI this wouldn't exist. Primarily it has been programmed by AI agents. E
   <a href="#top">↑ top</a>
 ══════════════════════════════════════════════════════════════════
 </pre>
-

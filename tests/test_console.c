@@ -146,9 +146,9 @@ static void every_verb_parses_its_forms(void) {
         const Verb *v = verb_at(i);
         char line[256];
         if (strcmp(v->name, "bind") == 0) {
-            parses("bind 7 - index", CMD_RUN);
+            parses("bind 7 index", CMD_RUN);
             parses("bind cc7 index", CMD_RUN);
-            parses("bind CC7 - Index", CMD_RUN);
+            parses("bind CC7 Index", CMD_RUN);
             continue;
         }
         if (strcmp(v->name, "unbind") == 0) {
@@ -160,40 +160,46 @@ static void every_verb_parses_its_forms(void) {
         if (strcmp(v->name, "help") == 0) {
             parses("help", CMD_HELP);
             parses("?", CMD_HELP);
-            parses("help delete", CMD_HELP);
+            parses("help rm", CMD_HELP);
             parses("help presets", CMD_HELP);
             continue;
         }
         if (v->required == 0) parses(v->name, CMD_RUN);
         if (v->nargs >= 1) {
-            snprintf(line, sizeof line, "%s some name", v->name);
+            snprintf(line, sizeof line, "%s some_name", v->name);
             if (v->nargs == 1) parses(line, CMD_RUN);
         }
         if (v->nargs >= 2) {
-            snprintf(line, sizeof line, "%s some name - other one", v->name);
+            snprintf(line, sizeof line, "%s some_name other_one", v->name);
             parses(line, CMD_RUN);
         }
         for (int k = 0; v->aliases[k]; k++) {
-            snprintf(line, sizeof line, "%s%s", v->aliases[k],
-                     v->required ? " some name - other one" : "");
+            const char *args = v->required == 0 ? ""
+                               : v->nargs == 1 ? " some_name"
+                                              : " some_name other_one";
+            snprintf(line, sizeof line, "%s%s", v->aliases[k], args);
             parses(line, CMD_RUN);
         }
         for (int f = 0; f < v->nflags; f++) {
-            snprintf(line, sizeof line, "%s a take --%s 30", v->name,
-                     v->flags[f].name);
+            if (v->flags[f].value)
+                snprintf(line, sizeof line, "%s a_take --%s 30", v->name,
+                         v->flags[f].name);
+            else
+                snprintf(line, sizeof line, "%s --%s", v->name,
+                         v->flags[f].name);
             parses(line, CMD_RUN);
         }
     }
     Command c;
     char err[768];
-    parse_line("move my long name - my folder", &c, err, sizeof err);
-    CHECK(c.argc == 2 && strcmp(c.arg[0], "my long name") == 0
-              && strcmp(c.arg[1], "my folder") == 0,
+    parse_line("mv my_long_name my_folder", &c, err, sizeof err);
+    CHECK(c.argc == 2 && strcmp(c.arg[0], "my_long_name") == 0
+              && strcmp(c.arg[1], "my_folder") == 0,
           "two-argument split: '%s' / '%s'", c.arg[0], c.arg[1]);
-    parse_line("rec a take --end 30", &c, err, sizeof err);
-    CHECK(c.has_end && c.end == 30.0f && strcmp(c.arg[0], "a take") == 0,
+    parse_line("rec a_take --end 30", &c, err, sizeof err);
+    CHECK(c.has_end && c.end == 30.0f && strcmp(c.arg[0], "a_take") == 0,
           "rec flag: end=%g name='%s'", (double)c.end, c.arg[0]);
-    parse_line("bind cc7 - index", &c, err, sizeof err);
+    parse_line("bind cc7 index", &c, err, sizeof err);
     CHECK(c.cc == 7 && c.target == CC_INDEX, "bind parsed cc%d target %d", c.cc,
           c.target);
     parse_line("unbind all", &c, err, sizeof err);
@@ -201,9 +207,9 @@ static void every_verb_parses_its_forms(void) {
     parse_line("   ", &c, err, sizeof err);
     CHECK(c.kind == CMD_NOP, "blank line is a no-op");
     char echo[256];
-    parse_line("move drift - lab", &c, err, sizeof err);
+    parse_line("mv drift lab", &c, err, sizeof err);
     command_echo(&c, echo, sizeof echo);
-    CHECK(strcmp(echo, "move drift - lab") == 0, "echo '%s'", echo);
+    CHECK(strcmp(echo, "mv drift lab") == 0, "echo '%s'", echo);
 }
 
 static void help_on_every_verb(void) {
@@ -246,27 +252,28 @@ static void help_on_every_verb(void) {
 
 static void two_line_errors(void) {
     error_lines("save", "save wants a name", "usage: save <name>");
-    error_lines("move drift", "move wants <preset> - <folder>",
-                "usage: move <preset> - <folder>");
+    error_lines("mv drift", "mv wants <path> <destination>",
+                "usage: mv <path> <destination>");
     error_lines("undo now", "undo takes nothing", "usage: undo");
     error_lines("rec --end", "--end wants a seconds", "usage: rec");
     error_lines("rec --end soon", "--end wants a number of seconds, not 'soon'",
                 "usage: rec");
     error_lines("save --loud x", "save has no flag --loud", "usage: save");
-    error_lines("bind 300 - index", "'300' is not a controller: cc wants 0 to 127",
-                "usage: bind <cc> - <control>");
+    error_lines("mv drift - lab", "mv takes 2 arguments", "usage: mv");
+    error_lines("bind 300 index", "'300' is not a controller: cc wants 0 to 127",
+                "usage: bind <cc> <control>");
     error_lines("unbind x", "'x' is not a controller: cc wants 0 to 127, or all",
                 "usage: unbind <cc>");
-    error_lines("save ../x", "'../x' cannot be a name: no slashes, and not empty",
+    error_lines("save ../x", "'../x' is not a name or one-level preset path",
                 "usage: save");
-    error_lines("delet drift", "no verb called delet; did you mean delete?",
+    error_lines("delet drift", "no verb called delet; did you mean rm?",
                 "help lists every verb");
     error_lines("recrd", "no verb called recrd; did you mean rec?",
                 "help lists every verb");
     error_lines("xqzvwp", "no verb called xqzvwp", "help lists every verb");
     Command c;
     char err[768];
-    CHECK(!parse_line("bind 7 - loudness", &c, err, sizeof err),
+    CHECK(!parse_line("bind 7 loudness", &c, err, sizeof err),
           "unknown control parsed");
     CHECK(strstr(err, "index") != NULL, "unknown control lists the controls");
 }
@@ -289,23 +296,23 @@ static void history_records_every_submitted_line(void) {
     memset(&h, 0, sizeof h);
     h.cursor = -1;
     CHECK(history_up(&h) == NULL, "empty history walks");
-    CHECK(run_line(&app, &h, "bind 7 - index"), "bind ran");
+    CHECK(run_line(&app, &h, "bind 7 index"), "bind ran");
     CHECK(bind_calls == 1 && last_cc == 7, "bind reached the rig");
-    CHECK(!run_line(&app, &h, "bind 900 - index"), "bad bind ran");
-    CHECK(!run_line(&app, &h, "delete nothere"), "delete of nothing ran");
+    CHECK(!run_line(&app, &h, "bind 900 index"), "bad bind ran");
+    CHECK(!run_line(&app, &h, "rm nothere"), "delete of nothing ran");
     CHECK(run_line(&app, &h, "unbind all"), "unbind ran");
     CHECK(unbind_calls == 1 && last_unbind == -1, "unbind all reached the rig");
     CHECK(run_line(&app, &h, "unbind all"), "repeat ran");
     CHECK(run_line(&app, &h, "   "), "blank ran");
     CHECK(h.len == 4, "history holds %d lines, wanted 4", h.len);
     CHECK(strcmp(history_up(&h), "unbind all") == 0, "up 1");
-    CHECK(strcmp(history_up(&h), "delete nothere") == 0, "up 2");
-    CHECK(strcmp(history_up(&h), "bind 900 - index") == 0, "up 3");
-    CHECK(strcmp(history_up(&h), "bind 7 - index") == 0, "up 4");
-    CHECK(strcmp(history_up(&h), "bind 7 - index") == 0,
+    CHECK(strcmp(history_up(&h), "rm nothere") == 0, "up 2");
+    CHECK(strcmp(history_up(&h), "bind 900 index") == 0, "up 3");
+    CHECK(strcmp(history_up(&h), "bind 7 index") == 0, "up 4");
+    CHECK(strcmp(history_up(&h), "bind 7 index") == 0,
           "up stays on oldest");
-    CHECK(strcmp(history_down(&h), "bind 900 - index") == 0, "down 1");
-    CHECK(strcmp(history_down(&h), "delete nothere") == 0, "down 2");
+    CHECK(strcmp(history_down(&h), "bind 900 index") == 0, "down 1");
+    CHECK(strcmp(history_down(&h), "rm nothere") == 0, "down 2");
     CHECK(strcmp(history_down(&h), "unbind all") == 0, "down 3");
     CHECK(history_down(&h) == NULL, "down off the newest end");
     CHECK(history_up(&h) != NULL && strcmp(h.line[h.cursor], "unbind all") == 0,
@@ -343,16 +350,18 @@ static void trash_and_undo_round_trip(void) {
     CHECK(write_file(drift, json), "wrote %s", drift);
     preset_rescan(&app);
     CHECK(app.preset_count == 1, "one preset scanned, got %d", app.preset_count);
+    CHECK(!run_ok("save drift", err, sizeof err), "save replaced drift");
+    CHECK(strstr(err, "use ow drift") != NULL, "duplicate save said: %s", err);
 
     /* delete: missing name, no highlight, then the real thing */
-    CHECK(!run_ok("delete nothere", err, sizeof err), "delete nothere ran");
+    CHECK(!run_ok("rm nothere", err, sizeof err), "rm nothere ran");
     CHECK(strncmp(err, "no preset called nothere\n", 25) == 0,
-          "delete nothere said: %s", err);
+          "rm nothere said: %s", err);
     app.have_selected = false;
-    CHECK(!run_ok("delete", err, sizeof err), "bare delete ran");
-    CHECK(strncmp(err, "delete wants a preset\n", 22) == 0, "bare delete said: %s",
+    CHECK(!run_ok("rm", err, sizeof err), "bare rm ran");
+    CHECK(strncmp(err, "rm wants a preset\n", 18) == 0, "bare rm said: %s",
           err);
-    CHECK(run_ok("delete drift", err, sizeof err), "delete drift: %s", err);
+    CHECK(run_ok("rm USER/drift", err, sizeof err), "rm path: %s", err);
     CHECK(!present(drift) && present(trashed), "drift moved to the trash");
     char what[256];
     CHECK(undo_pending(what, sizeof what) && strcmp(what, "USER/drift") == 0,
@@ -366,13 +375,13 @@ static void trash_and_undo_round_trip(void) {
     /* delete through the highlight, and a second copy in the trash */
     app.preset_selected = app.preset_names[0];
     app.have_selected = true;
-    CHECK(run_ok("delete", err, sizeof err), "delete highlighted: %s", err);
+    CHECK(run_ok("rm", err, sizeof err), "rm highlighted: %s", err);
     CHECK(!app.have_selected, "highlight dropped with the file");
     CHECK(write_file(drift, json), "rewrote drift");
     preset_rescan(&app);
-    CHECK(run_ok("delete selected", err, sizeof err) == false,
+    CHECK(run_ok("rm selected", err, sizeof err) == false,
           "delete selected with no highlight ran");
-    CHECK(run_ok("delete drift", err, sizeof err), "delete drift again: %s", err);
+    CHECK(run_ok("rm drift", err, sizeof err), "rm drift again: %s", err);
     char trashed2[1024];
     in_dir("trash/drift~1.json", trashed2, sizeof trashed2);
     CHECK(present(trashed) && present(trashed2), "second copy kept as ~1");
@@ -380,26 +389,38 @@ static void trash_and_undo_round_trip(void) {
     CHECK(present(drift) && !present(trashed2), "undo restored the ~1 copy");
 
     /* add, move, undo */
-    CHECK(run_ok("add lab", err, sizeof err), "add lab: %s", err);
+    CHECK(run_ok("mkdir lab", err, sizeof err), "mkdir lab: %s", err);
     CHECK(is_dir(lab), "lab made");
-    CHECK(!run_ok("add lab", err, sizeof err), "add lab twice ran");
-    CHECK(!run_ok("add trash", err, sizeof err), "add trash ran");
-    CHECK(!run_ok("move drift - nowhere", err, sizeof err), "move to nowhere ran");
+    CHECK(!run_ok("mkdir lab", err, sizeof err), "mkdir lab twice ran");
+    CHECK(run_ok("rmdir lab", err, sizeof err), "rmdir lab: %s", err);
+    CHECK(!is_dir(lab), "rmdir left lab behind");
+    CHECK(run_ok("mkdir lab", err, sizeof err), "remade lab: %s", err);
+    CHECK(!run_ok("mkdir trash", err, sizeof err), "mkdir trash ran");
+    CHECK(!run_ok("mv drift nowhere/drift", err, sizeof err), "move to nowhere ran");
     CHECK(strncmp(err, "no folder called nowhere", 24) == 0, "move said: %s", err);
-    CHECK(run_ok("move drift - lab", err, sizeof err), "move: %s", err);
+    CHECK(run_ok("mv drift lab", err, sizeof err), "move: %s", err);
     CHECK(!present(drift) && present(lab_drift), "drift filed under lab");
+    CHECK(run_ok("cd lab", err, sizeof err), "cd lab: %s", err);
+    CHECK(app.preset_filter.kind == FILTER_BANK
+              && strcmp(app.preset_filter.bank, "lab") == 0,
+          "cd did not select lab");
+    CHECK(run_ok("ls", err, sizeof err), "ls lab: %s", err);
+    CHECK(run_ok("load lab/drift", err, sizeof err), "load path: %s", err);
+    CHECK(app.have_loaded && strcmp(app.preset_loaded.bank, "lab") == 0,
+          "load path did not load lab/drift");
+    CHECK(!run_ok("rmdir lab", err, sizeof err), "rmdir removed nonempty lab");
     CHECK(run_ok("undo", err, sizeof err), "undo move: %s", err);
     CHECK(present(drift) && !present(lab_drift), "undo unfiled it");
 
     /* rename, undo */
-    CHECK(run_ok("rename drift - drifted", err, sizeof err), "rename: %s", err);
+    CHECK(run_ok("mv drift drifted", err, sizeof err), "rename: %s", err);
     CHECK(!present(drift) && present(drifted), "renamed on disk");
     CHECK(run_ok("undo", err, sizeof err), "undo rename: %s", err);
     CHECK(present(drift) && !present(drifted), "undo renamed it back");
 
     /* overwrite keeps the old file in the trash; undo brings it back */
     CHECK(write_file(drift, "{\"marker\": true}"), "marked drift");
-    CHECK(run_ok("overwrite drift", err, sizeof err), "overwrite: %s", err);
+    CHECK(run_ok("ow drift", err, sizeof err), "overwrite: %s", err);
     char text[4096];
     CHECK(read_file(drift, text, sizeof text) && strstr(text, "marker") == NULL,
           "overwrite wrote the current sound");
@@ -411,15 +432,15 @@ static void trash_and_undo_round_trip(void) {
           "undo restored the old contents");
 
     /* remove a folder with something in it, undo */
-    CHECK(run_ok("move drift - lab", err, sizeof err), "move for remove: %s", err);
-    CHECK(run_ok("remove lab", err, sizeof err), "remove lab: %s", err);
+    CHECK(run_ok("mv drift lab", err, sizeof err), "move for remove: %s", err);
+    CHECK(run_ok("rm -r lab", err, sizeof err), "remove lab: %s", err);
     char trashed_lab[1024];
     in_dir("trash/lab/drift.json", trashed_lab, sizeof trashed_lab);
     CHECK(!is_dir(lab) && present(trashed_lab), "lab and its preset in the trash");
     CHECK(run_ok("undo", err, sizeof err), "undo remove: %s", err);
     CHECK(is_dir(lab) && present(lab_drift), "undo restored the folder");
-    CHECK(!run_ok("remove trash", err, sizeof err), "remove trash ran");
-    CHECK(!run_ok("remove USER", err, sizeof err), "remove USER ran");
+    CHECK(!run_ok("rm -r trash", err, sizeof err), "remove trash ran");
+    CHECK(!run_ok("rm -r USER", err, sizeof err), "remove USER ran");
     free(json);
 }
 

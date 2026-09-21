@@ -418,7 +418,7 @@ void draw_block_caret(Canvas *c, Ui *ui, FontId f, P2 text_pos,
 void preset_rescan(App *a);
 void preset_load(App *a, const PresetRef *r);
 void preset_save_in(App *a, const char *bank, const char *name);
-void preset_run_save(App *a, const char *name);
+bool preset_run_save(App *a, const char *name);
 void preset_run_overwrite(App *a, const char *args);
 void preset_run_delete(App *a, const char *args);
 /* first call arms on the highlighted row, the next call on the same row

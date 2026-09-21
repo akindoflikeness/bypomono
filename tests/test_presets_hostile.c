@@ -671,7 +671,7 @@ static void preset_save_in_writes_nothing_outside_the_preset_dir(void) {
     /* a legitimate save still lands, and lands inside */
     preset_save_in(&hostile_app, "BYPO", "plain name");
     char want[1024];
-    snprintf(want, sizeof want, "%s/BYPO/plain name.json", dir);
+    snprintf(want, sizeof want, "%s/BYPO/plain_name.json", dir);
     CHECK(present(want), "a plain save did not write %s", want);
 }
 

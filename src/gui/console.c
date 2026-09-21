@@ -28,21 +28,21 @@ static const Tip TIPS[] = {
     {W_ALWAYS, "press / to type a command. help on its own lists them."},
     {W_ALWAYS, "USER holds everything you made, wherever you filed it."},
     {W_COMMANDING,
-     "move <preset> - <folder> files a preset. add <folder> makes the folder."},
+     "mv <preset> <folder> files a preset. mkdir <folder> makes the folder."},
     {W_COMMANDING,
-     "put -h after any verb — move -h — and it will tell you how it is spelled."},
+     "put -h after any verb — mv -h — and it will tell you how it is spelled."},
     {W_HIGHLIGHTED,
-     "selected stands for the highlighted preset: move selected - <folder>."},
+     "selected stands for the highlighted preset: mv selected <folder>."},
     {W_HIGHLIGHTED,
-     "rename <preset> - <new name> renames it where it sits, folder and all."},
+     "mv <preset> <new_name> renames it where it sits, folder and all."},
     {W_BROWSING, "click a preset to highlight it, click it again to load it."},
     {W_ALWAYS, "two clicks on the bar, under a second, opens it to type in."},
-    {W_NOTHING_SAVED, "save never clobbers — a taken name earns a ~1."},
+    {W_NOTHING_SAVED, "save never clobbers — use ow when a name is taken."},
     {W_COMMANDING,
-     "delete <preset> and remove <folder> go to the trash. undo puts the last "
+     "rm <preset> and rm -r <folder> go to the trash. undo puts the last "
      "one back."},
     {W_HIGHLIGHTED,
-     "overwrite selected replaces it with the sound you have now."},
+     "ow selected replaces it with the sound you have now."},
 };
 
 void tell_new_tips(App *a) {

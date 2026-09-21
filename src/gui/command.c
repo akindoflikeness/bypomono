@@ -76,13 +76,17 @@ static bool is_view_name(const char *folder) {
 /* ---------- the verb table ---------- */
 
 static bool run_rec(App *a, const Command *c, char *err, size_t n);
+static bool run_ls(App *a, const Command *c, char *err, size_t n);
+static bool run_cd(App *a, const Command *c, char *err, size_t n);
+static bool run_load(App *a, const Command *c, char *err, size_t n);
 static bool run_save(App *a, const Command *c, char *err, size_t n);
 static bool run_overwrite(App *a, const Command *c, char *err, size_t n);
 static bool run_delete(App *a, const Command *c, char *err, size_t n);
 static bool run_rename(App *a, const Command *c, char *err, size_t n);
-static bool run_move(App *a, const Command *c, char *err, size_t n);
 static bool run_add(App *a, const Command *c, char *err, size_t n);
 static bool run_remove(App *a, const Command *c, char *err, size_t n);
+static bool run_rmdir(App *a, const Command *c, char *err, size_t n);
+static bool folder_ok(const char *folder, char *err, size_t n);
 static bool run_undo(App *a, const Command *c, char *err, size_t n);
 static bool run_bind(App *a, const Command *c, char *err, size_t n);
 static bool run_unbind(App *a, const Command *c, char *err, size_t n);
@@ -98,27 +102,37 @@ static const Flag REC_FLAGS[] = {
     {"end", "seconds", "finish the take on its own after this long"},
 };
 
+static const Flag RM_FLAGS[] = {
+    {"r", NULL, "move a folder and everything in it to the trash"},
+};
+
 static const Verb VERBS[] = {
+    {"ls", {NULL}, G_PRESETS, {"path or mod", NULL}, 1, 0, true, NULL, 0,
+     "list presets in a folder, the browser view, or modulation routes", run_ls,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"cd", {NULL}, G_PRESETS, {"folder", NULL}, 1, 0, true, NULL, 0,
+     "set the preset browser view; no argument prints it", run_cd, NULL, NULL,
+     NULL, NULL, NULL, NULL},
+    {"load", {NULL}, G_PRESETS, {"path", NULL}, 1, 1, true, NULL, 0,
+     "load a preset by path or unambiguous name", run_load, NULL, NULL, NULL,
+     NULL, NULL, NULL},
     {"save", {NULL}, G_PRESETS, {"name", NULL}, 1, 1, false, NULL, 0,
      "write the current sound under a name", run_save, NULL, NULL, NULL,
      NULL, NULL, NULL},
-    {"overwrite", {NULL}, G_PRESETS, {"preset", NULL}, 1, 1, false, NULL, 0,
+    {"ow", {"overwrite", NULL}, G_PRESETS, {"path", NULL}, 1, 1, true, NULL, 0,
      "replace a preset with the current sound", run_overwrite, NULL, NULL, NULL,
      NULL, NULL, NULL},
-    {"delete", {NULL}, G_PRESETS, {"preset", NULL}, 1, 0, false, NULL, 0,
-     "move a preset to the trash, or the highlighted one", run_delete, NULL, NULL, NULL,
+    {"rm", {"delete", NULL}, G_PRESETS, {"path", NULL}, 1, 0, true,
+     RM_FLAGS, 1, "move a preset to the trash; -r moves a folder", run_delete, NULL, NULL, NULL,
      NULL, NULL, NULL},
-    {"rename", {NULL}, G_PRESETS, {"preset", "new name"}, 2, 2, false, NULL, 0,
+    {"mv", {"rename", "move", NULL}, G_PRESETS, {"path", "destination"}, 2, 2, true, NULL, 0,
      "give a preset a different name, where it sits", run_rename, NULL, NULL, NULL,
      NULL, NULL, NULL},
-    {"move", {NULL}, G_PRESETS, {"preset", "folder"}, 2, 2, false, NULL, 0,
-     "put a preset in a folder that already exists", run_move, NULL, NULL, NULL,
-     NULL, NULL, NULL},
-    {"add", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, false, NULL, 0,
+    {"mkdir", {"add", NULL}, G_PRESETS, {"folder", NULL}, 1, 1, true, NULL, 0,
      "make an empty folder", run_add, NULL, NULL, NULL,
      NULL, NULL, NULL},
-    {"remove", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, false, NULL, 0,
-     "move a folder and everything in it to the trash", run_remove, NULL, NULL, NULL,
+    {"rmdir", {NULL}, G_PRESETS, {"folder", NULL}, 1, 1, true, NULL, 0,
+     "remove an empty folder", run_rmdir, NULL, NULL, NULL,
      NULL, NULL, NULL},
     {"undo", {NULL}, G_PRESETS, {NULL, NULL}, 0, 0, false, NULL, 0,
      "put back the last trashed, renamed, moved or overwritten item", run_undo, NULL, NULL, NULL,
@@ -254,7 +268,7 @@ static void verb_form(const Verb *v, char *out, size_t cap) {
         return;
     }
     for (int i = 0; i < v->nargs; i++) {
-        const char *sep = i == 0 ? " " : ARG_SEP;
+        const char *sep = " ";
         if (i < v->required)
             scat(out, cap, "%s<%s>", sep, v->args[i]);
         else
@@ -358,13 +372,6 @@ static bool is_help_word(const char *w) {
     return strcmp(w, "-h") == 0 || strcmp(w, "--help") == 0 || strcmp(w, "?") == 0;
 }
 
-static void join_words(char *const words[], int from, int to, char *out,
-                       size_t cap) {
-    out[0] = '\0';
-    for (int i = from; i < to; i++)
-        scat(out, cap, "%s%s", i == from ? "" : " ", words[i]);
-}
-
 static int parse_cc_word(const char *w) {
     const char *d = w;
     if (strncasecmp(w, "cc", 2) == 0) d = w + 2;
@@ -388,10 +395,29 @@ static bool clean_name(const char *raw, char *out, size_t cap, char *err,
         snprintf(out, cap, "%s", SELECTED_WORD);
         return true;
     }
-    sanitise_segment(raw, out, cap);
+    const char *slash = strchr(raw, '/');
+    if (!slash) {
+        sanitise_segment(raw, out, cap);
+    } else {
+        if (slash == raw || !slash[1] || strchr(slash + 1, '/')) out[0] = '\0';
+        else {
+            char left[128], clean_left[128], right[192];
+            snprintf(left, sizeof left, "%.*s", (int)(slash - raw), raw);
+            sanitise_segment(left, clean_left, sizeof clean_left);
+            sanitise_segment(slash + 1, right, sizeof right);
+            size_t nl = strlen(clean_left), nr = strlen(right);
+            if (clean_left[0] && right[0] && nl + nr + 2 <= cap) {
+                memcpy(out, clean_left, nl);
+                out[nl] = '/';
+                memcpy(out + nl + 1, right, nr + 1);
+            } else {
+                out[0] = '\0';
+            }
+        }
+    }
     if (!out[0])
         return reason(err, err_len,
-                      "'%s' cannot be a name: no slashes, and not empty", raw);
+                      "'%s' is not a name or one-level preset path", raw);
     return true;
 }
 
@@ -476,41 +502,24 @@ static bool parse_words(char *const words[], int n, Command *out, char *err,
                               "--end wants a number of seconds, not '%s'", val);
             out->has_end = true;
             out->end = s;
+        } else if (strcmp(f->name, "r") == 0) {
+            out->recursive = true;
         }
     }
 
-    int sep = -1;
-    for (int i = 0; i < npos; i++)
-        if (strcmp(pos[i], "-") == 0) sep = i;
     char given[2][192];
-    int ngiven = 0;
+    int ngiven = npos;
     if (npos > 0 && v->nargs == 0)
         return reason(err, err_len, "%s takes nothing", v->name);
-    if (v->nargs >= 2 && sep >= 0) {
-        join_words(pos, 0, sep, given[0], sizeof given[0]);
-        join_words(pos, sep + 1, npos, given[1], sizeof given[1]);
-        ngiven = 2;
-    } else if (v->nargs >= 2 && v->words && npos == 2) {
-        snprintf(given[0], sizeof given[0], "%s", pos[0]);
-        snprintf(given[1], sizeof given[1], "%s", pos[1]);
-        ngiven = 2;
-    } else if (npos > 0) {
-        join_words(pos, 0, npos, given[0], sizeof given[0]);
-        ngiven = 1;
-    }
-    for (int i = 0; i < ngiven; i++) {
-        char t[192];
-        trim_into(given[i], t, sizeof t);
-        if (!t[0]) {
-            ngiven = i;
-            break;
-        }
-        snprintf(given[i], sizeof given[i], "%s", t);
-    }
+    if (npos > v->nargs)
+        return reason(err, err_len, "%s takes %d argument%s", v->name,
+                      v->nargs, v->nargs == 1 ? "" : "s");
+    for (int i = 0; i < ngiven; i++)
+        snprintf(given[i], sizeof given[i], "%s", pos[i]);
     if (ngiven < v->required) {
         if (v->required >= 2)
             return reason(err, err_len, "%s wants <%s>%s<%s>", v->name,
-                          v->args[0], ARG_SEP, v->args[1]);
+                          v->args[0], " ", v->args[1]);
         return reason(err, err_len, "%s wants a %s", v->name, v->args[0]);
     }
     for (int i = 0; i < ngiven; i++)
@@ -591,7 +600,7 @@ void command_echo(const Command *c, char *out, size_t cap) {
         return;
     }
     if (v->run == run_bind) {
-        scat(out, cap, " cc%d%s%s", c->cc, ARG_SEP, cc_target_name(c->target));
+        scat(out, cap, " cc%d %s", c->cc, cc_target_name(c->target));
         return;
     }
     if (v->run == run_unbind) {
@@ -602,7 +611,7 @@ void command_echo(const Command *c, char *out, size_t cap) {
         return;
     }
     if (c->argc > 0) scat(out, cap, " %s", c->arg[0]);
-    if (c->argc > 1) scat(out, cap, "%s%s", ARG_SEP, c->arg[1]);
+    if (c->argc > 1) scat(out, cap, " %s", c->arg[1]);
     if (c->has_end) scat(out, cap, " --end %g", (double)c->end);
 }
 
@@ -835,12 +844,22 @@ static bool resolve(App *a, const char *name, PresetRef *out, char *err,
         return reason(err, err_len, "%s needs a preset highlighted first",
                       SELECTED_WORD);
     }
+    char *slash = strchr(want, '/');
+    const char *want_name = want;
+    const char *want_bank = NULL;
+    if (slash) {
+        *slash = '\0';
+        want_name = slash + 1;
+        want_bank = strcasecmp(want, MINE_BANK) == 0 ? "" : want;
+    }
     int hits = 0;
     const PresetRef *hit = NULL;
-    for (int pass = 0; pass < 2 && hits == 0; pass++) {
+    int passes = want_bank ? 1 : 2;
+    for (int pass = 0; pass < passes && hits == 0; pass++) {
         for (int i = 0; i < a->preset_count; i++) {
             const PresetRef *p = &a->preset_names[i];
             if (strcmp(p->bank, TRASH_DIR) == 0) continue;
+            if (want_bank && strcasecmp(p->bank, want_bank) != 0) continue;
             bool in_view = true;
             switch (a->preset_filter.kind) {
             case FILTER_ALL: break;
@@ -849,10 +868,10 @@ static bool resolve(App *a, const char *name, PresetRef *out, char *err,
                 in_view = strcmp(p->bank, a->preset_filter.bank) == 0;
                 break;
             }
-            if (pass == 0 && !in_view) continue;
+            if (!want_bank && pass == 0 && !in_view) continue;
             char low[192];
             lower_into(p->name, low, sizeof low);
-            if (strcmp(low, want) != 0) continue;
+            if (strcmp(low, want_name) != 0) continue;
             hits++;
             hit = p;
         }
@@ -860,8 +879,8 @@ static bool resolve(App *a, const char *name, PresetRef *out, char *err,
     if (hits == 0) return reason(err, err_len, "no preset called %s", name);
     if (hits > 1)
         return reason(err, err_len,
-                      "%s is in %d folders; narrow the browser to one first",
-                      name, hits);
+                      "%s is in %d folders; use a folder/name path", name,
+                      hits);
     *out = *hit;
     return true;
 }
@@ -949,6 +968,98 @@ static bool write_text(const char *path, const char *text) {
 
 /* ---------- handlers ---------- */
 
+static const char *view_name(const App *a) {
+    switch (a->preset_filter.kind) {
+    case FILTER_ALL: return "ALL";
+    case FILTER_MINE: return MINE_BANK;
+    case FILTER_BANK: return a->preset_filter.bank;
+    }
+    return "ALL";
+}
+
+static bool run_cd(App *a, const Command *c, char *err, size_t n) {
+    if (c->argc == 0) {
+        push_log(a, "%s", view_name(a));
+        return true;
+    }
+    const char *folder = c->arg[0];
+    if (strcasecmp(folder, "ALL") == 0) {
+        a->preset_filter.kind = FILTER_ALL;
+        a->preset_filter.bank[0] = '\0';
+    } else if (strcasecmp(folder, MINE_BANK) == 0) {
+        a->preset_filter.kind = FILTER_MINE;
+        a->preset_filter.bank[0] = '\0';
+    } else {
+        int found = -1;
+        for (int i = 0; i < a->folder_count; i++)
+            if (strcasecmp(a->preset_folders[i], folder) == 0) found = i;
+        if (found < 0 || strcasecmp(folder, TRASH_DIR) == 0)
+            return reason(err, n, "no preset folder called %s", folder);
+        a->preset_filter.kind = FILTER_BANK;
+        snprintf(a->preset_filter.bank, sizeof a->preset_filter.bank, "%s",
+                 a->preset_folders[found]);
+    }
+    push_log(a, "preset view: %s", view_name(a));
+    return true;
+}
+
+static bool run_ls(App *a, const Command *c, char *err, size_t n) {
+    if (c->argc > 0 && strcasecmp(c->arg[0], "mod") == 0) {
+        Command mods = {0};
+        return mod_run_mods(a, &mods, err, n);
+    }
+    PresetFilter filter = a->preset_filter;
+    if (c->argc > 0) {
+        const char *path = c->arg[0];
+        if (strchr(path, '/')) {
+            PresetRef p;
+            if (!resolve(a, path, &p, err, n)) return false;
+            char q[256];
+            preset_qualified(&p, q, sizeof q);
+            push_log(a, "%s", q);
+            return true;
+        }
+        if (strcasecmp(path, "ALL") == 0)
+            filter.kind = FILTER_ALL;
+        else if (strcasecmp(path, MINE_BANK) == 0)
+            filter.kind = FILTER_MINE;
+        else {
+            bool found = false;
+            for (int i = 0; i < a->folder_count; i++)
+                if (strcasecmp(a->preset_folders[i], path) == 0) {
+                    filter.kind = FILTER_BANK;
+                    snprintf(filter.bank, sizeof filter.bank, "%s",
+                             a->preset_folders[i]);
+                    found = true;
+                }
+            if (!found) return reason(err, n, "no preset folder called %s", path);
+        }
+    }
+    int listed = 0;
+    for (int i = 0; i < a->preset_count; i++) {
+        const PresetRef *p = &a->preset_names[i];
+        bool show = filter.kind == FILTER_ALL
+                    || (filter.kind == FILTER_MINE
+                        && strcmp(p->bank, STOCK_BANK) != 0)
+                    || (filter.kind == FILTER_BANK
+                        && strcmp(p->bank, filter.bank) == 0);
+        if (!show || strcmp(p->bank, TRASH_DIR) == 0) continue;
+        char q[256];
+        preset_qualified(p, q, sizeof q);
+        push_log(a, "%s", q);
+        listed++;
+    }
+    if (listed == 0) push_log(a, "%s is empty", c->argc ? c->arg[0] : view_name(a));
+    return true;
+}
+
+static bool run_load(App *a, const Command *c, char *err, size_t n) {
+    PresetRef p;
+    if (!resolve(a, c->arg[0], &p, err, n)) return false;
+    preset_load(a, &p);
+    return true;
+}
+
 static bool run_rec(App *a, const Command *c, char *err, size_t n) {
     char args[512] = "";
     if (c->argc > 0) snprintf(args, sizeof args, "%s", c->arg[0]);
@@ -959,7 +1070,15 @@ static bool run_rec(App *a, const Command *c, char *err, size_t n) {
 }
 
 static bool run_save(App *a, const Command *c, char *err, size_t n) {
-    preset_run_save(a, c->arg[0]);
+    PresetRef p = ref_make(NULL, c->arg[0]);
+    char path[PATHBUF];
+    if (!preset_path(&p, path, sizeof path))
+        return reason(err, n, "'%s' cannot be a preset name", c->arg[0]);
+    if (path_exists(path))
+        return reason(err, n, "%s already exists; use ow %s to replace it",
+                      c->arg[0], c->arg[0]);
+    if (!preset_run_save(a, c->arg[0]))
+        return reason(err, n, "%s could not be saved", c->arg[0]);
     return true;
 }
 
@@ -996,11 +1115,15 @@ static bool run_overwrite(App *a, const Command *c, char *err, size_t n) {
 }
 
 static bool run_delete(App *a, const Command *c, char *err, size_t n) {
+    if (c->recursive) {
+        if (c->argc == 0) return reason(err, n, "rm -r wants a folder");
+        return run_remove(a, c, err, n);
+    }
     PresetRef p;
     if (c->argc > 0) {
         if (!resolve(a, c->arg[0], &p, err, n)) return false;
     } else if (!focus_highlighted(a, &p)) {
-        return reason(err, n, "delete wants a preset");
+        return reason(err, n, "rm wants a preset");
     }
     char path[PATHBUF], dst[PATHBUF];
     if (!preset_path(&p, path, sizeof path) || !path_exists(path))
@@ -1025,10 +1148,34 @@ static bool run_rename(App *a, const Command *c, char *err, size_t n) {
                       "your own copy instead",
                       STOCK_BANK);
     if (strcasecmp(c->arg[1], SELECTED_WORD) == 0)
-        return reason(err, n, "%s cannot be a preset name", SELECTED_WORD);
-    PresetRef dest = ref_make(p.bank, c->arg[1]);
+        return reason(err, n, "%s cannot be a destination", SELECTED_WORD);
+
+    PresetRef dest;
+    const char *slash = strchr(c->arg[1], '/');
+    if (slash) {
+        char bank[64];
+        snprintf(bank, sizeof bank, "%.*s", (int)(slash - c->arg[1]),
+                 c->arg[1]);
+        dest = ref_make(strcasecmp(bank, MINE_BANK) == 0 ? "" : bank,
+                        slash + 1);
+    } else {
+        char candidate[PATHBUF];
+        snprintf(candidate, sizeof candidate, "%s/%s", preset_dir(),
+                 c->arg[1]);
+        dest = is_dir_path(candidate) ? ref_make(c->arg[1], p.name)
+                                      : ref_make(p.bank, c->arg[1]);
+    }
     if (refs_equal(&dest, &p))
-        return reason(err, n, "%s is what it is called already", p.name);
+        return reason(err, n, "%s is already there", c->arg[0]);
+    if (dest.bank[0]) {
+        if (!folder_ok(dest.bank, err, n)) return false;
+        char folder_path[PATHBUF];
+        snprintf(folder_path, sizeof folder_path, "%s/%s", preset_dir(),
+                 dest.bank);
+        if (!is_dir_path(folder_path))
+            return reason(err, n, "no folder called %s; mkdir %s makes it",
+                          dest.bank, dest.bank);
+    }
     char src[PATHBUF], dst[PATHBUF];
     if (!preset_path(&p, src, sizeof src) || !preset_path(&dest, dst, sizeof dst))
         return reason(err, n, "'%s' cannot be a name", c->arg[1]);
@@ -1039,9 +1186,10 @@ static bool run_rename(App *a, const Command *c, char *err, size_t n) {
         return reason(err, n, "rename failed: %s", strerror(errno));
     char q[256];
     preset_qualified(&dest, q, sizeof q);
-    journal_set(J_RENAMED, src, dst, q);
+    journal_set(strcmp(p.bank, dest.bank) == 0 ? J_RENAMED : J_MOVED, src, dst,
+                q);
     refile(a, &p, &dest);
-    push_log(a, "'%s' is now '%s'.", p.name, q);
+    push_log(a, "'%s' moved to '%s'.", p.name, q);
     return true;
 }
 
@@ -1057,34 +1205,6 @@ static bool folder_ok(const char *folder, char *err, size_t n) {
     if (strcasecmp(folder, TRASH_DIR) == 0)
         return reason(err, n, "%s is where deleted things wait for undo",
                       TRASH_DIR);
-    return true;
-}
-
-static bool run_move(App *a, const Command *c, char *err, size_t n) {
-    const char *folder = c->arg[1];
-    if (!folder_ok(folder, err, n)) return false;
-    PresetRef p;
-    if (!resolve(a, c->arg[0], &p, err, n)) return false;
-    PresetRef dest = ref_make(folder, p.name);
-    if (refs_equal(&dest, &p))
-        return reason(err, n, "%s is already in %s", p.name, folder);
-    char folder_path[PATHBUF];
-    snprintf(folder_path, sizeof folder_path, "%s/%s", preset_dir(), folder);
-    if (!is_dir_path(folder_path))
-        return reason(err, n, "no folder called %s; add %s makes it", folder,
-                      folder);
-    char src[PATHBUF], dst[PATHBUF];
-    if (!preset_path(&p, src, sizeof src) || !preset_path(&dest, dst, sizeof dst))
-        return reason(err, n, "'%s' cannot be a name", folder);
-    if (path_exists(dst))
-        return reason(err, n, "%s already holds a %s", folder, p.name);
-    if (rename(src, dst) != 0)
-        return reason(err, n, "move failed: %s", strerror(errno));
-    char q[256];
-    preset_qualified(&dest, q, sizeof q);
-    journal_set(J_MOVED, src, dst, q);
-    refile(a, &p, &dest);
-    push_log(a, "'%s' filed under %s.", p.name, folder);
     return true;
 }
 
@@ -1130,6 +1250,28 @@ static bool run_remove(App *a, const Command *c, char *err, size_t n) {
     prune_refs(a);
     push_log(a, "folder '%s' and everything in it moved to the trash. undo puts it back.",
              folder);
+    return true;
+}
+
+static bool run_rmdir(App *a, const Command *c, char *err, size_t n) {
+    const char *folder = c->arg[0];
+    if (!folder_ok(folder, err, n)) return false;
+    char path[PATHBUF];
+    snprintf(path, sizeof path, "%s/%s", preset_dir(), folder);
+    if (!is_dir_path(path)) return reason(err, n, "no folder called %s", folder);
+    if (rmdir(path) != 0) {
+        if (errno == ENOTEMPTY || errno == EEXIST)
+            return reason(err, n, "%s is not empty; use rm -r %s", folder,
+                          folder);
+        return reason(err, n, "rmdir failed: %s", strerror(errno));
+    }
+    preset_rescan(a);
+    if (a->preset_filter.kind == FILTER_BANK
+        && strcmp(a->preset_filter.bank, folder) == 0) {
+        a->preset_filter.kind = FILTER_ALL;
+        a->preset_filter.bank[0] = '\0';
+    }
+    push_log(a, "empty folder '%s' removed.", folder);
     return true;
 }
 

@@ -478,15 +478,20 @@ void sanitise_segment(const char *raw, char *out, size_t out_len) {
     if (n == 0) return;
     if (strcmp(t, ".") == 0 || strcmp(t, "..") == 0) return;
     if (strchr(t, '/') || strchr(t, '\\')) return;
-    for (size_t i = 0; i < n; i++) {
+    bool underscore = false;
+    size_t o = 0;
+    for (size_t i = 0; i < n && o + 1 < out_len; i++) {
         unsigned char c = (unsigned char)t[i];
-        if (!(isalnum(c) || c >= 0x80 || c == '-' || c == '_' || c == ' '))
-            t[i] = '-';
+        if (isspace(c)) {
+            if (!underscore && o > 0) out[o++] = '_';
+            underscore = true;
+            continue;
+        }
+        if (!(isalnum(c) || c >= 0x80 || c == '-' || c == '_')) c = '-';
+        out[o++] = (char)c;
+        underscore = c == '_';
     }
-    char s[256];
-    trim_into(t, s, sizeof s);
-    if (s[0] == 0) return;
-    snprintf(out, out_len, "%s", s);
+    out[o] = '\0';
 }
 
 /* a path segment must stay one segment: no separators, no . or .. */
@@ -695,7 +700,8 @@ static int sync_stock_bank(const char *stock, const char *dir) {
         return 0;
     }
 
-    int added = 0;
+    int synced = 0;
+    bool ledger_changed = false;
     struct dirent *e;
     while ((e = readdir(d))) {
         size_t len = strlen(e->d_name);
@@ -709,14 +715,39 @@ static int sync_stock_bank(const char *stock, const char *dir) {
                 break;
             }
         if (known) continue;
+
+        /* v1.2 tightened stock names to underscores. If this exact preset is
+           in the old ledger under its spaced spelling, rename the installed
+           copy and update the ledger instead of installing a duplicate. */
+        char legacy[128];
+        snprintf(legacy, sizeof legacy, "%s", e->d_name);
+        for (char *p = legacy; *p && strcmp(p, ".json") != 0; p++)
+            if (*p == '_') *p = ' ';
+        int legacy_seen = -1;
+        for (int i = 0; i < seen_n; i++)
+            if (strcmp(seen[i], legacy) == 0) legacy_seen = i;
+        if (legacy_seen >= 0) {
+            char old_path[JOINBUF + 300], new_path[JOINBUF + 300];
+            snprintf(old_path, sizeof old_path, "%s/%s", dir_bank, legacy);
+            snprintf(new_path, sizeof new_path, "%s/%s", dir_bank, e->d_name);
+            if (path_exists(old_path) && !path_exists(new_path)
+                && rename(old_path, new_path) == 0) {
+                snprintf(seen[legacy_seen], 128, "%s", e->d_name);
+                ledger_changed = true;
+                synced++;
+                continue;
+            }
+        }
+
         char src[JOINBUF + 300], dst[JOINBUF + 300];
         snprintf(src, sizeof src, "%s/%s", stock_bank, e->d_name);
         snprintf(dst, sizeof dst, "%s/%s", dir_bank, e->d_name);
-        if (mkdir_p(dir_bank) && copy_file(src, dst)) added++;
+        if (mkdir_p(dir_bank) && copy_file(src, dst)) synced++;
         if (seen_n < LEDGER_MAX) snprintf(seen[seen_n++], 128, "%s", e->d_name);
+        ledger_changed = true;
     }
     closedir(d);
-    if (added > 0) {
+    if (ledger_changed) {
         FILE *f = fopen(ledger_path, "wb");
         if (f) {
             for (int i = 0; i < seen_n; i++)
@@ -725,7 +756,7 @@ static int sync_stock_bank(const char *stock, const char *dir) {
         }
     }
     free(seen);
-    return added;
+    return synced;
 }
 
 void prepare_preset_dir(void) {
@@ -784,7 +815,7 @@ void prepare_preset_dir(void) {
 
         int n = sync_stock_bank(stock, dir);
         if (n > 0)
-            printf("presets: added %d new to %s from %s\n", n, STOCK_BANK,
+            printf("presets: updated %d in %s from %s\n", n, STOCK_BANK,
                    stock);
     }
 
@@ -1056,15 +1087,14 @@ static bool save_in(App *a, const char *folder, const char *name,
     }
     PresetRef written = ref_make(folder, file);
     char path[PATHBUF];
-    int x = 1;
-    while (preset_path(&written, path, sizeof path) && path_exists(path)) {
-        char nm[160];
-        snprintf(nm, sizeof nm, "%s~%d", file, x);
-        written = ref_make(folder, nm);
-        x++;
-    }
     if (!preset_path(&written, path, sizeof path)) {
         push_log(a, "'%s' cannot be a preset name.", name);
+        return false;
+    }
+    if (path_exists(path)) {
+        char q[256];
+        preset_qualified(&written, q, sizeof q);
+        push_log(a, "'%s' already exists. use ow %s to replace it.", q, q);
         return false;
     }
     Session s = app_session(a);
@@ -1090,9 +1120,9 @@ void preset_save_in(App *a, const char *bank, const char *name) {
     save_in(a, bank, name, &written);
 }
 
-void preset_run_save(App *a, const char *name) {
+bool preset_run_save(App *a, const char *name) {
     PresetRef written;
-    if (!save_in(a, NULL, name, &written)) return;
+    if (!save_in(a, NULL, name, &written)) return false;
     if (a->preset_filter.kind != FILTER_ALL) {
         a->preset_filter.kind = FILTER_MINE;
         a->preset_filter.bank[0] = 0;
@@ -1103,6 +1133,7 @@ void preset_run_save(App *a, const char *name) {
     a->have_loaded = true;
     clear_name_bar(a);
     a->preset_searching = false;
+    return true;
 }
 
 static bool resolve_preset(App *a, const char *name, PresetRef *out, char *err,

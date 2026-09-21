@@ -39,8 +39,9 @@ static void trimmed(const char *raw, char *out, size_t cap) {
 
 static bool is_command_text(const char *raw) {
     static const char *const NAMES[] = {
-        "rec",  "record", "save",   "overwrite", "delete", "rename", "move",
-        "add",  "bind",   "unbind", "remove",    "undo",   "help",
+        "rec",    "record", "save",   "ow",     "overwrite", "rm",
+        "delete", "mv",     "rename", "move",   "mkdir",     "add",
+        "rmdir",  "bind",   "unbind", "remove", "undo",      "help",
     };
     char t[256];
     trimmed(raw, t, sizeof t);
@@ -85,8 +86,9 @@ static bool query_matches_any(App *a) {
 }
 
 static void save_from_bar(App *a, Ui *ui) {
-    char name[256];
-    trimmed(a->preset_name.text, name, sizeof name);
+    char typed[256], name[256];
+    trimmed(a->preset_name.text, typed, sizeof typed);
+    sanitise_segment(typed, name, sizeof name);
     if (!name[0]) {
         push_log(a, "a preset needs a name. type one in the bar.");
         a->preset_armed = 0;
@@ -95,7 +97,7 @@ static void save_from_bar(App *a, Ui *ui) {
         (void)ui;
         return;
     }
-    if (is_command_text(name)) {
+    if (is_command_text(typed)) {
         push_log(a, "that is a command — press enter to run it.");
         return;
     }
@@ -329,7 +331,7 @@ void draw_preset_bar(App *a, Ui *ui, Rct r) {
                         false, ICON_SCALE)
             || key_hit(a, ui, PB_FOLDER)) {
             snprintf(a->console_input.text, sizeof a->console_input.text,
-                     "add ");
+                     "mkdir ");
             a->console_input.len = (int)strlen(a->console_input.text);
             a->console_open = true;
             a->console_focus = true;
@@ -424,7 +426,12 @@ void draw_presets_pane(App *a, Ui *ui) {
         query[0] = '\0';
     } else {
         trimmed(a->preset_name.text, query, sizeof query);
-        for (char *q = query; *q; q++) *q = (char)tolower((unsigned char)*q);
+        for (char *q = query; *q; q++) {
+            if (isspace((unsigned char)*q))
+                *q = '_';
+            else
+                *q = (char)tolower((unsigned char)*q);
+        }
     }
 
     int shown[MAX_PRESETS];

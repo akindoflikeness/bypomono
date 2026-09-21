@@ -3,7 +3,6 @@
 
 #include "app.h"
 
-#define ARG_SEP " - "
 #define SELECTED_WORD "selected"
 #define TRASH_DIR "trash"
 
@@ -39,6 +38,7 @@ typedef struct Command {
     float end;
     int cc;
     bool cc_all;
+    bool recursive;
     CcTarget target;
     bool view;                  /* -v: pin the line's view above the log */
     char words[CMD_WORDS][64];  /* raw verbs: the words after the verb */
@@ -76,9 +76,9 @@ typedef int (*VerbComplete)(char *const words[], int nwords, const char *prefix,
 
 typedef struct Verb {
     const char *name;
-    const char *aliases[2]; /* NULL-terminated */
+    const char *aliases[3]; /* NULL-terminated */
     VerbGroup group;
-    const char *args[2]; /* placeholders; the second follows " - " */
+    const char *args[2];
     int nargs, required;
     bool words; /* single-word arguments, so plain spaces split them too */
     const Flag *flags;
@@ -135,7 +135,7 @@ const Verb *verb_lookup(const char *word);
 const Verb *verb_nearest(const char *word);
 int verb_complete(const char *prefix, const Verb **out, int max);
 const char *verb_group_title(VerbGroup g);
-/* "usage: move <preset> - <folder>" */
+/* "usage: mv <source> <destination>" */
 void verb_usage(const Verb *v, char *out, size_t cap);
 /* usage, the description, the flags and the aliases, one per line */
 void verb_help(const Verb *v, char *out, size_t cap);

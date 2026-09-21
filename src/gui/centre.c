@@ -932,7 +932,7 @@ static void draw_info_view(App *a, Ui *ui, Rct r) {
               0.0f);
     y += text_row_height(heading) + TIGHT;
     static const char *const LINES[] = {
-        "Pixeloid Mono  GGBotNet  SIL OFL 1.1",
+        "BYPOSerif, from Source Serif 4  Adobe  SIL OFL 1.1",
         "European Teletext  Jayvee Enaguas  CC0 1.0",
         "Unifont Ex Mono  stgiga / GNU Unifont  SIL OFL 1.1",
         "SDL2  zlib License     FreeType  FTL",

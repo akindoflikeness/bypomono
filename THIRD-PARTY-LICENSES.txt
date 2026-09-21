@@ -1,7 +1,7 @@
 Third-party components in Blow Your Phase Off, grouped by licence.
 
 european_teletext: CC0 1.0
-pixeloid_mono: SIL Open Font License 1.1
+byposerif: SIL Open Font License 1.1
 unifontexmono: SIL Open Font License 1.1
 SDL2 (Simple DirectMedia Layer): zlib License
 FreeType: FreeType License (FTL)
@@ -10,9 +10,11 @@ FreeType: FreeType License (FTL)
 licence: SIL Open Font License 1.1
 ================================================================
 
-Covers fonts: pixeloid_mono, unifontexmono
+Covers fonts: byposerif, unifontexmono
 
-﻿Copyright © 2020-2022 GGBotNet (https://ggbot.net/fonts/), with Reserved Font Name "Pixeloid".
+BYPOSerif is a bitmap font drawn from the outlines of Source Serif 4:
+Copyright 2014-2023 Adobe (http://www.adobe.com/), with Reserved Font Name
+'Source'.
 
 Copyright (c) 2023, stgiga (stgiga.weebly.com), with Reserved Font Name
 UnifontExMono. Built on GNU Unifont: Copyright (c) 1998-2023 Roman Czyborra,

@@ -39,7 +39,7 @@
             ".globl " EMB_SYM(#sym "_end") "\n" EMB_SYM(#sym "_end") ":\n"    \
             ".text\n")
 
-EMBED(bypo_font_ui, "pixeloid_mono/PixeloidMono.ttf");
+EMBED(bypo_font_ui, "byposerif/BYPOSerif.otb");
 EMBED(bypo_font_fallback, "unifontexmono/UnifontExMono.ttf");
 EMBED(bypo_font_readout, "european_teletext/EuropeanTeletext.ttf");
 
@@ -50,7 +50,7 @@ extern const unsigned char bypo_font_readout[], bypo_font_readout_end[];
 const unsigned char *embedded_face(int face, size_t *len) {
     const unsigned char *start, *end;
     switch (face) {
-    case FACE_PIXELOID_MONO:
+    case FACE_BYPOSERIF:
         start = bypo_font_ui; end = bypo_font_ui_end; break;
     case FACE_UNIFONTEXMONO:
         start = bypo_font_fallback; end = bypo_font_fallback_end; break;

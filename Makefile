@@ -148,7 +148,7 @@ PIC_OBJ = $(DSP_SRC:.c=.pic.o) $(GUI_PIC) src/plug_audio.pic.o src/midi.pic.o \
 # so the plugin build carries the faces inside it. .incbin reads them relative
 # to this directory. The standalone keeps using assets/, so its object is the
 # empty half of the file.
-FONT_FILES = assets/fonts/pixeloid_mono/PixeloidMono.ttf \
+FONT_FILES = assets/fonts/byposerif/BYPOSerif.otb \
              assets/fonts/unifontexmono/UnifontExMono.ttf \
              assets/fonts/european_teletext/EuropeanTeletext.ttf
 

@@ -5,16 +5,17 @@ repo root. No font enters `assets/fonts/` without its licence recorded there.
 
 | role | font | author | licence | attribution required |
 |---|---|---|---|---|
-| UI text | Pixeloid Mono | GGBotNet | SIL OFL 1.1 | no |
+| UI text | BYPOSerif, a bitmap cut of Source Serif 4 | Adobe (outlines) | SIL OFL 1.1 | no |
 | readouts | European Teletext | Jayvee Enaguas | CC0 1.0 | no |
 | fallback for glyphs the others lack (φ ρ π Δ • ◦ ¤, subscripts) | Unifont Ex Mono | stgiga, built on GNU Unifont | SIL OFL 1.1 | no |
 
 ## Native grids
 
 These are bitmap faces and are only crisp at whole multiples of the grid
-they were drawn on: Pixeloid Mono 9 px, European Teletext 16 px, Unifont Ex
-Mono 16 px. `ui_font()` and `readout_font()` in `src/gui/text.c` snap to
-these.
+they were drawn on: European Teletext 16 px, Unifont Ex Mono 16 px.
+BYPOSerif is drawn pixel by pixel at 9, 10, 11, 12, 13 and 16 px and has no
+outlines, so it exists at those sizes only. `ui_font()` and `readout_font()`
+in `src/gui/text.c` snap to these.
 
 ## Provenance
 

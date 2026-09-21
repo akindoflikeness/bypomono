@@ -15,7 +15,7 @@ typedef struct {
 } FaceSpec;
 
 static const FaceSpec FACES[FACE_COUNT] = {
-    {"pixeloid_mono", "PixeloidMono.ttf", 9},
+    {"byposerif", "BYPOSerif.otb", 0},
     {"unifontexmono", "UnifontExMono.ttf", 16},
     {"european_teletext", "EuropeanTeletext.ttf", 16},
 };
@@ -91,8 +91,14 @@ float grid_size(float want, float native) {
     return mult * native;
 }
 
+/* BYPOSerif is hand-drawn at these sizes only and has no outlines */
+static const float UI_SIZES[] = {9, 10, 11, 12, 13, 16};
+
 FontId ui_font(float want) {
-    return (FontId){UI_FACE, grid_size(want, 9.0f)};
+    float best = UI_SIZES[0];
+    for (size_t i = 1; i < sizeof UI_SIZES / sizeof UI_SIZES[0]; i++)
+        if (fabsf(UI_SIZES[i] - want) < fabsf(best - want)) best = UI_SIZES[i];
+    return (FontId){UI_FACE, best};
 }
 
 FontId readout_font(float want) {
@@ -126,10 +132,17 @@ static GlyphEntry *lookup(int face, int px, uint32_t cp) {
                 e->top = s->bitmap_top;
                 e->advance = (float)(s->advance.x >> 6);
                 e->bitmap = malloc((size_t)e->w * e->h);
-                for (int r = 0; r < e->h; r++)
-                    memcpy(e->bitmap + (size_t)r * e->w,
-                           s->bitmap.buffer + (size_t)r * s->bitmap.pitch,
-                           (size_t)e->w);
+                for (int r = 0; r < e->h; r++) {
+                    const uint8_t *row =
+                        s->bitmap.buffer + (size_t)r * s->bitmap.pitch;
+                    uint8_t *dst = e->bitmap + (size_t)r * e->w;
+                    /* embedded bitmap strikes come back one bit per pixel */
+                    if (s->bitmap.pixel_mode == FT_PIXEL_MODE_MONO)
+                        for (int x = 0; x < e->w; x++)
+                            dst[x] = (row[x >> 3] >> (7 - (x & 7))) & 1 ? 255 : 0;
+                    else
+                        memcpy(dst, row, (size_t)e->w);
+                }
                 e->used = true;
                 return e;
             }

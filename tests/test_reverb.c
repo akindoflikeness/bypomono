@@ -172,7 +172,7 @@ static void rotators_follow_the_drone_pitch(void) {
     VoicePair pair;
     voice_pair_init(&pair, SR, patch_init(ALGORITHMS[0], RATIO_GOLDEN));
     CHECK(verb.ghosts[0].rot.a == at_start, "ghost starts off the drone pitch");
-    CHECK(pair.voices[0].rip_line.rot.a == at_start, "rip starts off the drone pitch");
+    CHECK(pair.voice.rip_line.rot.a == at_start, "rip starts off the drone pitch");
 
     /* the pitch sets where the rotators are going; they travel there, because
        writing a live filter's coefficient steps its output */
@@ -184,18 +184,16 @@ static void rotators_follow_the_drone_pitch(void) {
         for (int i = 0; i < NUM_OPS; i++)
             CHECK(verb.ghosts[i].rot_to == want, "ghost %d at %g hz aims at %g (want %g)", i,
                   (double)hz[k], (double)verb.ghosts[i].rot_to, (double)want);
-        for (int i = 0; i < 2; i++)
-            CHECK(pair.voices[i].rip_line.rot_to == want, "rip %d at %g hz aims at %g (want %g)",
-                  i, (double)hz[k], (double)pair.voices[i].rip_line.rot_to, (double)want);
+        CHECK(pair.voice.rip_line.rot_to == want, "rip at %g hz aims at %g (want %g)",
+              (double)hz[k], (double)pair.voice.rip_line.rot_to, (double)want);
         Frame quiet = impulse_frame(0.0f);
         for (size_t n = 0; n < (size_t)(SR * 0.2f); n++) verb_process(&verb, &quiet);
         voice_pair_render_frames(&pair, (size_t)(SR * 0.2f), noop_frame, NULL);
         for (int i = 0; i < NUM_OPS; i++)
             CHECK(fabsf(verb.ghosts[i].rot.a - want) < 1e-3f, "ghost %d never arrived: %g",
                   i, (double)verb.ghosts[i].rot.a);
-        for (int i = 0; i < 2; i++)
-            CHECK(fabsf(pair.voices[i].rip_line.rot.a - want) < 1e-3f, "rip %d never arrived: %g",
-                  i, (double)pair.voices[i].rip_line.rot.a);
+        CHECK(fabsf(pair.voice.rip_line.rot.a - want) < 1e-3f, "rip never arrived: %g",
+              (double)pair.voice.rip_line.rot.a);
     }
     voice_pair_free(&pair);
     verb_free(&verb);

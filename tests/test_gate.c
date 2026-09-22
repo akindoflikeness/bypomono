@@ -24,7 +24,7 @@ static void held_drone(VoiceBank *b, int voices) {
 
 static const Envelope *note0(const VoiceBank *b) {
     const VoicePair *p = &b->pairs[0];
-    return &p->voices[p->target].env;
+    return &p->voice.env;
 }
 
 static void the_drone_settles_at_sustain_and_stays(void) {

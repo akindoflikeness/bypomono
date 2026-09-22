@@ -41,8 +41,21 @@ static Gui *gui_of(const clap_plugin_t *pl) {
     return ((Plug *)pl->plugin_data)->gui_state;
 }
 
+/* The most magnification the editor takes from the host's display density.
+   The 1180x780 design at a 200% laptop density is 2360x1560 device pixels,
+   nearly the whole screen; 1.5 keeps it to 1770x1170. Lower it if the window
+   is still too big for you, raise it towards WINDOW_SCALE_MAX for a big
+   monitor. Only Windows reports density this way; X11 and Cocoa are unchanged. */
+#if defined(_WIN32)
+#define HOST_SCALE_CAP 1.5f
+#else
+#define HOST_SCALE_CAP WINDOW_SCALE_MAX
+#endif
+
 static float compose_scale(const Gui *g) {
-    return snap_scale(g->fit * g->s.host_scale);
+    float hs = g->s.host_scale;
+    if (hs > HOST_SCALE_CAP) hs = HOST_SCALE_CAP;
+    return snap_scale(g->fit * hs);
 }
 
 GuiSurface *gui_surface(Gui *g) { return &g->s; }

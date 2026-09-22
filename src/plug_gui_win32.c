@@ -48,6 +48,26 @@ static UINT win_dpi(HWND hwnd) {
     return dpi ? dpi : 96;
 }
 
+/* The density of the primary display before any window exists. GetDpiForSystem
+   is Windows 10 1607 and later; LOGPIXELSX is what every older process sees. */
+static UINT system_dpi(void) {
+    typedef UINT(WINAPI * GetDpiForSystemFn)(void);
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    GetDpiForSystemFn fn =
+        user32 ? (GetDpiForSystemFn)(void (*)(void))GetProcAddress(
+                     user32, "GetDpiForSystem")
+               : NULL;
+    UINT dpi = fn ? fn() : 0;
+    if (!dpi) {
+        HDC dc = GetDC(NULL);
+        if (dc) {
+            dpi = (UINT)GetDeviceCaps(dc, LOGPIXELSX);
+            ReleaseDC(NULL, dc);
+        }
+    }
+    return dpi ? dpi : 96;
+}
+
 /* ---------- painting ---------- */
 
 static void blit_to(Gui *g, HDC dc) {
@@ -232,6 +252,13 @@ void backend_usable_screen(Gui *g, int *w, int *h) {
         *w = GetSystemMetrics(SM_CXSCREEN);
         *h = GetSystemMetrics(SM_CYSCREEN);
     }
+    /* A DPI-aware host gets the work area in device pixels. fit is chosen in
+       points and host_scale carries the density (see backend_attach), so the
+       density is divided out here; otherwise a 200% display counts it twice
+       and the editor asks for a window larger than the screen. */
+    float k = (float)system_dpi() / 70.0f;
+    *w = (int)((float)*w / k);
+    *h = (int)((float)*h / k);
 }
 
 float backend_px_per_point(Gui *g) { return 1.0f; }

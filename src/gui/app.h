@@ -104,6 +104,19 @@ RING_DECLARE(EventRing, Event, 256)
 RING_DECLARE(VizRing, VizFrame, 16384)
 RING_DECLARE(RecRing, float, (1 << 19))
 
+/* A repeated control (a drag, a preset field) keeps only its latest value.
+   The note ring stays a queue. seq is a seqlock: odd while the UI writes. */
+typedef struct {
+    _Atomic uint32_t seq;
+    Event ev;
+} CtrlBox;
+
+enum {
+    BOX_PATCH, BOX_VERB, BOX_MELODY, BOX_CHANDAS, BOX_WARMTH, BOX_LIMITER,
+    BOX_TEMPO, BOX_GLIDE, BOX_ENGAGE, BOX_BEND, BOX_ADSR, BOX_MIDI,
+    BOX_TRANSPORT, BOX_RECORD, BOX_PITCH, BOX_COUNT
+};
+
 /* fixed-point atomics, all relaxed */
 typedef struct { _Atomic int32_t note; } MidiNoteAtom; /* -1 = none */
 void midi_note_press(MidiNoteAtom *m, uint8_t note);
@@ -234,6 +247,15 @@ typedef struct App {
     bool midi_open;
     char midi_port[128];
     EventRing ctrl, midi_ev;
+    /* latest value of each repeated control; the audio thread applies these
+       before ctrl, so a drag cannot fill the ring while the host is idle */
+    CtrlBox ctrl_box[BOX_COUNT];
+    CtrlBox seq_box[SEQS];
+    CtrlBox route_box[MOD_ROUTES];
+    uint32_t ctrl_seen[BOX_COUNT]; /* audio thread */
+    uint32_t seq_seen[SEQS];
+    uint32_t route_seen[MOD_ROUTES];
+    bool ctrl_drop_logged;
     VizRing viz;
     RecRing rec;
     MidiNoteAtom midi_note;
@@ -327,8 +349,11 @@ typedef struct App {
     bool quit;
 } App;
 
-/* push onto the UI->audio ring, logging on overflow */
+/* push onto the UI->audio ring. Repeated controls replace their previous
+   unapplied value; notes and one-shot actions stay queued. */
 void app_send(App *a, Event ev);
+/* audio thread: latest controls, then queued notes and actions */
+void app_drain_ctrl(App *a, void (*apply)(void *ud, Event ev), void *ud);
 /* every sequence and route slot, after a preset or state replaced a->mods */
 void app_send_mods(App *a);
 /* sequence edits (cmd_mod.c): commit sends only what changed */

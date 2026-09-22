@@ -299,6 +299,43 @@ static void a_note_under_rip_starts_without_a_click(void) {
           (double)(worst_at * BLOCK) / SR);
 }
 
+static int ctrl_n;
+static float ctrl_index;
+static int ctrl_notes;
+
+static void take_ctrl(void *ud, Event ev) {
+    (void)ud;
+    ctrl_n++;
+    if (ev.kind == EV_SET_PATCH) ctrl_index = ev.u.patch.index;
+    if (ev.kind == EV_NOTE_ON) ctrl_notes++;
+}
+
+static void a_drag_does_not_fill_the_control_ring(void) {
+    static App a;
+    memset(&a, 0, sizeof a);
+    Event ev = {0};
+    ev.kind = EV_SET_PATCH;
+    for (int i = 0; i < 1000; i++) {
+        ev.u.patch.index = (float)i;
+        app_send(&a, ev);
+    }
+    ev.kind = EV_NOTE_ON;
+    ev.u.note.key = 60;
+    ev.u.note.hz = 440.0f;
+    ev.u.note.velocity = 1.0f;
+    app_send(&a, ev);
+    ctrl_n = 0;
+    ctrl_index = -1.0f;
+    ctrl_notes = 0;
+    app_drain_ctrl(&a, take_ctrl, NULL);
+    CHECK(ctrl_n == 2, "a drag queued %d events", ctrl_n);
+    CHECK(ctrl_index == 999.0f, "latest index %g", (double)ctrl_index);
+    CHECK(ctrl_notes == 1, "the note was dropped");
+    ctrl_n = 0;
+    app_drain_ctrl(&a, take_ctrl, NULL);
+    CHECK(ctrl_n == 0, "the same control was applied again");
+}
+
 void test_notes(void) {
     gated_steps_play_on_the_clock();
     a_gate_off_releases_only_the_sequencer_note();
@@ -309,4 +346,5 @@ void test_notes(void) {
     presets_carry_pitch_and_the_melody_clock();
     pitch_and_melody_take_turns();
     a_note_under_rip_starts_without_a_click();
+    a_drag_does_not_fill_the_control_ring();
 }

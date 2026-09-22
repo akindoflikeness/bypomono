@@ -100,7 +100,7 @@ src/audio.o: src/audio.c src/audio.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SDL_CFLAGS) -c $< -o $@
 
 # the preset tests link the parser and saver
-TEST_GUI_OBJ = src/gui/json_session.o src/gui/presets.o
+TEST_GUI_OBJ = src/gui/json_session.o src/gui/presets.o src/gui/ctrl.o
 TEST_GUI_OBJ += src/gui/command.o src/gui/cmd_controls.o src/gui/cmd_mod.o \
                 src/gui/cmd_pitch.o src/gui/focus.o \
                 src/gui/params.o src/gui/layout.o src/cli/view.o

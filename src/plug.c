@@ -660,6 +660,10 @@ static bool handle_event(Plug *p, const clap_event_header_t *hdr) {
     return false;
 }
 
+static void apply_gui_event_ud(void *ud, Event ev) {
+    apply_gui_event(ud, ev);
+}
+
 static clap_process_status plug_process(const clap_plugin_t *plugin,
                                         const clap_process_t *pr) {
     Plug *p = plugin->plugin_data;
@@ -677,8 +681,7 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
     App *gapp = atomic_load_explicit(&p->gui_app, memory_order_acquire);
     Event ev;
     while (EventRing_pop(&p->mod_ev, &ev)) apply_gui_event(p, ev);
-    if (gapp)
-        while (EventRing_pop(&gapp->ctrl, &ev)) apply_gui_event(p, ev);
+    if (gapp) app_drain_ctrl(gapp, apply_gui_event_ud, p);
     bank_apply_if_new(p);
 
     if (atomic_load_explicit(&p->dirty, memory_order_acquire)) apply_vals(p);

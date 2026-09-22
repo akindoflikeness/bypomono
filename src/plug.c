@@ -5,6 +5,7 @@
 
 #include <clap/ext/latency.h>
 
+#include "ftz.h"
 #include "plug.h"
 
 const ParamSpec PLUG_SPEC[P_COUNT] = {
@@ -99,6 +100,52 @@ static int plug_getv_int(const Plug *p, int id) {
     return (int)lround(v);
 }
 
+/* bit 8: sync. low 8 bits: division as int8 (melody divisions are non-negative). */
+static void mel_clock_load(const Plug *p, bool *sync, int8_t *division) {
+    uint32_t w = atomic_load_explicit(&((Plug *)p)->mel_clock, memory_order_acquire);
+    *division = (int8_t)(w & 0xffu);
+    *sync = (w & 0x100u) != 0;
+}
+
+static void mel_clock_store(Plug *p, bool sync, int8_t division) {
+    uint32_t w = (uint32_t)(uint8_t)division | (sync ? 0x100u : 0u);
+    atomic_store_explicit(&p->mel_clock, w, memory_order_release);
+}
+
+void plug_publish_bank(Plug *p, const ModBank *mods, const PitchSeqParams *pitch) {
+    uint32_t s = atomic_load_explicit(&p->bank_seq, memory_order_relaxed);
+    atomic_store_explicit(&p->bank_seq, s + 1, memory_order_relaxed);
+    atomic_thread_fence(memory_order_release);
+    p->mods_main = *mods;
+    p->pitch_main = *pitch;
+    atomic_store_explicit(&p->bank_seq, s + 2, memory_order_release);
+}
+
+/* audio thread, after the rings have been drained so a load wins over a
+   stale event still sitting in one of them */
+static void bank_apply_if_new(Plug *p) {
+    for (int spin = 0; spin < 8; spin++) {
+        uint32_t gen = atomic_load_explicit(&p->bank_gen, memory_order_acquire);
+        if (gen == p->bank_seen) return;
+        uint32_t a = atomic_load_explicit(&p->bank_seq, memory_order_acquire);
+        if (a & 1u) continue;
+        ModBank mods = p->mods_main;
+        PitchSeqParams pitch = p->pitch_main;
+        atomic_thread_fence(memory_order_acquire);
+        uint32_t b = atomic_load_explicit(&p->bank_seq, memory_order_relaxed);
+        uint32_t gen2 = atomic_load_explicit(&p->bank_gen, memory_order_acquire);
+        if (a != b || gen != gen2) continue;
+        mods = mod_bank_sanitize(mods);
+        pitch = pitch_seq_sanitize(pitch);
+        for (int i = 0; i < SEQS; i++) mod_set_seq(&p->mod, i, mods.seq[i]);
+        for (int i = 0; i < MOD_ROUTES; i++)
+            mod_set_route(&p->mod, i, mods.route[i]);
+        pitch_seq_set_params(&p->pitch, pitch);
+        p->bank_seen = gen;
+        return;
+    }
+}
+
 static RatioMode ratio_mode_of_vals(const Plug *p) {
     int mode = plug_getv_int(p, P_RATIO_MODE);
     if (mode < 0) mode = 0;
@@ -174,8 +221,7 @@ static void apply_vals(Plug *p) {
     mp.root_midi = (uint8_t)plug_getv_int(p, P_SH_ROOT);
     mp.range_degrees = (uint8_t)plug_getv_int(p, P_SH_RANGE);
     mp.rate_hz = (float)getv(p, P_SH_RATE);
-    mp.sync = p->mel_sync;
-    mp.division = p->mel_division;
+    mel_clock_load(p, &mp.sync, &mp.division);
     if (was_enabled && !mp.enabled) voice_bank_note_off_all(&p->voice);
     melody_set_params(&p->melody, mp);
     tape_set(&p->tape, (float)getv(p, P_WARMTH));
@@ -220,8 +266,7 @@ Session plug_session_of_vals(const Plug *p) {
     s.melody.root_midi = (uint8_t)plug_getv_int(p, P_SH_ROOT);
     s.melody.range_degrees = (uint8_t)plug_getv_int(p, P_SH_RANGE);
     s.melody.rate_hz = (float)getv(p, P_SH_RATE);
-    s.melody.sync = p->mel_sync;
-    s.melody.division = p->mel_division;
+    mel_clock_load(p, &s.melody.sync, &s.melody.division);
     s.pitch = p->pitch_main;
     s.drone_hz = (float)getv(p, P_DRONE_HZ);
     s.chandas.enabled = getv(p, P_CH_ON) > 0.5;
@@ -297,7 +342,7 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_SUSTAIN, s->sustain);
     setv(p, P_RELEASE, s->release_s);
     setv(p, P_DRONE, s->drone ? 1 : 0);
-    atomic_store_explicit(&p->dirty, true, memory_order_relaxed);
+    atomic_store_explicit(&p->dirty, true, memory_order_release);
 }
 
 /* ---------- editor events (audio thread) ---------- */
@@ -358,8 +403,7 @@ static void apply_gui_event(Plug *p, Event ev) {
         if (p->melody.params.enabled && !ev.u.melody.enabled)
             voice_bank_note_off_all(&p->voice);
         melody_set_params(&p->melody, ev.u.melody);
-        p->mel_sync = ev.u.melody.sync;
-        p->mel_division = ev.u.melody.division;
+        mel_clock_store(p, ev.u.melody.sync, ev.u.melody.division);
         setv(p, P_SH_ON, ev.u.melody.enabled ? 1 : 0);
         setv(p, P_SH_SRC, ev.u.melody.source == HOLD_XORSHIFT ? 1 : 0);
         setv(p, P_SH_TUNING, (double)ev.u.melody.tuning);
@@ -498,15 +542,17 @@ static bool host_holding(const Plug *p) {
     return false;
 }
 
-/* plays whatever the pitch sequencer has due now, leaving keys the host
-   holds alone */
+/* plays whatever the pitch sequencer has due now. A held host key keeps its
+   note: gate-offs still release the sequencer's own note, and a new
+   sequencer note or a pitch move waits until the key is up. */
 static void pitch_run_due(Plug *p) {
     size_t until;
     while (pitch_seq_samples_until(&p->pitch, &until) && until == 0) {
         if (!p->transport_running && !p->pitch.held) break;
         PitchEvent e = pitch_seq_fire(&p->pitch);
         if (e.kind == PITCH_EV_NONE) break;
-        if (!host_holding(p)) pitch_event_play(e, &p->voice, &p->chandas, &p->mod);
+        if (e.kind == PITCH_EV_OFF || !host_holding(p))
+            pitch_event_play(e, &p->voice, &p->chandas, &p->mod);
     }
 }
 
@@ -556,8 +602,9 @@ static void set_host_param_value(Plug *p, int id, double value) {
         setv(p, P_OP_RATIO1 + i, ratio_mode_ratio(mode, i));
 }
 
-static void handle_event(Plug *p, const clap_event_header_t *hdr) {
-    if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
+/* true when a parameter changed and apply_vals still has to run */
+static bool handle_event(Plug *p, const clap_event_header_t *hdr) {
+    if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) return false;
     switch (hdr->type) {
     case CLAP_EVENT_NOTE_ON: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
@@ -583,7 +630,7 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
             (const clap_event_param_value_t *)hdr;
         if (ev->param_id < P_COUNT) {
             set_host_param_value(p, (int)ev->param_id, ev->value);
-            apply_vals(p);
+            return true;
         }
         break;
     }
@@ -610,6 +657,11 @@ static void handle_event(Plug *p, const clap_event_header_t *hdr) {
     default:
         break;
     }
+    return false;
+}
+
+static void apply_gui_event_ud(void *ud, Event ev) {
+    apply_gui_event(ud, ev);
 }
 
 static clap_process_status plug_process(const clap_plugin_t *plugin,
@@ -621,6 +673,7 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
         return CLAP_PROCESS_ERROR;
     float *l = pr->audio_outputs[0].data32[0];
     float *r = pr->audio_outputs[0].data32[1];
+    ftz_state csr = ftz_begin();
 
     if (pr->transport && (pr->transport->flags & CLAP_TRANSPORT_HAS_TEMPO))
         plug_set_tempo(p, (float)pr->transport->tempo);
@@ -628,14 +681,15 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
     App *gapp = atomic_load_explicit(&p->gui_app, memory_order_acquire);
     Event ev;
     while (EventRing_pop(&p->mod_ev, &ev)) apply_gui_event(p, ev);
-    if (gapp)
-        while (EventRing_pop(&gapp->ctrl, &ev)) apply_gui_event(p, ev);
+    if (gapp) app_drain_ctrl(gapp, apply_gui_event_ud, p);
+    bank_apply_if_new(p);
 
-    if (atomic_load_explicit(&p->dirty, memory_order_relaxed)) apply_vals(p);
+    if (atomic_load_explicit(&p->dirty, memory_order_acquire)) apply_vals(p);
 
     const clap_input_events_t *in = pr->in_events;
     uint32_t n_ev = in ? in->size(in) : 0;
     uint32_t idx = 0, frame = 0;
+    bool vals_stale = false;
     while (frame < pr->frames_count) {
         uint32_t next = pr->frames_count;
         while (idx < n_ev) {
@@ -645,21 +699,27 @@ static clap_process_status plug_process(const clap_plugin_t *plugin,
                                                     : pr->frames_count;
                 break;
             }
-            handle_event(p, hdr);
+            vals_stale = handle_event(p, hdr) || vals_stale;
             idx++;
+        }
+        if (vals_stale) {
+            apply_vals(p);
+            vals_stale = false;
         }
         if (next > frame) {
             render_span(p, gapp, l, r, frame, next - frame);
             frame = next;
         }
     }
-    while (idx < n_ev) handle_event(p, in->get(in, idx++));
+    while (idx < n_ev) vals_stale = handle_event(p, in->get(in, idx++)) || vals_stale;
+    if (vals_stale) apply_vals(p);
     if (gapp) {
         voices_store(gapp, &p->voice);
         seq_meter_store(&gapp->seq_meter, &p->mod);
         atomic_store_explicit(&gapp->seq_meter.pitch_step, p->pitch.step,
                               memory_order_relaxed);
     }
+    ftz_end(csr);
     return CLAP_PROCESS_CONTINUE;
 }
 
@@ -794,7 +854,7 @@ static void params_flush(const clap_plugin_t *pl,
     if (p->engine_alive)
         apply_vals(p);
     else
-        atomic_store_explicit(&p->dirty, true, memory_order_relaxed);
+        atomic_store_explicit(&p->dirty, true, memory_order_release);
 }
 
 static const clap_plugin_params_t EXT_PARAMS = {
@@ -855,18 +915,10 @@ static bool state_load(const clap_plugin_t *pl, const clap_istream_t *stream) {
     bool ok = session_from_json(buf, &s);
     free(buf);
     if (!ok) return false;
-    p->mel_sync = s.melody.sync;
-    p->mel_division = s.melody.division;
+    mel_clock_store(p, s.melody.sync, s.melody.division);
+    plug_publish_bank(p, &s.mods, &s.pitch);
+    atomic_fetch_add_explicit(&p->bank_gen, 1, memory_order_release);
     vals_of_session(p, &s);
-    p->mods_main = s.mods;
-    p->pitch_main = s.pitch;
-    EventRing_push(&p->mod_ev, (Event){.kind = EV_SET_PITCH, .u.pitch = s.pitch});
-    for (int i = 0; i < SEQS; i++)
-        EventRing_push(&p->mod_ev,
-                       (Event){.kind = EV_SET_SEQ, .u.seq = {i, s.mods.seq[i]}});
-    for (int i = 0; i < MOD_ROUTES; i++)
-        EventRing_push(&p->mod_ev, (Event){.kind = EV_SET_ROUTE,
-                                           .u.route = {i, s.mods.route[i]}});
     App *g = atomic_load_explicit(&p->gui_app, memory_order_acquire);
     if (g) {
         g->mods = s.mods;
@@ -911,6 +963,12 @@ static bool plug_activate(const clap_plugin_t *plugin, double sr,
     p->mod.bank = mod_bank_sanitize(p->mods_main);
     p->base.bend = 0.0f;
     p->engine_alive = true;
+    /* a load that arrived while the plugin was idle is already in the bank.
+       Drop anything still queued so the first process cannot replay it on
+       top, and remember the generation activate just copied. */
+    Event stale;
+    while (EventRing_pop(&p->mod_ev, &stale)) {}
+    p->bank_seen = atomic_load_explicit(&p->bank_gen, memory_order_acquire);
     apply_vals(p);
     p->active = true;
     return true;
@@ -981,7 +1039,7 @@ static const clap_plugin_descriptor_t DESC = {
     .url = "https://github.com/wraithsys/bypomono",
     .manual_url = "https://github.com/wraithsys/bypomono",
     .support_url = "https://github.com/wraithsys/bypomono",
-    .version = "1.1.0",
+    .version = APP_VERSION,
     .description = "Blow Your Phase Off - Phase Violence PM Sound Design Synthesis",
     .features = FEATURES,
 };
@@ -1018,7 +1076,7 @@ static const clap_plugin_t *factory_create(const clap_plugin_factory_t *f,
     p->plugin.plugin_data = p;
     p->host = host;
     p->sr = 48000.0;
-    p->mel_division = MELODY_DEFAULT_DIVISION;
+    mel_clock_store(p, false, MELODY_DEFAULT_DIVISION);
     p->pitch_main = pitch_seq_params_default();
     for (int i = 0; i < P_COUNT; i++)
         atomic_store_explicit(&p->vals[i], SPEC[i].def, memory_order_relaxed);

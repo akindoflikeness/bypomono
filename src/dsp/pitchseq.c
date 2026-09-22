@@ -124,7 +124,9 @@ void pitch_seq_advance(PitchSeq *s, size_t samples) {
 
 void pitch_event_play(PitchEvent e, VoiceBank *v, Chandas *h, Mod *m) {
     if (e.kind == PITCH_EV_OFF) {
-        voice_bank_note_off_all(v);
+        /* the sequencer's own note. A key the host is holding has a real
+           number and must keep sounding through the gate. */
+        voice_bank_note_off_exact(v, -1);
     } else if (e.kind == PITCH_EV_MOVE) {
         voice_bank_glide_newest_to_hz(v, e.hz);
     } else if (e.kind == PITCH_EV_ON) {

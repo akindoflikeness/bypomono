@@ -12,7 +12,7 @@
 #include "test.h"
 
 /* the verbs that reach the audio rig are stubbed; the test binary links no
-   engine (push_log and app_send are stubbed by the presets suite) */
+   engine (push_log is stubbed by the presets suite) */
 static int rec_calls, bind_calls, unbind_calls, last_cc, last_unbind;
 void gui_run_record(App *a, const char *args) { (void)a; (void)args; rec_calls++; }
 void gui_run_bind(App *a, int cc, CcTarget t) { (void)a; (void)t; bind_calls++; last_cc = cc; }

@@ -14,7 +14,6 @@
 /* presets.c logs, posts engine events and names algorithms for the log line;
    the test binary links none of the GUI, so those are stubbed */
 void push_log(App *a, const char *fmt, ...) { (void)a; (void)fmt; }
-void app_send(App *a, Event ev) { (void)a; (void)ev; }
 void app_send_mods(App *a) { (void)a; }
 void push_log_view(App *a, const View *v) { (void)a; (void)v; }
 const char *const ROMAN[8] = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII"};

@@ -168,6 +168,11 @@ static CGFloat backing_of(BypoView *v) {
     if (sc >= 0) gui_in_key(gui, sc, false);
 }
 
+- (BOOL)resignFirstResponder {
+    gui_in_cancel(gui);
+    return [super resignFirstResponder];
+}
+
 @end
 
 /* ---------- backend interface ---------- */

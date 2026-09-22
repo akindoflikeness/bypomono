@@ -62,6 +62,8 @@ void chamber_init(Chamber *c, float sr) {
         c->g[i] = 0.0f;
         c->len_to[i] = 0.0f;
         c->g_to[i] = 0.0f;
+        c->norm[i] = 0.0f;
+        c->norm_g[i] = -1.0f; /* g starts at 0; the first sample builds norm */
     }
     c->dc_r = expf(-TAU_F * CHAMBER_DC_HZ / sr);
     c->glide = expf(-1.0f / (0.04f * sr));
@@ -141,7 +143,7 @@ Stereo chamber_process(Chamber *c, Stereo dry) {
         size_t l = (size_t)((float)AP_LEN[k] * (c->sr / 48000.0f));
         float v = delay_read(&c->ap[k], l);
         float y = -AP_G * x + v;
-        delay_write(&c->ap[k], x + AP_G * y);
+        delay_write(&c->ap[k], flush_tiny(x + AP_G * y));
         x = y;
     }
     float s[CHAMBER_N];
@@ -154,18 +156,24 @@ Stereo chamber_process(Chamber *c, Stereo dry) {
         c->g[i] += (c->g_to[i] - c->g[i]) * (1.0f - c->glide);
         float wob = sinf(c->mod_ph[i]) * c->mod_samples;
         float v = delay_read_frac(&c->lines[i], fmaxf(c->len[i] + wob, 2.0f));
-        c->lp[i] = v * (1.0f - c->damp_a) + c->lp[i] * c->damp_a;
+        c->lp[i] = flush_tiny(v * (1.0f - c->damp_a) + c->lp[i] * c->damp_a);
         float fb = c->lp[i] * c->g[i];
         float y = fb - c->dc_x1[i] + c->dc_r * c->dc_y1[i];
         c->dc_x1[i] = fb;
-        c->dc_y1[i] = y;
+        c->dc_y1[i] = flush_tiny(y);
         s[i] = y;
     }
     hadamard8(s);
     for (int i = 0; i < CHAMBER_N; i++) {
         /* same energy normalisation as the room's combs: a longer tail rings
-           longer, not louder */
-        delay_write(&c->lines[i], s[i] + x * sqrtf(1.0f - c->g[i] * c->g[i]));
+           longer, not louder. g glides, so the square root is redone only
+           once it has moved. */
+        if (fabsf(c->g[i] - c->norm_g[i]) > 1e-5f) {
+            c->norm_g[i] = c->g[i];
+            float g = clampf(c->g[i], 0.0f, 0.9999f);
+            c->norm[i] = sqrtf(1.0f - g * g);
+        }
+        delay_write(&c->lines[i], flush_tiny(s[i] + x * c->norm[i]));
     }
     float mid = 0.0f;
     for (int i = 0; i < CHAMBER_N; i++) {

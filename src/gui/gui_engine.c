@@ -1,4 +1,5 @@
 #include "app.h"
+#include "../ftz.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -219,14 +220,16 @@ static void engine_apply(AudioState *s, Event ev) {
 }
 
 /* plays whatever the pitch sequencer has due now. A stopped transport holds
-   the steps, but a note already sounding is still let go on time. */
+   the steps, but a note already sounding is still let go on time. While a
+   MIDI port is driving, a gate-off releases only the sequencer's note. */
 static void pitch_run_due(AudioState *s) {
     size_t until;
     while (pitch_seq_samples_until(&s->pitch, &until) && until == 0) {
         if (!s->transport_running && !s->pitch.held) break;
         PitchEvent e = pitch_seq_fire(&s->pitch);
         if (e.kind == PITCH_EV_NONE) break;
-        if (!s->midi_driving) pitch_event_play(e, &s->voice, &s->chandas, &s->mod);
+        if (e.kind == PITCH_EV_OFF || !s->midi_driving)
+            pitch_event_play(e, &s->voice, &s->chandas, &s->mod);
     }
 }
 
@@ -281,18 +284,17 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
     }
 }
 
+static void apply_ctrl(void *ud, Event ev);
+
 static void render(void *ud, float *data, size_t frames, int channels) {
     AudioState *s = ud;
     App *a = s->app;
     struct timespec began;
     clock_gettime(CLOCK_MONOTONIC, &began);
+    ftz_state csr = ftz_begin();
 
+    app_drain_ctrl(a, apply_ctrl, s);
     Event ev;
-    while (EventRing_pop(&a->ctrl, &ev)) {
-        if (ev.kind == EV_RECORD) s->rec_on = ev.u.flag;
-        if (ev.kind == EV_SET_MIDI_DRIVING) s->midi_driving = ev.u.flag;
-        engine_apply(s, ev);
-    }
     while (EventRing_pop(&a->midi_ev, &ev)) engine_apply(s, ev);
 
     bool rec_armed = s->rec_on;
@@ -351,6 +353,7 @@ static void render(void *ud, float *data, size_t frames, int channels) {
                               memory_order_relaxed);
     }
     voices_store(a, &s->voice);
+    ftz_end(csr);
 }
 
 int gui_audio_start(App *a) {
@@ -471,9 +474,11 @@ bool gui_set_midi_port(App *a, const char *name) {
 
 /* ---------- UI-side drains ---------- */
 
-void app_send(App *a, Event ev) {
-    if (!EventRing_push(&a->ctrl, ev))
-        push_log(a, "control ring full — a change was dropped.");
+static void apply_ctrl(void *ud, Event ev) {
+    AudioState *s = ud;
+    if (ev.kind == EV_RECORD) s->rec_on = ev.u.flag;
+    if (ev.kind == EV_SET_MIDI_DRIVING) s->midi_driving = ev.u.flag;
+    engine_apply(s, ev);
 }
 
 void app_send_mods(App *a) {

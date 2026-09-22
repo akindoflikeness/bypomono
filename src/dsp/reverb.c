@@ -56,6 +56,8 @@ static void comb_new(Comb *c, size_t len, float lfo_inc, float lfo_phase) {
     c->lp = 0.0f;
     c->lfo_phase = lfo_phase;
     c->lfo_inc = lfo_inc;
+    c->in_gain = 0.0f;
+    c->in_gain_fb = -1.0f;
 }
 
 static float comb_fb_for(float delay_seconds, float decay) {
@@ -67,6 +69,7 @@ static void comb_set_delay(Comb *c, float seconds, float sample_rate) {
     c->delay_seconds = seconds;
     float ref = comb_fb_for(seconds, verb_params_default().decay);
     c->in_ref = 1.0f / sqrtf(1.0f - ref * ref);
+    c->in_gain_fb = -1.0f; /* in_ref moved; the next sample rebuilds in_gain */
     c->delay = d < 1 ? 1 : (d > c->len - 1 ? c->len - 1 : d);
     c->delay_to = (float)c->delay;
     if (c->delay_f <= 0.0f) c->delay_f = c->delay_to; /* born on its length */
@@ -91,12 +94,17 @@ static float comb_process(Comb *c, float x, float damp, float glide) {
     size_t i0 = (c->write + len - di) % len;
     size_t i1 = (c->write + len - di - 1) % len;
     float y = c->buf[i0] * (1.0f - frac) + c->buf[i1] * frac;
-    c->lp = y + damp * (c->lp - y);
+    c->lp = flush_tiny(y + damp * (c->lp - y));
     /* input scaled by sqrt(1 - fb^2) holds the loop's energy gain constant, so
        a longer decay rings longer instead of louder; in_ref pins that constant
-       to the level the default decay has always had */
-    float in = sqrtf(1.0f - c->fb * c->fb) * c->in_ref;
-    c->buf[c->write] = x * in + c->lp * c->fb;
+       to the level the default decay has always had. fb glides, so the square
+       root is redone only once it has moved. */
+    if (fabsf(c->fb - c->in_gain_fb) > 1e-5f) {
+        c->in_gain_fb = c->fb;
+        float fb = clampf(c->fb, 0.0f, MAX_FB);
+        c->in_gain = sqrtf(1.0f - fb * fb) * c->in_ref;
+    }
+    c->buf[c->write] = flush_tiny(x * c->in_gain + c->lp * c->fb);
     c->write = (c->write + 1) % c->len;
     return y;
 }
@@ -127,7 +135,7 @@ static float ghost_process(GhostLine *g, float x) {
     size_t i0 = (g->write + g->len - di) % g->len;
     size_t i1 = (g->write + g->len - di - 1) % g->len;
     float y = phase_rotator_process(&g->rot, g->buf[i0] * (1.0f - frac) + g->buf[i1] * frac);
-    g->buf[g->write] = x + y * g->fb;
+    g->buf[g->write] = flush_tiny(x + y * g->fb);
     g->write = (g->write + 1) % g->len;
     return y;
 }
@@ -147,7 +155,7 @@ static float allpass_process(Allpass *a, float x) {
     size_t read = (a->write + a->len - a->delay) % a->len;
     float d = a->buf[read];
     float y = d - ALLPASS_G * x;
-    a->buf[a->write] = x + ALLPASS_G * d;
+    a->buf[a->write] = flush_tiny(x + ALLPASS_G * d);
     a->write = (a->write + 1) % a->len;
     return y;
 }
@@ -191,6 +199,7 @@ void verb_init(StereoVerb *v, float sample_rate) {
     v->room_hp_r.ic1 = 0.0f;
     v->room_hp_r.ic2 = 0.0f;
     v->room_hp_g = tanf(PI_F * verb_room_hp_hz(START_HZ) / sample_rate);
+    v->damp_for = -1.0f;
     v->room_hp_for_hz = START_HZ;
     v->ghost_hz = START_HZ;
 }
@@ -307,14 +316,19 @@ Stereo verb_process(StereoVerb *v, const Frame *frame) {
     for (int i = 0; i < 2; i++) {
         wet_r = allpass_process(&v->ap_r[i], wet_r);
     }
-    float fc = clampf(FC_MAX_HZ * powf(PHI, -FC_GOLDEN_STEPS * damp), FC_MIN_HZ,
-                      fminf(FC_MAX_HZ, FC_MAX_NYQUIST_FRACTION * v->sample_rate));
-    float g = tanf(PI_F * fc / v->sample_rate);
-    float k1 = 1.0f / verb_damp_q(damp);
-    wet_l = svf_process(&v->svf_l[0], wet_l, g, k1);
-    wet_l = svf_process(&v->svf_l[1], wet_l, g, 2.0f);
-    wet_r = svf_process(&v->svf_r[0], wet_r, g, k1);
-    wet_r = svf_process(&v->svf_r[1], wet_r, g, 2.0f);
+    /* damp glides and the field nudges it. While it is sitting still the
+       cutoff and Q stay put, so a ringing tail does not call powf and tanf. */
+    if (fabsf(damp - v->damp_for) > 1e-4f) {
+        v->damp_for = damp;
+        float fc = clampf(FC_MAX_HZ * powf(PHI, -FC_GOLDEN_STEPS * damp), FC_MIN_HZ,
+                          fminf(FC_MAX_HZ, FC_MAX_NYQUIST_FRACTION * v->sample_rate));
+        v->wet_g = tanf(PI_F * fc / v->sample_rate);
+        v->wet_k = 1.0f / verb_damp_q(damp);
+    }
+    wet_l = svf_process(&v->svf_l[0], wet_l, v->wet_g, v->wet_k);
+    wet_l = svf_process(&v->svf_l[1], wet_l, v->wet_g, 2.0f);
+    wet_r = svf_process(&v->svf_r[0], wet_r, v->wet_g, v->wet_k);
+    wet_r = svf_process(&v->svf_r[1], wet_r, v->wet_g, 2.0f);
     wet_l = dc_block_process(&v->wet_dc_l, wet_l);
     wet_r = dc_block_process(&v->wet_dc_r, wet_r);
     if (fabsf(frame->base_hz - v->room_hp_for_hz) > v->room_hp_for_hz * 1e-4f) {

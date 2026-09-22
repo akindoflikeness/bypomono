@@ -291,6 +291,8 @@ typedef struct {
     /* Velocity is a gain outside the normalized envelope. It is smoothed on
        a sounding voice so a different retrigger velocity cannot step the VCA. */
     float velocity, velocity_to;
+    /* index^exponent, recomputed when index has actually moved */
+    float pow_index, fb_pow, index_pow[NUM_OPS];
     EnvParams adsr;
     Envelope env;
 } Voice;
@@ -409,9 +411,12 @@ void voice_bank_glide_newest_to_hz(VoiceBank *b, float hz);
 /* holds or lets go of the drone's gate on note 0 */
 void voice_bank_set_drone(VoiceBank *b, bool held);
 void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity);
-/* mono releases whatever sounds; poly releases the note on `key`, or every
-   held note for key -1. The drone's gate stays held through both. */
+/* releases the note on `key`. key < 0 is the wildcard and lets every note go.
+   The drone's gate stays held either way. */
 void voice_bank_note_off(VoiceBank *b, int key);
+/* the slot whose key is exactly `key`, and no other. -1 is the sequencer's
+   key, not the wildcard. */
+void voice_bank_note_off_exact(VoiceBank *b, int key);
 void voice_bank_note_off_all(VoiceBank *b);
 bool voice_bank_note_sounding(const VoiceBank *b);
 void voice_bank_set_bend_semitones(VoiceBank *b, float semitones);
@@ -474,6 +479,7 @@ typedef struct {
     float mod_ph[CHAMBER_N];
     float len[CHAMBER_N], g[CHAMBER_N];
     float len_to[CHAMBER_N], g_to[CHAMBER_N];
+    float norm[CHAMBER_N], norm_g[CHAMBER_N]; /* sqrt(1-g^2), held while g is still */
     float glide, damp_a, mod_samples;
     float mix, mix_to;
 } Chamber;
@@ -637,6 +643,7 @@ typedef struct {
     float in_ref; /* 1/sqrt(1 - fb^2) at the default decay */
     float fb, fb_target, lp;
     float lfo_phase, lfo_inc;
+    float in_gain, in_gain_fb; /* sqrt(1-fb^2)*in_ref, held while fb is still */
 } Comb;
 
 typedef struct {
@@ -671,6 +678,7 @@ typedef struct {
     DcBlock wet_dc_l, wet_dc_r;
     Svf room_hp_l, room_hp_r;
     float room_hp_g, room_hp_for_hz;
+    float damp_for, wet_g, wet_k; /* the damp filter, held while damp is still */
     float ghost_hz; /* pitch the ghost rotators are currently solved for */
     bool configured; /* the first configure lands outright, later ones travel */
     Svf svf_l[2], svf_r[2];
@@ -944,7 +952,8 @@ void mod_advance(Mod *m, size_t samples, float bpm);
 int mod_apply(Mod *m, const ModBase *base, ModBase *out);
 
 /* plays a pitch sequencer event on the voices, the way the melody's notes
-   are played: one note at a time, the last one let go first */
+   are played: one note at a time, the last one let go first. A gate-off
+   releases only the sequencer's note (key -1). */
 void pitch_event_play(PitchEvent e, VoiceBank *v, Chandas *h, Mod *m);
 
 /* ---------- session ---------- */

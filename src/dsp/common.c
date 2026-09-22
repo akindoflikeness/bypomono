@@ -44,7 +44,7 @@ void phase_rotator_init(PhaseRotator *p, float a) {
 float phase_rotator_process(PhaseRotator *p, float x) {
     float y = p->a * x + p->x1 - p->a * p->y1;
     p->x1 = x;
-    p->y1 = y;
+    p->y1 = flush_tiny(y);
     return y;
 }
 
@@ -165,7 +165,7 @@ float limiter_reduction_db(const Limiter *l) { return l->reduction_db; }
 float dc_block_process(DcBlock *d, float x) {
     float y = x - d->x1 + DC_BLOCK_R * d->y1;
     d->x1 = x;
-    d->y1 = y;
+    d->y1 = flush_tiny(y);
     return y;
 }
 
@@ -181,8 +181,8 @@ float svf_process(Svf *s, float x, float g, float k) {
     float v3 = x - s->ic2;
     float v1 = a1 * s->ic1 + a2 * v3;
     float v2 = s->ic2 + a2 * s->ic1 + a3 * v3;
-    s->ic1 = 2.0f * v1 - s->ic1;
-    s->ic2 = 2.0f * v2 - s->ic2;
+    s->ic1 = flush_tiny(2.0f * v1 - s->ic1);
+    s->ic2 = flush_tiny(2.0f * v2 - s->ic2);
     return v2;
 }
 
@@ -193,8 +193,8 @@ float svf_process_hp(Svf *s, float x, float g, float k) {
     float v3 = x - s->ic2;
     float v1 = a1 * s->ic1 + a2 * v3;
     float v2 = s->ic2 + a2 * s->ic1 + a3 * v3;
-    s->ic1 = 2.0f * v1 - s->ic1;
-    s->ic2 = 2.0f * v2 - s->ic2;
+    s->ic1 = flush_tiny(2.0f * v1 - s->ic1);
+    s->ic2 = flush_tiny(2.0f * v2 - s->ic2);
     return x - k * v1 - v2;
 }
 
@@ -230,8 +230,9 @@ void biquad_allpass(Biquad *q, float hz, float sr) {
 
 float biquad_process(Biquad *q, float x) {
     float y = q->b0 * x + q->z1;
-    q->z1 = q->b1 * x - q->a1 * y + q->z2;
-    q->z2 = q->b2 * x - q->a2 * y;
+    float z1 = q->b1 * x - q->a1 * y + q->z2;
+    q->z2 = flush_tiny(q->b2 * x - q->a2 * y);
+    q->z1 = flush_tiny(z1);
     return y;
 }
 

@@ -106,7 +106,7 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
     XSelectInput(b->dpy, b->win,
                  ExposureMask | ButtonPressMask | ButtonReleaseMask
                      | PointerMotionMask | KeyPressMask | KeyReleaseMask
-                     | EnterWindowMask | LeaveWindowMask);
+                     | EnterWindowMask | LeaveWindowMask | FocusChangeMask);
     b->gc = XCreateGC(b->dpy, b->win, 0, NULL);
     return true;
 }
@@ -221,6 +221,7 @@ void backend_pump(Gui *g) {
         case Expose: gui_invalidate(g); break;
         case EnterNotify: gui_in_inside(g, true); break;
         case LeaveNotify: gui_in_inside(g, false); break;
+        case FocusOut: gui_in_cancel(g); break;
         default: break;
         }
     }

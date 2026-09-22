@@ -622,6 +622,9 @@ static void draw_starfield(const App *a, Canvas *c, Rct rect,
 }
 
 void draw_stage(App *a, Ui *ui, Rct r) {
+    /* The sky and the suture move every frame, so the fingerprint of the
+       whole canvas would miss and is not worth reading. */
+    ui->repaint_soon = true;
     Rct stage = rct_shrink(r, 4.0f);
     ShellPose pose = shell_pose(a, stage);
     draw_starfield(a, ui->canvas, stage, &pose);

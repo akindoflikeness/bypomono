@@ -5,6 +5,7 @@
 #define _UNICODE
 #include <windows.h>
 #include <windowsx.h>
+#include <mmsystem.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -12,9 +13,15 @@
 #include "plug_gui_backend.h"
 
 #define BYPO_WNDCLASS L"BypoClapEditor"
-/* The system tick is ~15.6 ms, so a 16 ms timer lands one frame per tick. */
+/* 16 ms is one frame at 60 Hz once the scheduler tick is 1 ms. Without
+   timeBeginPeriod the multimedia clock stays at 15.6 ms and this request
+   lands every other tick, which is the 33 Hz the editor was drawing at. */
 #define FRAME_TIMER_ID 1
 #define FRAME_TIMER_MS 16
+/* A posted frame, so a click or a drag paints without waiting out WM_TIMER
+   (the lowest-priority message a host's pump has). */
+#define WM_FRAME (WM_APP + 1)
+#define FRAME_MIN_GAP_MS 12
 
 typedef struct {
     HWND hwnd;
@@ -23,7 +30,20 @@ typedef struct {
     bool tracking; /* a WM_MOUSELEAVE is armed */
     void (*frame_cb)(Gui *g);
     bool frame_on;
+    bool frame_posted;
+    DWORD last_frame;
 } W32Back;
+
+/* One system-wide timer resolution for every open editor. */
+static int period_users;
+
+static void period_begin(void) {
+    if (period_users++ == 0) timeBeginPeriod(1);
+}
+
+static void period_end(void) {
+    if (period_users > 0 && --period_users == 0) timeEndPeriod(1);
+}
 
 static W32Back *back_of(Gui *g) { return gui_surface(g)->back; }
 
@@ -70,12 +90,44 @@ static UINT system_dpi(void) {
 
 /* ---------- painting ---------- */
 
+/* The design canvas is the DIB. GDI nearest-neighbour stretches it to the
+   child window, so the editor does not keep a second buffer at window size
+   or walk every output pixel on the CPU. */
 static void blit_to(Gui *g, HDC dc) {
     W32Back *b = back_of(g);
     GuiSurface *s = gui_surface(g);
-    if (!b || !s->out_px) return;
-    StretchDIBits(dc, 0, 0, s->win_w, s->win_h, 0, 0, s->win_w, s->win_h,
-                  s->out_px, &b->bmi, DIB_RGB_COLORS, SRCCOPY);
+    if (!b || !s->src_px || s->src_w < 1 || s->src_h < 1 || s->win_w < 1
+        || s->win_h < 1)
+        return;
+    b->bmi.bmiHeader.biWidth = s->src_w;
+    b->bmi.bmiHeader.biHeight = -s->src_h; /* negative: top-down rows */
+    SetStretchBltMode(dc, COLORONCOLOR);
+    StretchDIBits(dc, 0, 0, s->win_w, s->win_h, 0, 0, s->src_w, s->src_h,
+                  s->src_px, &b->bmi, DIB_RGB_COLORS, SRCCOPY);
+}
+
+/* One frame soon, unless one was just drawn or is already queued. Mouse
+   moves during a drag then paint at the timer rate instead of once per
+   packet, which would pin the host's UI thread. */
+static void kick_frame(Gui *g) {
+    W32Back *b = back_of(g);
+    if (!b || !b->hwnd || !b->frame_cb || b->frame_posted) return;
+    DWORD now = GetTickCount();
+    if (b->last_frame != 0 && now - b->last_frame < FRAME_MIN_GAP_MS) return;
+    b->frame_posted = true;
+    PostMessageW(b->hwnd, WM_FRAME, 0, 0);
+}
+
+static void run_frame(Gui *g) {
+    W32Back *b = back_of(g);
+    if (!b) return;
+    b->frame_posted = false;
+    DWORD now = GetTickCount();
+    /* A kick and the timer can both be queued. One paint per gap is enough;
+       the input waiting in pending is taken by the next one. */
+    if (b->last_frame != 0 && now - b->last_frame < FRAME_MIN_GAP_MS) return;
+    b->last_frame = now;
+    if (b->frame_cb) b->frame_cb(g);
 }
 
 /* ---------- input ---------- */
@@ -141,58 +193,69 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         EndPaint(hwnd, &ps);
         return 0;
     }
-    case WM_TIMER: {
-        W32Back *b = back_of(g);
-        if (wp == FRAME_TIMER_ID && b && b->frame_cb) b->frame_cb(g);
+    case WM_TIMER:
+        if (wp == FRAME_TIMER_ID) run_frame(g);
         return 0;
-    }
+    case WM_FRAME:
+        run_frame(g);
+        return 0;
     case WM_ERASEBKGND: return 1; /* every pixel is painted anyway */
     case WM_SIZE: return 0;
     case WM_MOUSEMOVE:
         arm_leave(g);
         gui_in_motion(g, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+        kick_frame(g);
         return 0;
     case WM_MOUSELEAVE:
         back_of(g)->tracking = false;
         gui_in_inside(g, false);
+        kick_frame(g);
         return 0;
     case WM_LBUTTONDOWN:
         SetFocus(hwnd);
         SetCapture(hwnd);
         gui_in_motion(g, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
         gui_in_button(g, 1, true);
+        kick_frame(g);
         return 0;
     case WM_LBUTTONUP:
         ReleaseCapture();
         gui_in_motion(g, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
         gui_in_button(g, 1, false);
+        kick_frame(g);
         return 0;
     case WM_RBUTTONDOWN:
         gui_in_motion(g, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
         gui_in_button(g, 3, true);
+        kick_frame(g);
         return 0;
     case WM_RBUTTONUP:
         gui_in_motion(g, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
         gui_in_button(g, 3, false);
+        kick_frame(g);
         return 0;
     case WM_MOUSEWHEEL:
         /* positive is away from the user; the editor counts down as positive */
         gui_in_wheel(g, -(float)GET_WHEEL_DELTA_WPARAM(wp) / (float)WHEEL_DELTA);
+        kick_frame(g);
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
         int sc = vk_scancode(wp);
         if (sc >= 0) gui_in_key(g, sc, true);
+        kick_frame(g);
         return 0;
     }
     case WM_KEYUP:
     case WM_SYSKEYUP: {
         int sc = vk_scancode(wp);
         if (sc >= 0) gui_in_key(g, sc, false);
+        kick_frame(g);
         return 0;
     }
     case WM_CHAR:
         feed_char(g, wp);
+        kick_frame(g);
         return 0;
     case WM_GETDLGCODE: return DLGC_WANTALLKEYS;
     default: break;
@@ -219,7 +282,7 @@ static bool register_class(void) {
 
 /* ---------- backend interface ---------- */
 
-bool backend_scales_itself(void) { return false; }
+bool backend_scales_itself(void) { return true; }
 
 bool backend_open(Gui *g) {
     W32Back *b = calloc(1, sizeof *b);
@@ -291,9 +354,7 @@ bool backend_attach(Gui *g, const clap_window_t *window) {
 bool backend_resize(Gui *g) {
     W32Back *b = back_of(g);
     GuiSurface *s = gui_surface(g);
-    if (!b || !b->hwnd || !s->out_px) return false;
-    b->bmi.bmiHeader.biWidth = s->win_w;
-    b->bmi.bmiHeader.biHeight = -s->win_h; /* negative: top-down rows */
+    if (!b || !b->hwnd || !s->src_px) return false;
     SetWindowPos(b->hwnd, NULL, 0, 0, s->win_w, s->win_h,
                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
     return true;
@@ -324,14 +385,21 @@ int backend_event_fd(Gui *g) { return -1; }
 void backend_pump(Gui *g) {}
 
 /* WM_TIMER on the child window: the host's message loop dispatches it to
-   wndproc, so the frame runs on the thread that owns the window. */
+   wndproc, so the frame runs on the thread that owns the window. The 1 ms
+   timer period is held for as long as this timer is armed. */
 bool backend_start_frame_timer(Gui *g, void (*cb)(Gui *g)) {
     W32Back *b = back_of(g);
     if (!b || !b->hwnd) return false;
     if (b->frame_on) return true;
-    if (!SetTimer(b->hwnd, FRAME_TIMER_ID, FRAME_TIMER_MS, NULL)) return false;
+    period_begin();
+    if (!SetTimer(b->hwnd, FRAME_TIMER_ID, FRAME_TIMER_MS, NULL)) {
+        period_end();
+        return false;
+    }
     b->frame_cb = cb;
     b->frame_on = true;
+    b->frame_posted = false;
+    b->last_frame = 0;
     return true;
 }
 
@@ -341,4 +409,6 @@ void backend_stop_frame_timer(Gui *g) {
     KillTimer(b->hwnd, FRAME_TIMER_ID);
     b->frame_cb = NULL;
     b->frame_on = false;
+    b->frame_posted = false;
+    period_end();
 }

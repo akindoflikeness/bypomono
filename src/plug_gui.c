@@ -1,6 +1,6 @@
-/* Platform-independent half of the CLAP editor: it owns the App, renders the
-   fixed DESIGN_W x DESIGN_H canvas, magnifies it into out_px and hands that to
-   a backend (plug_gui_x11.c / plug_gui_win32.c / plug_gui_cocoa.m). */
+/* Platform-independent half of the CLAP editor: it owns the App and renders
+   the fixed DESIGN_W x DESIGN_H canvas. X11 magnifies that into out_px; Win32
+   and Cocoa scale the canvas themselves. */
 
 #include <math.h>
 #include <stdio.h>
@@ -308,15 +308,24 @@ static void gui_frame(Plug *p, Gui *g) {
     ui->drag_prev = ui->in.mouse;
     g->app->quit = false; /* nothing in a plugin may end the host */
 
-    uint64_t h = canvas_fingerprint(&g->canvas);
+    /* An animated page (the shell, a blinking caret) already knows the
+       pixels changed. Hashing the whole canvas just to confirm that reads
+       every pixel and then presents anyway. */
     double t_mag = st ? now_s() : 0.0;
-    if (st) {
-        st->frame_s += t_fp - t_frame;
-        st->fp_s += t_mag - t_fp;
+    if (!ui->repaint_soon) {
+        uint64_t h = canvas_fingerprint(&g->canvas);
+        if (st) st->fp_s += now_s() - t_mag;
+        t_mag = st ? now_s() : 0.0;
+        if (g->have_hash && h == g->last_hash) {
+            if (st) st->frame_s += t_fp - t_frame;
+            return;
+        }
+        g->last_hash = h;
+        g->have_hash = true;
+    } else {
+        g->have_hash = false;
     }
-    if (g->have_hash && h == g->last_hash) return;
-    g->last_hash = h;
-    g->have_hash = true;
+    if (st) st->frame_s += t_fp - t_frame;
     if (!backend_scales_itself()) magnify(g);
     double t_present = st ? now_s() : 0.0;
     backend_present(g);

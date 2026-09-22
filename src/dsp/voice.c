@@ -41,9 +41,9 @@ static float rip_line_process(RipLine *r, float x) {
     r->rot.a = glide_to(r->rot.a, r->rot_to, r->rot_k);
     size_t read = (r->write + r->len - r->delay) % r->len;
     float y = phase_rotator_process(&r->rot, r->buf[read]);
-    r->lp = y + RIP_DAMP * (r->lp - y);
+    r->lp = flush_tiny(y + RIP_DAMP * (r->lp - y));
     r->in_gain = glide_to(r->in_gain, 1.0f, r->in_k);
-    r->buf[r->write] = x * r->in_gain + r->lp * r->fb;
+    r->buf[r->write] = flush_tiny(x * r->in_gain + r->lp * r->fb);
     r->write = (r->write + 1) % r->len;
     return r->lp;
 }
@@ -86,6 +86,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->detune_to = 1.0f;
     v->velocity = 1.0f;
     v->velocity_to = 1.0f;
+    v->pow_index = -1.0f; /* index is in 0..1; the first sample builds the powers */
     v->fb_smooth = patch.feedback;
     v->adsr = env_params_default();
     envelope_init(&v->env, sample_rate);
@@ -213,6 +214,7 @@ static void voice_apply_patch(Voice *v, Patch patch, bool reset) {
     v->patch = patch;
     if (restructure) {
         v->compiled = compile(v->patch.algorithm);
+        v->pow_index = -1.0f; /* operator depths changed; the powers are stale */
         if (reset) reset_all(v);
     }
     breath_set_mode(&v->breath, v->patch.ratio_mode);
@@ -307,13 +309,20 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         v->detune += (v->detune_to - v->detune) * param_k;
         v->velocity += (v->velocity_to - v->velocity) * param_k;
         float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
+        /* index glides. While it is sitting still the operator powers stay
+           put; a move past this threshold is inaudible and rebuilds them. */
+        if (fabsf(index - v->pow_index) > 1e-5f) {
+            v->pow_index = index;
+            for (int i = 0; i < NUM_OPS; i++)
+                v->index_pow[i] = index_exp[i] > 0.0f ? powf(index, index_exp[i]) : 1.0f;
+            v->fb_pow = powf(index, fb_exp);
+        }
         float eff_level[NUM_OPS];
         for (int i = 0; i < NUM_OPS; i++) {
             v->level_s[i] += (level[i] - v->level_s[i]) * param_k;
-            eff_level[i] =
-                v->level_s[i] * (index_exp[i] > 0.0f ? powf(index, index_exp[i]) : 1.0f);
+            eff_level[i] = v->level_s[i] * v->index_pow[i];
         }
-        float eff_feedback = v->fb_smooth * powf(index, fb_exp);
+        float eff_feedback = v->fb_smooth * v->fb_pow;
 
         /* rip drives the carriers' phase, so it has to arrive smoothly */
         v->rip_smooth += (rip_target - v->rip_smooth) * param_k;

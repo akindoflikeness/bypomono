@@ -353,9 +353,30 @@ static void gui_frame_cb(Gui *g) {
     if (g->plug) gui_tick(g->plug, g);
 }
 
+static void drop_host_timer(Gui *g) {
+    if (!g->timer_on || !g->plug) return;
+    Plug *p = g->plug;
+    const clap_host_timer_support_t *ht =
+        p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
+    if (ht) ht->unregister_timer(p->host, g->timer_id);
+    g->timer_on = false;
+}
+
+static void ensure_host_timer(Gui *g) {
+    if (g->timer_on || !g->plug) return;
+    Plug *p = g->plug;
+    const clap_host_timer_support_t *ht =
+        p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
+    if (ht && ht->register_timer(p->host, TIMER_MS, &g->timer_id))
+        g->timer_on = true;
+}
+
 static void start_native_timer(Gui *g) {
     if (g->native_timer || !g->parented) return;
     g->native_timer = backend_start_frame_timer(g, gui_frame_cb);
+    /* the host timer was the fallback. Once a native one is running, leave
+       the host's message thread with a single 16 ms source. */
+    if (g->native_timer) drop_host_timer(g);
 }
 
 static void stop_native_timer(Gui *g) {
@@ -432,8 +453,8 @@ static bool gui_create(const clap_plugin_t *pl, const char *api,
     g->last_time = 0.0;
     memset(&g->pending, 0, sizeof g->pending);
 
-    /* the fallback: a backend with a frame timer of its own takes over on
-       parent, and then this one stops rendering */
+    /* the fallback until a backend timer takes over on parent. X11 has no
+       native timer, so this one stays. */
     const clap_host_timer_support_t *ht =
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);
     if (ht && ht->register_timer(p->host, TIMER_MS, &g->timer_id))
@@ -584,6 +605,7 @@ static bool gui_show(const clap_plugin_t *pl) {
     g->shown = true;
     g->have_hash = false; /* the window may have come back empty */
     start_native_timer(g);
+    if (!g->native_timer) ensure_host_timer(g);
     return true;
 }
 
@@ -591,6 +613,7 @@ static bool gui_hide(const clap_plugin_t *pl) {
     Gui *g = gui_of(pl);
     if (!g || !g->parented) return false;
     stop_native_timer(g);
+    drop_host_timer(g); /* hidden: neither timer keeps the host thread awake */
     backend_hide(g);
     g->shown = false;
     return true;

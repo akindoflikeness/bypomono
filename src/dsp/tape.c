@@ -28,7 +28,7 @@ static void shelf_set(Shelf *s, float hz, float gain_db, float sr) {
 }
 
 static float shelf_process(Shelf *s, float x) {
-    s->lp += (x - s->lp) * s->k;
+    s->lp = flush_tiny(s->lp + (x - s->lp) * s->k);
     return x + s->lp * s->gain;
 }
 
@@ -42,7 +42,7 @@ static void top_set(Top *t, float hz, float sr) {
 }
 
 static float top_process(Top *t, float x) {
-    t->lp += (x - t->lp) * t->k;
+    t->lp = flush_tiny(t->lp + (x - t->lp) * t->k);
     return t->lp;
 }
 

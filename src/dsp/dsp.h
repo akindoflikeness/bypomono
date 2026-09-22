@@ -291,6 +291,8 @@ typedef struct {
     /* Velocity is a gain outside the normalized envelope. It is smoothed on
        a sounding voice so a different retrigger velocity cannot step the VCA. */
     float velocity, velocity_to;
+    /* index^exponent, recomputed when index has actually moved */
+    float pow_index, fb_pow, index_pow[NUM_OPS];
     EnvParams adsr;
     Envelope env;
 } Voice;
@@ -477,6 +479,7 @@ typedef struct {
     float mod_ph[CHAMBER_N];
     float len[CHAMBER_N], g[CHAMBER_N];
     float len_to[CHAMBER_N], g_to[CHAMBER_N];
+    float norm[CHAMBER_N], norm_g[CHAMBER_N]; /* sqrt(1-g^2), held while g is still */
     float glide, damp_a, mod_samples;
     float mix, mix_to;
 } Chamber;
@@ -640,6 +643,7 @@ typedef struct {
     float in_ref; /* 1/sqrt(1 - fb^2) at the default decay */
     float fb, fb_target, lp;
     float lfo_phase, lfo_inc;
+    float in_gain, in_gain_fb; /* sqrt(1-fb^2)*in_ref, held while fb is still */
 } Comb;
 
 typedef struct {
@@ -674,6 +678,7 @@ typedef struct {
     DcBlock wet_dc_l, wet_dc_r;
     Svf room_hp_l, room_hp_r;
     float room_hp_g, room_hp_for_hz;
+    float damp_for, wet_g, wet_k; /* the damp filter, held while damp is still */
     float ghost_hz; /* pitch the ghost rotators are currently solved for */
     bool configured; /* the first configure lands outright, later ones travel */
     Svf svf_l[2], svf_r[2];

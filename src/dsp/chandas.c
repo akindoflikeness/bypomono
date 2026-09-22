@@ -148,8 +148,8 @@ static void chorus_clear(Chorus *c) {
 
 static Stereo chorus_process(Chorus *c, Stereo wet, float warp) {
     size_t n = c->len;
-    c->buf_l[c->w] = wet.l;
-    c->buf_r[c->w] = wet.r;
+    c->buf_l[c->w] = flush_tiny(wet.l);
+    c->buf_r[c->w] = flush_tiny(wet.r);
     c->w = (c->w + 1) % n;
     float k = 1.0f / fmaxf(CHORUS_DEPTH_GLIDE_SECONDS * c->sample_rate, 1.0f);
     c->depth += (clampf(warp, 0.0f, 1.0f) - c->depth) * k;
@@ -318,8 +318,8 @@ static void chandas_spawn(Chandas *h, size_t k, float entry) {
 static void chandas_write(Chandas *h, Stereo dry, Stereo wet) {
     float fl = dc_block_process(&h->dc_loop_l, wet.l);
     float fr = dc_block_process(&h->dc_loop_r, wet.r);
-    h->buf_l[h->w] = dry.l + fl * REGEN;
-    h->buf_r[h->w] = dry.r + fr * REGEN;
+    h->buf_l[h->w] = flush_tiny(dry.l + fl * REGEN);
+    h->buf_r[h->w] = flush_tiny(dry.r + fr * REGEN);
     h->w = (h->w + 1) % h->len;
 }
 

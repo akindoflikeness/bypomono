@@ -86,7 +86,7 @@ static float comb_process(Comb *c, float x, float damp, float glide) {
     if (c->lfo_phase >= 1.0f) {
         c->lfo_phase -= 1.0f;
     }
-    float wobble = sinf(TAU_F * c->lfo_phase) * VERB_MOD_DEPTH_SAMPLES;
+    float wobble = lfo_sin(c->lfo_phase) * VERB_MOD_DEPTH_SAMPLES;
     size_t len = c->len;
     float d = clampf(c->delay_f + wobble, 1.0f, (float)(len - 2));
     size_t di = (size_t)d;

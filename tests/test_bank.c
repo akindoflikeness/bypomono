@@ -82,7 +82,7 @@ static void four_notes_sound_together(void) {
     for (int i = 0; i < 4; i++) {
         CHECK(holds_hz(&b, midi_hz(keys[i])), "key %d is not held", keys[i]);
         CHECK(!voice_pair_silent(&b.pairs[i * UNISON_MAX]), "slot %d is silent", i);
-        CHECK(fabsf(voice_target_hz(&b.pairs[i * UNISON_MAX].voices[0]) - midi_hz(keys[i])) < 1e-3f,
+        CHECK(fabsf(voice_target_hz(&b.pairs[i * UNISON_MAX].voice) - midi_hz(keys[i])) < 1e-3f,
               "slot %d glided instead of starting on its note", i);
     }
     voice_bank_free(&b);
@@ -113,7 +113,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
     for (int i = 0; i < 4; i++)
         voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
 
-    Voice *stolen = &b.pairs[0 * UNISON_MAX].voices[0];
+    Voice *stolen = &b.pairs[0 * UNISON_MAX].voice;
     float from = stolen->freq;
     float target = midi_hz(74);
     voice_bank_note_on(&b, 74, target, 0.8f);
@@ -125,7 +125,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
           (double)stolen->freq);
 
     /* A repeated key is a retrigger, not a replacement of another held key. */
-    Voice *same_key = &b.pairs[3 * UNISON_MAX].voices[0];
+    Voice *same_key = &b.pairs[3 * UNISON_MAX].voice;
     float same_target = midi_hz(72);
     voice_bank_note_on(&b, 71, same_target, 0.8f);
     CHECK(same_key->steal_glide_seconds == 0.0f,
@@ -135,7 +135,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
                "a same-key retrigger ignored zero player glide");
 
     /* A released tail is reusable, but no longer a held voice to steal. */
-    Voice *released = &b.pairs[1 * UNISON_MAX].voices[0];
+    Voice *released = &b.pairs[1 * UNISON_MAX].voice;
     voice_bank_note_off(&b, 64);
     float released_target = midi_hz(75);
     voice_bank_note_on(&b, 75, released_target, 0.8f);
@@ -146,7 +146,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
                "a released tail ignored zero player glide");
 
     /* An anonymous event cannot be a same-key retrigger, so it does steal. */
-    Voice *anonymous = &b.pairs[2 * UNISON_MAX].voices[0];
+    Voice *anonymous = &b.pairs[2 * UNISON_MAX].voice;
     voice_bank_note_on(&b, -1, midi_hz(76), 0.8f);
     CHECK(anonymous->steal_glide_seconds > 0.0f,
           "an anonymous held reassignment missed its safety glide");
@@ -248,16 +248,16 @@ static void unison_detunes_and_spreads_the_pair(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 2, 20.0f));
     voice_bank_set_drone(&b, true);
-    CHECK_NEAR(b.pairs[0].voices[0].detune_to, exp2f(-10.0f / 1200.0f), 1e-6f, "copy 0 detune %g",
-               (double)b.pairs[0].voices[0].detune_to);
-    CHECK_NEAR(b.pairs[1].voices[1].detune_to, exp2f(10.0f / 1200.0f), 1e-6f, "copy 1 detune %g",
-               (double)b.pairs[1].voices[1].detune_to);
+    CHECK_NEAR(b.pairs[0].voice.detune_to, exp2f(-10.0f / 1200.0f), 1e-6f, "copy 0 detune %g",
+               (double)b.pairs[0].voice.detune_to);
+    CHECK_NEAR(b.pairs[1].voice.detune_to, exp2f(10.0f / 1200.0f), 1e-6f, "copy 1 detune %g",
+               (double)b.pairs[1].voice.detune_to);
     Stereo_ ctx = { 0 };
     voice_bank_render_frames(&b, (size_t)(SR / 4), stereo_emit, &ctx);
     CHECK(ctx.peak_side > 1e-4f, "unison stayed in the middle (side %g)", (double)ctx.peak_side);
 
     voice_bank_set_patch(&b, voiced(1, 1, 20.0f));
-    CHECK(b.pairs[0].voices[0].detune_to == 1.0f, "a lone voice kept its detune");
+    CHECK(b.pairs[0].voice.detune_to == 1.0f, "a lone voice kept its detune");
     voice_bank_render_frames(&b, (size_t)(SR / 4), noop_emit, NULL);
     CHECK(b.spread == 0.0f && b.gain[1] == 0.0f, "unison never faded out");
     voice_bank_free(&b);
@@ -295,8 +295,8 @@ static void a_returning_copy_is_on_the_note(void) {
     voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
     voice_bank_set_patch(&b, voiced(1, 2, 8.0f));
     voice_bank_render_frames(&b, 64, noop_emit, NULL);
-    CHECK(fabsf(b.pairs[1].voices[0].freq - 330.0f) < 1.0f, "the second copy came back at %g hz",
-          (double)b.pairs[1].voices[0].freq);
+    CHECK(fabsf(b.pairs[1].voice.freq - 330.0f) < 1.0f, "the second copy came back at %g hz",
+          (double)b.pairs[1].voice.freq);
     voice_bank_free(&b);
 }
 

@@ -340,7 +340,7 @@ static void rig_apply(void *ctx) {
     }
     case MV_REPEAT_IN_FADE: {
         /* a host echoing its parameters, or a second click: the second one
-           lands while the crossfade from the first is still running */
+           lands while the silence dip from the first is still running */
         Patch n = patch_init(ALGORITHMS[4], p.ratio_mode);
         n.index = p.index; n.voices = p.voices; n.unison = p.unison;
         patch_to(r, n);

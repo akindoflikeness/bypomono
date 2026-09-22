@@ -43,34 +43,44 @@ static void release_note(VoiceBank *b, int note) {
     b->held[note] = false;
 }
 
+static void park_dip(VoicePair *p) {
+    p->armed = false;
+    p->dip = 1.0f;
+    p->dip_dir = 0;
+    p->dip_left = 0;
+}
+
 static void hush_pair(VoicePair *p) {
-    for (int i = 0; i < 2; i++) envelope_init(&p->voices[i].env, p->voices[i].sample_rate);
+    envelope_init(&p->voice.env, p->voice.sample_rate);
+    park_dip(p);
 }
 
 /* a copy coming back in picks up where the note's first copy is */
 static void sync_copy(VoicePair *dst, const VoicePair *src) {
-    const Voice *from = &src->voices[src->target];
-    for (int i = 0; i < 2; i++) {
-        Voice *v = &dst->voices[i];
-        v->freq = from->freq;
-        v->target_freq = from->target_freq;
-        v->steal_glide_seconds = from->steal_glide_seconds;
-        v->master = from->master;
-        v->velocity = from->velocity;
-        v->velocity_to = from->velocity_to;
-        v->index = from->index;
-        v->field_smooth = from->field_smooth;
-        v->curve_smooth = from->curve_smooth;
-        v->field_amount = from->field_amount;
-        v->field_pitch = from->field_pitch;
-        v->bend = from->bend;
-        v->rip_smooth = from->rip_smooth;
-        v->fb_smooth = from->fb_smooth;
-        for (int op = 0; op < NUM_OPS; op++) v->level_s[op] = from->level_s[op];
-        v->env = from->env;
-        v->breath = from->breath;
-        voice_wake(v);
+    const Voice *from = &src->voice;
+    Voice *v = &dst->voice;
+    v->freq = from->freq;
+    v->target_freq = from->target_freq;
+    v->steal_glide_seconds = from->steal_glide_seconds;
+    v->master = from->master;
+    v->velocity = from->velocity;
+    v->velocity_to = from->velocity_to;
+    v->index = from->index;
+    v->field_smooth = from->field_smooth;
+    v->curve_smooth = from->curve_smooth;
+    v->field_amount = from->field_amount;
+    v->field_pitch = from->field_pitch;
+    v->bend = from->bend;
+    v->rip_smooth = from->rip_smooth;
+    v->fb_smooth = from->fb_smooth;
+    for (int op = 0; op < NUM_OPS; op++) {
+        v->level_s[op] = from->level_s[op];
+        v->ratio_s[op] = from->ratio_s[op];
     }
+    v->env = from->env;
+    v->breath = from->breath;
+    voice_wake(v);
+    park_dip(dst);
 }
 
 static void apply_voicing(VoiceBank *b) {
@@ -95,8 +105,7 @@ void voice_bank_init(VoiceBank *b, float sample_rate, Patch patch) {
         /* the second copy starts a golden fraction of a cycle along, so the
            pair does not open phase-locked */
         float offset = fract_pos((float)(s % UNISON_MAX) / PHI);
-        for (int i = 0; i < 2; i++)
-            for (int op = 0; op < NUM_OPS; op++) b->pairs[s].voices[i].phase[op] = offset;
+        for (int op = 0; op < NUM_OPS; op++) b->pairs[s].voice.phase[op] = offset;
     }
     for (int n = 0; n < POLY_MAX; n++) {
         b->key[n] = -1;
@@ -129,19 +138,17 @@ State voice_bank_state(const VoiceBank *b) {
 void voice_bank_set_state(VoiceBank *b, State next) {
     for (int s = 0; s < BANK_PAIRS; s++) {
         VoicePair *p = &b->pairs[s];
-        /* a slot nobody hears takes the change outright instead of spending
-           a crossfade rendering silence */
+        /* a slot nobody hears takes the change outright instead of dipping
+           through silence */
         bool quiet = s > 0 && (b->gain[s] == 0.0f || (!voice_pair_crossing(p) && voice_pair_silent(p)));
         if (!quiet) {
             voice_pair_set_state(p, next);
             continue;
         }
-        for (int i = 0; i < 2; i++) {
-            voice_set_patch(&p->voices[i], next.patch);
-            voice_set_adsr(&p->voices[i], next.adsr);
-        }
-        p->step = 0.0f;
-        p->blend = (float)p->target;
+        voice_set_patch(&p->voice, next.patch);
+        voice_snap_ratios(&p->voice);
+        voice_set_adsr(&p->voice, next.adsr);
+        park_dip(p);
         if (!voice_pair_silent(p)) b->gain[s] = 0.0f;
     }
     apply_voicing(b);
@@ -315,7 +322,7 @@ float voice_bank_target_hz(const VoiceBank *b) {
 
 const Envelope *voice_bank_newest_env(const VoiceBank *b) {
     const VoicePair *p = slot_pair_c(b, b->newest, 0);
-    return &p->voices[p->target].env;
+    return &p->voice.env;
 }
 
 int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]) {

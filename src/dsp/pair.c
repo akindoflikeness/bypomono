@@ -1,277 +1,205 @@
 #include "dsp.h"
 #include <math.h>
-#include <string.h>
-
-#define CHUNK 128
 
 void voice_pair_init(VoicePair *p, float sample_rate, Patch patch) {
-    voice_init(&p->voices[0], sample_rate, patch);
-    voice_init(&p->voices[1], sample_rate, patch);
-    p->target = 0;
-    p->blend = 0.0f;
-    p->step = 0.0f;
+    voice_init(&p->voice, sample_rate, patch);
     p->sample_rate = sample_rate;
+    p->dip = 1.0f;
+    p->dip_len = (int)(STRUCT_DIP_SECONDS * sample_rate + 0.5f);
+    if (p->dip_len < 1) p->dip_len = 1;
+    p->dip_left = 0;
+    p->dip_dir = 0;
+    p->armed = false;
 }
 
 void voice_pair_free(VoicePair *p) {
-    voice_free(&p->voices[0]);
-    voice_free(&p->voices[1]);
-}
-
-static int pair_live(const VoicePair *p) {
-    return p->target;
+    voice_free(&p->voice);
 }
 
 bool voice_pair_crossing(const VoicePair *p) {
-    return p->step != 0.0f;
+    return p->dip_dir != 0 || p->armed;
 }
 
 State voice_pair_state(const VoicePair *p) {
-    const Voice *v = &p->voices[pair_live(p)];
+    if (p->armed) return p->pending;
     State s;
-    s.patch = v->patch;
-    s.adsr = v->adsr;
+    s.patch = p->voice.patch;
+    s.adsr = p->voice.adsr;
     return s;
 }
 
-static void pair_cross_to(VoicePair *p, State next, bool audible) {
-    int incoming = p->blend < 0.5f ? 1 : 0;
-    /* the incoming voice starts its smoothed controls where the audible one
-       is, so a patch change glides the level instead of stepping it */
-    const Voice *live = &p->voices[1 - incoming];
-    Voice *in = &p->voices[incoming];
-    in->master = live->master;
-    in->velocity = live->velocity;
-    in->velocity_to = live->velocity_to;
-    in->index = live->index;
-    in->fb_smooth = live->fb_smooth;
-    in->field_smooth = live->field_smooth;
-    in->curve_smooth = live->curve_smooth;
-    /* mid-fade the incoming voice can already be heard, so it keeps its
-       phases; from silence it restrikes as before */
-    if (audible) {
-        voice_set_patch_live(&p->voices[incoming], next.patch);
-    } else {
-        voice_set_patch(&p->voices[incoming], next.patch);
+/* dip = 0.5*(1+cos(pi*u)) on the way down, the mirror on the way up.
+   Both ends have a flat derivative, so the join is not a kink. */
+static void advance_dip(VoicePair *p) {
+    if (p->dip_dir == 0) return;
+    if (p->dip_left > 0) p->dip_left--;
+    float u = 1.0f - (float)p->dip_left / (float)p->dip_len;
+    if (u < 0.0f) u = 0.0f;
+    if (u > 1.0f) u = 1.0f;
+    if (p->dip_dir < 0) p->dip = 0.5f * (1.0f + cosf(PI_F * u));
+    else p->dip = 0.5f * (1.0f - cosf(PI_F * u));
+    if (p->dip_left > 0) return;
+    if (p->dip_dir < 0) {
+        p->dip = 0.0f;
+        if (p->armed) {
+            voice_set_patch(&p->voice, p->pending.patch);
+            voice_set_adsr(&p->voice, p->pending.adsr);
+            voice_snap_ratios(&p->voice);
+            p->armed = false;
+        }
+        p->dip_dir = 1;
+        p->dip_left = p->dip_len;
+        return;
     }
-    voice_set_adsr(&p->voices[incoming], next.adsr);
-    p->target = incoming;
-    float want = (float)incoming;
-    float samples = fmaxf(CROSSFADE_SECONDS * p->sample_rate, 1.0f);
-    p->step = (want - p->blend) / samples;
+    p->dip = 1.0f;
+    p->dip_dir = 0;
+    p->dip_left = 0;
+}
+
+static void arm_dip(VoicePair *p, State next) {
+    p->pending = next;
+    p->pending_compiled = compile(next.patch.algorithm);
+    p->armed = true;
+    if (p->dip_dir < 0) return;
+    float c = clampf(2.0f * p->dip - 1.0f, -1.0f, 1.0f);
+    float u = acosf(c) / PI_F;
+    int left = (int)((1.0f - u) * (float)p->dip_len + 0.5f);
+    if (left < 1) left = 1;
+    p->dip_dir = -1;
+    p->dip_left = left;
 }
 
 void voice_pair_set_state(VoicePair *p, State next) {
-    State cur = voice_pair_state(p);
-    bool crossing = voice_pair_crossing(p);
-    if (!state_is_structural_change(&cur, &next)) {
-        int live = p->target;
-        voice_set_patch(&p->voices[live], next.patch);
-        voice_set_adsr(&p->voices[live], next.adsr);
-        int fading = 1 - live;
-        if (crossing) {
-            /* the outgoing voice is still audible: it takes the levels but
-               never a restructure, which would reset its phases under us */
-            voice_take_levels(&p->voices[fading], &next.patch);
-        } else {
-            voice_set_patch(&p->voices[fading], next.patch);
-            voice_set_adsr(&p->voices[fading], next.adsr);
-        }
+    if (p->armed) {
+        /* a repeated copy of the change, or a knob moved during the dip,
+           rides along. Only a new shape turns the fade around. */
+        bool again = state_is_structural_change(&p->pending, &next);
+        p->pending = next;
+        p->pending_compiled = compile(next.patch.algorithm);
+        if (again) arm_dip(p, next);
         return;
     }
-    pair_cross_to(p, next, crossing);
+    bool sounding = voice_note_sounding(&p->voice) || p->dip < 1.0f;
+    State cur = voice_pair_state(p);
+    if (state_is_structural_change(&cur, &next) && sounding) {
+        arm_dip(p, next);
+        return;
+    }
+    voice_set_patch(&p->voice, next.patch);
+    voice_set_adsr(&p->voice, next.adsr);
+    if (!voice_note_sounding(&p->voice)) voice_snap_ratios(&p->voice);
 }
 
 void voice_pair_set_patch(VoicePair *p, Patch patch) {
     State s;
     s.patch = patch;
-    s.adsr = p->voices[pair_live(p)].adsr;
+    s.adsr = p->armed ? p->pending.adsr : p->voice.adsr;
     voice_pair_set_state(p, s);
 }
 
 const Patch *voice_pair_patch(const VoicePair *p) {
-    return &p->voices[pair_live(p)].patch;
+    return p->armed ? &p->pending.patch : &p->voice.patch;
 }
 
 const Compiled *voice_pair_compiled(const VoicePair *p) {
-    return &p->voices[pair_live(p)].compiled;
+    return p->armed ? &p->pending_compiled : &p->voice.compiled;
 }
 
 void voice_pair_set_op_enabled(VoicePair *p, int op, bool on) {
-    for (int i = 0; i < 2; i++) {
-        voice_set_op_enabled(&p->voices[i], op, on);
-    }
+    voice_set_op_enabled(&p->voice, op, on);
 }
 
 void voice_pair_set_freq_hz(VoicePair *p, float hz) {
-    for (int i = 0; i < 2; i++) {
-        voice_set_freq_hz(&p->voices[i], hz);
-    }
+    voice_set_freq_hz(&p->voice, hz);
 }
 
 void voice_pair_set_drone_hz(VoicePair *p, float hz) {
-    for (int i = 0; i < 2; i++) voice_set_drone_hz(&p->voices[i], hz);
+    voice_set_drone_hz(&p->voice, hz);
 }
 
 void voice_pair_glide_to_hz(VoicePair *p, float hz) {
-    for (int i = 0; i < 2; i++) {
-        voice_glide_to_hz(&p->voices[i], hz);
-    }
+    voice_glide_to_hz(&p->voice, hz);
 }
 
 void voice_pair_drone_to_hz(VoicePair *p, float hz) {
-    for (int i = 0; i < 2; i++) {
-        voice_drone_to_hz(&p->voices[i], hz);
-    }
+    voice_drone_to_hz(&p->voice, hz);
 }
 
 void voice_pair_note_on(VoicePair *p, float hz, float velocity) {
-    for (int i = 0; i < 2; i++) {
-        voice_note_on(&p->voices[i], hz, velocity);
-    }
+    voice_note_on(&p->voice, hz, velocity);
 }
 
 void voice_pair_note_steal(VoicePair *p, float hz, float velocity) {
-    for (int i = 0; i < 2; i++) voice_note_steal(&p->voices[i], hz, velocity);
+    voice_note_steal(&p->voice, hz, velocity);
 }
 
 bool voice_pair_note_sounding(const VoicePair *p) {
-    return voice_note_sounding(&p->voices[pair_live(p)]);
+    return voice_note_sounding(&p->voice);
 }
 
 const EnvParams *voice_pair_adsr(const VoicePair *p) {
-    return &p->voices[pair_live(p)].adsr;
+    return &p->voice.adsr;
 }
 
 void voice_pair_set_bend_semitones(VoicePair *p, float semitones) {
-    for (int i = 0; i < 2; i++) {
-        voice_set_bend_semitones(&p->voices[i], semitones);
-    }
+    voice_set_bend_semitones(&p->voice, semitones);
 }
 
 void voice_pair_note_off(VoicePair *p) {
-    for (int i = 0; i < 2; i++) {
-        voice_note_off(&p->voices[i]);
-    }
+    voice_note_off(&p->voice);
 }
 
 float voice_pair_target_hz(const VoicePair *p) {
-    return voice_target_hz(&p->voices[pair_live(p)]);
+    return voice_target_hz(&p->voice);
 }
 
 void voice_pair_set_adsr_now(VoicePair *p, EnvParams adsr) {
-    for (int i = 0; i < 2; i++) voice_set_adsr(&p->voices[i], adsr);
+    voice_set_adsr(&p->voice, adsr);
+    if (p->armed) p->pending.adsr = adsr;
 }
 
 void voice_pair_set_detune_cents(VoicePair *p, float cents) {
-    for (int i = 0; i < 2; i++) voice_set_detune_cents(&p->voices[i], cents);
+    voice_set_detune_cents(&p->voice, cents);
 }
 
 void voice_pair_wake(VoicePair *p) {
-    for (int i = 0; i < 2; i++) voice_wake(&p->voices[i]);
+    voice_wake(&p->voice);
 }
 
 bool voice_pair_silent(const VoicePair *p) {
-    for (int i = 0; i < 2; i++) {
-        const Voice *v = &p->voices[i];
-        if (envelope_active(&v->env)) return false;
-    }
-    return true;
-}
-
-static bool adsr_eq(const EnvParams *a, const EnvParams *b) {
-    return a->attack_s == b->attack_s && a->decay_s == b->decay_s &&
-           a->release_s == b->release_s && a->sustain == b->sustain;
-}
-
-static bool op_params_eq(const OpParams *a, const OpParams *b) {
-    return a->enabled == b->enabled &&
-           a->ratio == b->ratio &&
-           a->detune_cents == b->detune_cents &&
-           a->level == b->level;
-}
-
-static bool patch_ops_eq(const Patch *a, const Patch *b) {
-    for (int op = 0; op < NUM_OPS; op++) {
-        if (!op_params_eq(&a->ops[op], &b->ops[op])) return false;
-    }
-    return true;
+    return !envelope_active(&p->voice.env);
 }
 
 typedef struct {
-    Frame *a_buf;
-    size_t i;
-} ACapture;
-
-static void pair_a_emit(void *userdata, size_t n, const Frame *frame) {
-    ACapture *c = userdata;
-    c->a_buf[c->i] = *frame;
-    c->i += 1;
-}
-
-typedef struct {
-    const Frame *a_buf;
-    size_t k;
-    size_t done;
-    float *blend;
-    float *step;
     FrameEmit emit;
     void *userdata;
-} BCapture;
+    size_t base;
+    float gain;
+} Fwd;
 
-static void pair_b_emit(void *userdata, size_t n, const Frame *b) {
-    BCapture *c = userdata;
-    float t = clampf(*c->blend, 0.0f, 1.0f);
-    float ga = 1.0f - t;
-    float gb = t;
-    const Frame *a = &c->a_buf[c->k];
-    Frame f = *a;
-    for (int op = 0; op < NUM_OPS; op++) {
-        f.ops[op] = a->ops[op] * ga + b->ops[op] * gb;
+static void fwd_emit(void *userdata, size_t n, const Frame *frame) {
+    Fwd *w = userdata;
+    Frame out = *frame;
+    float g = w->gain;
+    if (g < 1.0f) {
+        out.master *= g;
+        out.mix *= g;
+        out.side *= g;
     }
-    f.mix = a->mix * ga + b->mix * gb;
-    f.master = a->master * ga + b->master * gb;
-    f.field = a->field * ga + b->field * gb;
-    f.base_hz = a->base_hz * ga + b->base_hz * gb;
-    f.side = a->side * ga + b->side * gb;
-    c->emit(c->userdata, c->done + c->k, &f);
-    c->k += 1;
-    if (*c->step != 0.0f) {
-        *c->blend += *c->step;
-        if ((*c->step > 0.0f && *c->blend >= 1.0f) ||
-            (*c->step < 0.0f && *c->blend <= 0.0f)) {
-            *c->blend = *c->step > 0.0f ? 1.0f : 0.0f;
-            *c->step = 0.0f;
-        }
-    }
+    w->emit(w->userdata, w->base + n, &out);
 }
 
 void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *userdata) {
     size_t done = 0;
-    Frame a_buf[CHUNK];
-    memset(a_buf, 0, sizeof a_buf);
     while (done < count) {
-        size_t run = CHUNK < count - done ? CHUNK : count - done;
-        {
-            ACapture ac = { a_buf, 0 };
-            voice_render_frames(&p->voices[0], run, pair_a_emit, &ac);
-            BCapture bc = { a_buf, 0, done, &p->blend, &p->step, emit, userdata };
-            voice_render_frames(&p->voices[1], run, pair_b_emit, &bc);
+        if (p->dip_dir == 0) {
+            Fwd w = { emit, userdata, done, 1.0f };
+            voice_render_frames(&p->voice, count - done, fwd_emit, &w);
+            return;
         }
-        if (p->step == 0.0f) {
-            int t = p->target;
-            Patch patch = p->voices[t].patch;
-            EnvParams adsr = p->voices[t].adsr;
-            int idle = 1 - t;
-            bool stale = p->voices[idle].patch.ratio_mode != patch.ratio_mode ||
-                         p->voices[idle].patch.algorithm != patch.algorithm ||
-                         !patch_ops_eq(&p->voices[idle].patch, &patch) ||
-                         !adsr_eq(&p->voices[idle].adsr, &adsr);
-            if (stale) {
-                voice_set_patch(&p->voices[idle], patch);
-                voice_set_adsr(&p->voices[idle], adsr);
-            }
-        }
-        done += run;
+        advance_dip(p);
+        Fwd w = { emit, userdata, done, p->dip };
+        voice_render_frames(&p->voice, 1, fwd_emit, &w);
+        done++;
     }
 }

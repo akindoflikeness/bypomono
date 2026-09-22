@@ -30,7 +30,7 @@ static void mut_op_detune(State *s) { s->patch.ops[1].detune_cents = 12.0f; }
 static void the_shape_of_the_patch_is_structural_and_the_rest_is_not(void) {
     State a = base_state();
 
-    void (*structural[])(State *) = {mut_ratio_mode, mut_algorithm, mut_op_ratio};
+    void (*structural[])(State *) = {mut_ratio_mode, mut_algorithm};
     for (size_t i = 0; i < sizeof structural / sizeof structural[0]; i++) {
         State b = base_state();
         structural[i](&b);
@@ -39,7 +39,7 @@ static void the_shape_of_the_patch_is_structural_and_the_rest_is_not(void) {
 
     void (*knobs[])(State *) = {mut_index, mut_feedback, mut_field,
                                 mut_curve, mut_master_level, mut_glide,
-                                mut_rip, mut_op_level, mut_op_detune};
+                                mut_rip, mut_op_level, mut_op_detune, mut_op_ratio};
     for (size_t i = 0; i < sizeof knobs / sizeof knobs[0]; i++) {
         State b = base_state();
         knobs[i](&b);

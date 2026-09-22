@@ -65,6 +65,7 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
         v->out[i] = 0.0f;
         v->gain[i] = patch.ops[i].enabled ? 1.0f : 0.0f;
         v->level_s[i] = patch.ops[i].level;
+        v->ratio_s[i] = patch.ops[i].ratio;
         v->pending_reset[i] = false;
     }
     v->fb_hist[0] = 0.0f;
@@ -235,21 +236,8 @@ void voice_set_patch(Voice *v, Patch patch) {
     voice_apply_patch(v, patch, true);
 }
 
-void voice_set_patch_live(Voice *v, Patch patch) {
-    voice_apply_patch(v, patch, false);
-}
-
-void voice_take_levels(Voice *v, const Patch *next) {
-    v->patch.feedback = next->feedback;
-    v->patch.index = next->index;
-    v->patch.rip = next->rip;
-    v->patch.master_level = next->master_level;
-    v->patch.glide_seconds = next->glide_seconds;
-    v->patch.field = next->field;
-    v->patch.curve = next->curve;
-    v->patch.voices = next->voices;
-    v->patch.unison = next->unison;
-    v->patch.unison_detune = next->unison_detune;
+void voice_snap_ratios(Voice *v) {
+    for (int i = 0; i < NUM_OPS; i++) v->ratio_s[i] = v->patch.ops[i].ratio;
 }
 
 void voice_set_algorithm(Voice *v, AlgorithmId algorithm) {
@@ -268,10 +256,9 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         ? expf(-1.0f / (glide_seconds * v->sample_rate))
         : 0.0f;
     float steal_glide = expf(-1.0f / (STEAL_GLIDE_SECONDS * v->sample_rate));
-    float freq_mult[NUM_OPS];
-    for (int i = 0; i < NUM_OPS; i++) {
-        freq_mult[i] = v->patch.ops[i].ratio * exp2f(v->patch.ops[i].detune_cents / 1200.0f);
-    }
+    float op_detune[NUM_OPS];
+    for (int i = 0; i < NUM_OPS; i++)
+        op_detune[i] = exp2f(v->patch.ops[i].detune_cents / 1200.0f);
     float level[NUM_OPS];
     float index_exp[NUM_OPS];
     for (int i = 0; i < NUM_OPS; i++) {
@@ -308,6 +295,13 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         v->bend += (v->bend_to - v->bend) * param_k;
         v->detune += (v->detune_to - v->detune) * param_k;
         v->velocity += (v->velocity_to - v->velocity) * param_k;
+        float freq_mult[NUM_OPS];
+        for (int i = 0; i < NUM_OPS; i++) {
+            float d = v->patch.ops[i].ratio - v->ratio_s[i];
+            if (fabsf(d) < 1e-5f) v->ratio_s[i] = v->patch.ops[i].ratio;
+            else v->ratio_s[i] += d * param_k;
+            freq_mult[i] = v->ratio_s[i] * op_detune[i];
+        }
         float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
         /* index glides. While it is sitting still the operator powers stay
            put; a move past this threshold is inaudible and rebuilds them. */

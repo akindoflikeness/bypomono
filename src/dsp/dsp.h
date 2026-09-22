@@ -293,6 +293,7 @@ typedef struct {
     float velocity, velocity_to;
     /* index^exponent, recomputed when index has actually moved */
     float pow_index, fb_pow, index_pow[NUM_OPS];
+    float ratio_s[NUM_OPS]; /* operator ratios glide; a jump is a chirp, not a click */
     EnvParams adsr;
     Envelope env;
 } Voice;
@@ -317,11 +318,9 @@ void voice_glide_to_hz(Voice *v, float hz);
 void voice_drone_to_hz(Voice *v, float hz); /* glide, gesture only if settled */
 void voice_set_op_enabled(Voice *v, int op, bool on);
 void voice_set_patch(Voice *v, Patch patch);
-/* the same, for a voice that can still be heard: it takes the new structure
-   without the phase reset, because the crossfade is what hides the change */
-void voice_set_patch_live(Voice *v, Patch patch);
-/* levels and macros only; the voice keeps the structure it is sounding */
-void voice_take_levels(Voice *v, const Patch *next);
+/* park the gliding ratios on the patch, for a voice that is not sounding
+   or has just passed through silence */
+void voice_snap_ratios(Voice *v);
 void voice_set_algorithm(Voice *v, AlgorithmId algorithm);
 float voice_op_phase(const Voice *v, int op);
 void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata);
@@ -329,13 +328,20 @@ void voice_render(Voice *v, float *buf, size_t len);
 
 /* ---------- pair ---------- */
 
-#define CROSSFADE_SECONDS 0.035f
+/* A shape change (algorithm, ratio palette) cannot glide. The note dips
+   through silence and the new shape lands while nothing is coming out. */
+#define STRUCT_DIP_SECONDS 0.005f
 
 typedef struct {
-    Voice voices[2];
-    int target;
-    float blend, step;
+    Voice voice;
     float sample_rate;
+    float dip;     /* 1 = full level, 0 = silent */
+    int dip_len;   /* samples in one 5 ms leg */
+    int dip_left;  /* samples left in the current leg */
+    int dip_dir;   /* -1 down, +1 up, 0 parked at full */
+    bool armed;    /* a shape change is waiting to land at silence */
+    State pending;
+    Compiled pending_compiled; /* what the room follows until the dip lands */
 } VoicePair;
 
 void voice_pair_init(VoicePair *p, float sample_rate, Patch patch);
@@ -359,10 +365,10 @@ void voice_pair_set_bend_semitones(VoicePair *p, float semitones);
 void voice_pair_note_off(VoicePair *p);
 float voice_pair_target_hz(const VoicePair *p);
 void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *userdata);
-void voice_pair_set_adsr_now(VoicePair *p, EnvParams adsr); /* no crossfade */
+void voice_pair_set_adsr_now(VoicePair *p, EnvParams adsr); /* no dip */
 void voice_pair_set_detune_cents(VoicePair *p, float cents);
 void voice_pair_wake(VoicePair *p);
-/* both voices' envelopes have finished */
+/* the envelope has finished */
 bool voice_pair_silent(const VoicePair *p);
 
 /* ---------- bank ---------- */
@@ -372,7 +378,7 @@ bool voice_pair_silent(const VoicePair *p);
 #define BANK_CHUNK 128
 #define UNISON_WIDTH 0.5f
 
-/* Up to POLY_MAX notes, each played by UNISON_MAX crossfading pairs.
+/* Up to POLY_MAX notes, each played by UNISON_MAX pairs.
    Slot = note * UNISON_MAX + copy. The drone is a held gate on note 0: it
    holds that note's envelope at sustain until it is let go. In poly, keys
    play the other notes; in mono a key borrows note 0 and hands it back. */

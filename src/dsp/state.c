@@ -7,19 +7,11 @@ State state_new(Patch patch) {
     return s;
 }
 
-/* the envelope never needs a crossfade: a voice's envelope takes new
-   settings mid-note without stepping */
+/* Algorithm and ratio palette rewrite the oscillator relationship, so they
+   dip through silence. A single operator ratio is a frequency and glides.
+   The envelope never needs either: it takes new settings mid-note. */
 bool state_is_structural_change(const State *a, const State *b) {
-    if (a->patch.algorithm != b->patch.algorithm) {
-        return true;
-    }
-    if (a->patch.ratio_mode != b->patch.ratio_mode) {
-        return true;
-    }
-    for (int i = 0; i < NUM_OPS; i++) {
-        if (a->patch.ops[i].ratio != b->patch.ops[i].ratio) {
-            return true;
-        }
-    }
+    if (a->patch.algorithm != b->patch.algorithm) return true;
+    if (a->patch.ratio_mode != b->patch.ratio_mode) return true;
     return false;
 }

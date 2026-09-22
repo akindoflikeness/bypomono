@@ -95,6 +95,10 @@ void gui_in_wheel(Gui *g, float delta);            /* + is down, 1 per notch */
 void gui_in_inside(Gui *g, bool inside);
 void gui_in_key(Gui *g, int scancode, bool down);
 void gui_in_text(Gui *g, const char *utf8, int n);
+/* the button went up without a button-up (capture moved elsewhere) */
+void gui_in_release_button(Gui *g);
+/* focus left the editor: button, pointer and every held key */
+void gui_in_cancel(Gui *g);
 
 /* the window lost its content: present again even if the editor did not
    change anything (X11 Expose) */

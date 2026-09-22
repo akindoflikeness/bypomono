@@ -84,6 +84,23 @@ static void drop(void *u, size_t i, const Frame *f) {
     (void)f;
 }
 
+static void a_gate_off_releases_only_the_sequencer_note(void) {
+    static VoiceBank b;
+    Patch poly = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
+    poly.voices = 4;
+    voice_bank_init(&b, SR, poly);
+    voice_bank_note_on(&b, 60, 220.0f, 1.0f);
+    voice_bank_note_on(&b, -1, 330.0f, 1.0f);
+    pitch_event_play((PitchEvent){PITCH_EV_OFF, 0.0f, 0.0f}, &b, NULL, NULL);
+    float held[POLY_MAX];
+    int n = voice_bank_held_hz(&b, held);
+    CHECK(n == 1, "gate-off left %d notes", n);
+    if (n == 1)
+        CHECK_NEAR(held[0], 220.0f, 1e-3f, "the host key was released, held %g",
+                   (double)held[0]);
+    voice_bank_free(&b);
+}
+
 static void a_gate_off_step_moves_the_note_without_restarting_it(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, patch_init(ALGORITHMS[0], RATIO_GOLDEN));
@@ -284,6 +301,7 @@ static void a_note_under_rip_starts_without_a_click(void) {
 
 void test_notes(void) {
     gated_steps_play_on_the_clock();
+    a_gate_off_releases_only_the_sequencer_note();
     a_gate_off_step_moves_the_note_without_restarting_it();
     snap_rounds_to_12_tet();
     the_length_wraps_and_off_lets_go();

@@ -56,14 +56,18 @@ typedef struct Plug {
     bool engine_alive;
     bool transport_running;
     float applied_drone_hz;
-    /* main thread: the sequences and routes host state saves; state_load hands
-       them to the audio thread through mod_ev */
+    /* main thread writes the sequences and routes host state saves. bank_seq
+       is a seqlock (odd while a write is in progress). bank_gen advances when
+       a state load should replace whatever the audio thread is playing. */
     ModBank mods_main;
     PitchSeqParams pitch_main;
+    _Atomic uint32_t bank_seq;
+    _Atomic uint32_t bank_gen;
+    uint32_t bank_seen; /* audio thread: last bank_gen it applied */
     EventRing mod_ev;
-    /* the melody's clock settings, which are not host params */
-    bool mel_sync;
-    int8_t mel_division;
+    /* melody clock, not a host param: low 8 bits are the division as int8,
+       bit 8 is sync. Written by both threads, so it is one atomic. */
+    _Atomic uint32_t mel_clock;
     /* editor bridge */
     _Atomic(App *) gui_app;
     bool rec_on;
@@ -77,6 +81,9 @@ typedef struct Plug {
 double plug_getv(const Plug *p, int id);
 void plug_setv(Plug *p, int id, double v);
 Session plug_session_of_vals(const Plug *p);
+/* main thread: publish a modulation bank and pitch sequence. Does not ask
+   the audio thread to reload; state_load does that itself. */
+void plug_publish_bank(Plug *p, const ModBank *mods, const PitchSeqParams *pitch);
 
 /* X11 alone delivers editor input on a pollable fd */
 #if defined(_WIN32) || defined(__APPLE__)

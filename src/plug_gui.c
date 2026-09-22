@@ -183,6 +183,19 @@ void gui_in_key(Gui *g, int scancode, bool down) {
     }
 }
 
+void gui_in_release_button(Gui *g) {
+    if (!g->pending.down) return;
+    g->pending.down = false;
+    g->pending.released = true;
+}
+
+void gui_in_cancel(Gui *g) {
+    gui_in_release_button(g);
+    g->pending.mouse_in_window = false;
+    memset(g->pending.key_down, 0, sizeof g->pending.key_down);
+    memset(g->pending.key_pressed, 0, sizeof g->pending.key_pressed);
+}
+
 void gui_in_text(Gui *g, const char *utf8, int n) {
     if (n <= 0) return;
     size_t cur = strlen(g->pending.text);
@@ -456,8 +469,7 @@ static void gui_destroy(const clap_plugin_t *pl) {
     /* unhook the audio thread first; the App itself stays allocated so the
        renderer can never race a free */
     atomic_store_explicit(&p->gui_app, NULL, memory_order_release);
-    p->mods_main = g->app->mods;
-    p->pitch_main = g->app->shadow_pitch;
+    plug_publish_bank(p, &g->app->mods, &g->app->shadow_pitch);
     stop_native_timer(g);
     const clap_host_timer_support_t *ht =
         p->host->get_extension(p->host, CLAP_EXT_TIMER_SUPPORT);

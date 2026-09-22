@@ -270,7 +270,14 @@ static void let_go(VoiceBank *b, int note, bool glide_home) {
 
 void voice_bank_note_off(VoiceBank *b, int key) {
     for (int n = 0; n < POLY_MAX; n++) {
-        if (b->poly > 1 && key >= 0 && b->key[n] != key) continue;
+        if (key >= 0 && b->key[n] != key) continue;
+        let_go(b, n, key >= 0);
+    }
+}
+
+void voice_bank_note_off_exact(VoiceBank *b, int key) {
+    for (int n = 0; n < POLY_MAX; n++) {
+        if (b->key[n] != key) continue;
         let_go(b, n, key >= 0);
     }
 }

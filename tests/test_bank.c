@@ -177,14 +177,17 @@ static void a_key_lets_go_of_its_own_note(void) {
     voice_bank_free(&b);
 }
 
-static void mono_releases_on_any_key(void) {
+static void mono_lets_go_of_the_sounding_key_only(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 1, 0.0f));
     voice_bank_note_on(&b, 60, midi_hz(60), 0.8f);
     voice_bank_note_on(&b, 62, midi_hz(62), 0.8f);
     voice_bank_note_off(&b, 60);
     float held[POLY_MAX];
-    CHECK(voice_bank_held_hz(&b, held) == 0, "mono kept a note after a key-up");
+    CHECK(voice_bank_held_hz(&b, held) == 1, "mono let go of the key still down");
+    CHECK_NEAR(held[0], midi_hz(62), 1e-3f, "mono is holding %g", (double)held[0]);
+    voice_bank_note_off(&b, 62);
+    CHECK(voice_bank_held_hz(&b, held) == 0, "the sounding key did not release");
     voice_bank_free(&b);
 }
 
@@ -343,7 +346,7 @@ void test_bank(void) {
     a_fifth_note_takes_the_oldest();
     only_a_held_poly_reassignment_uses_the_safety_glide();
     a_key_lets_go_of_its_own_note();
-    mono_releases_on_any_key();
+    mono_lets_go_of_the_sounding_key_only();
     a_held_drone_keeps_its_own_note();
     going_mono_lets_the_chord_go();
     unison_detunes_and_spreads_the_pair();

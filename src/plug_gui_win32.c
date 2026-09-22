@@ -195,6 +195,15 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         feed_char(g, wp);
         return 0;
     case WM_GETDLGCODE: return DLGC_WANTALLKEYS;
+    case WM_KILLFOCUS:
+        ReleaseCapture();
+        gui_in_cancel(g);
+        return 0;
+    case WM_CAPTURECHANGED:
+        /* sent to the window that lost capture, including when this window
+           releases it on button-up. Keys stay: shift is still down. */
+        gui_in_release_button(g);
+        return 0;
     default: break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);

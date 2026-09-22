@@ -409,9 +409,12 @@ void voice_bank_glide_newest_to_hz(VoiceBank *b, float hz);
 /* holds or lets go of the drone's gate on note 0 */
 void voice_bank_set_drone(VoiceBank *b, bool held);
 void voice_bank_note_on(VoiceBank *b, int key, float hz, float velocity);
-/* mono releases whatever sounds; poly releases the note on `key`, or every
-   held note for key -1. The drone's gate stays held through both. */
+/* releases the note on `key`. key < 0 is the wildcard and lets every note go.
+   The drone's gate stays held either way. */
 void voice_bank_note_off(VoiceBank *b, int key);
+/* the slot whose key is exactly `key`, and no other. -1 is the sequencer's
+   key, not the wildcard. */
+void voice_bank_note_off_exact(VoiceBank *b, int key);
 void voice_bank_note_off_all(VoiceBank *b);
 bool voice_bank_note_sounding(const VoiceBank *b);
 void voice_bank_set_bend_semitones(VoiceBank *b, float semitones);
@@ -944,7 +947,8 @@ void mod_advance(Mod *m, size_t samples, float bpm);
 int mod_apply(Mod *m, const ModBase *base, ModBase *out);
 
 /* plays a pitch sequencer event on the voices, the way the melody's notes
-   are played: one note at a time, the last one let go first */
+   are played: one note at a time, the last one let go first. A gate-off
+   releases only the sequencer's note (key -1). */
 void pitch_event_play(PitchEvent e, VoiceBank *v, Chandas *h, Mod *m);
 
 /* ---------- session ---------- */

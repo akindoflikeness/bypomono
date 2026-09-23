@@ -8,7 +8,6 @@
 #define RIP_DELAY_SECONDS (0.029f * PHI)
 #define RIP_SCALE PI_F
 #define RIP_MAX_FB 0.9f
-#define FIELD_TO_INDEX 0.1f
 #define RIP_DAMP (1.0f / (PHI * PHI))
 /* A cleared line would otherwise take a new note's full-strength signal in
    one sample and hand it to the carriers' phase a delay later as a click. */
@@ -80,7 +79,6 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->rip_sig = 0.0f;
     v->rip_smooth = clampf(patch.rip, 0.0f, 1.0f);
     breath_init(&v->breath, sample_rate, patch.ratio_mode);
-    v->field_pitch = 1.0f;
     v->bend = 1.0f;
     v->bend_to = 1.0f;
     v->detune = 1.0f;
@@ -91,7 +89,6 @@ void voice_init(Voice *v, float sample_rate, Patch patch) {
     v->fb_smooth = patch.feedback;
     v->adsr = env_params_default();
     envelope_init(&v->env, sample_rate);
-    v->field_amount = 0.0f;
     v->field_smooth = clampf(patch.field, 0.0f, 1.0f);
     v->curve_smooth = clampf(patch.curve, 0.0f, 1.0f);
 }
@@ -302,7 +299,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
             else v->ratio_s[i] += d * param_k;
             freq_mult[i] = v->ratio_s[i] * op_detune[i];
         }
-        float index = clampf(v->index + v->field_amount * FIELD_TO_INDEX, 0.0f, 1.0f);
+        float index = v->index;
         /* index glides. While it is sitting still the operator powers stay
            put; a move past this threshold is inaudible and rebuilds them. */
         if (fabsf(index - v->pow_index) > 1e-5f) {
@@ -364,7 +361,7 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
             }
 
             float phase = v->phase[op]
-                + v->freq * v->bend * v->detune * v->field_pitch * freq_mult[op] / v->sample_rate;
+                + v->freq * v->bend * v->detune * freq_mult[op] / v->sample_rate;
             v->phase[op] = fract_pos(phase);
         }
 
@@ -380,12 +377,10 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         v->field_smooth += (field_target - v->field_smooth) * param_k;
         v->curve_smooth += (curve_target - v->curve_smooth) * param_k;
         Field field = breath_tick(&v->breath, v->freq, v->field_smooth, floor_, v->curve_smooth);
-        v->field_pitch = field.pitch;
-        v->field_amount = field.amount;
         Frame frame;
         for (int i = 0; i < NUM_OPS; i++) frame.ops[i] = v->out[i];
-        frame.mix = mix * field.gain;
-        frame.master = field.gain;
+        frame.mix = mix * floor_;
+        frame.master = floor_;
         frame.field = field.amount;
         frame.base_hz = v->freq;
         frame.side = 0.0f;

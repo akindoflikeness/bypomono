@@ -120,16 +120,15 @@ static void every_mode_has_its_own_movement(void) {
     }
 }
 
-static void the_pitch_movement_has_no_dc(void) {
+static void an_open_field_leaves_the_note_alone(void) {
     Breath b;
     breath_init(&b, SR, RATIO_GOLDEN);
-    size_t n = (size_t)SR * 60;
-    double mean = 0.0;
-    for (size_t i = 0; i < n; i++) {
-        mean += (double)breath_tick(&b, 110.0f, 1.0f, 0.5f, 0.5f).pitch;
+    breath_trigger(&b);
+    for (int i = 0; i < (int)SR; i++) {
+        Field out = breath_tick(&b, 110.0f, 1.0f, 0.5f, 0.5f);
+        CHECK(out.gain == 0.5f, "gain %g", out.gain);
+        CHECK(out.pitch == 1.0f, "pitch %g", out.pitch);
     }
-    mean /= (double)n;
-    CHECK(fabs(mean - 1.0) < 2e-3, "pitch drifted: mean multiplier %g", mean);
 }
 
 static void the_field_is_deterministic(void) {
@@ -192,14 +191,13 @@ static void the_gain_also_keeps_growing_with_the_control(void) {
         float lo = FLT_MAX;
         float hi = -FLT_MAX;
         for (size_t i = 0; i < stride; i++) {
-            float g = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).gain;
+            float g = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).amount;
             lo = fminf(lo, g);
             hi = fmaxf(hi, g);
         }
         float swing = hi - lo;
         CHECK(swing > last,
-              "at floor 0.5, field %g swung %g, no more than %g below it - the gain has "
-              "flattened even though the movement has not",
+              "field %g moved the damp filter by %g, no more than %g below it",
               field, swing, last);
         last = swing;
     }
@@ -228,14 +226,14 @@ static void across_a_note(float field, float floor_, float *at_note, float *else
         }
     }
 
-    float before = breath_tick(&b, 110.0f, field, floor_, 0.5f).gain;
+    float before = breath_tick(&b, 110.0f, field, floor_, 0.5f).amount;
     breath_trigger(&b);
-    float after = breath_tick(&b, 110.0f, field, floor_, 0.5f).gain;
+    float after = breath_tick(&b, 110.0f, field, floor_, 0.5f).amount;
 
     float prev = after;
     float elsewhere = 0.0f;
     for (size_t i = 0; i < step; i++) {
-        float g = breath_tick(&b, 110.0f, field, floor_, 0.5f).gain;
+        float g = breath_tick(&b, 110.0f, field, floor_, 0.5f).amount;
         elsewhere = fmaxf(elsewhere, fabsf(g - prev));
         prev = g;
     }
@@ -253,8 +251,8 @@ static void a_note_on_is_not_a_discontinuity_in_the_gain(void) {
         float elsewhere;
         across_a_note(field, floor_, &at_note, &elsewhere);
         CHECK(at_note <= elsewhere,
-              "field %g floor %g: the note stepped %.6f in one sample, more than the %.6f the "
-              "movement manages anywhere else in the note - that step is the click",
+              "field %g floor %g: the note stepped the damp filter by %.6f, more than the %.6f "
+              "it manages anywhere else in the note",
               field, floor_, at_note, elsewhere);
     }
 }
@@ -277,20 +275,20 @@ static void a_note_off_is_not_a_discontinuity_either(void) {
             breath_tick(&b, 110.0f, field, 0.5f, 0.5f);
         }
 
-        float before = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).gain;
+        float before = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).amount;
         breath_release(&b);
-        float after = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).gain;
+        float after = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).amount;
 
         float prev = after;
         float elsewhere = 0.0f;
         for (size_t i = 0; i < step; i++) {
-            float g = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).gain;
+            float g = breath_tick(&b, 110.0f, field, 0.5f, 0.5f).amount;
             elsewhere = fmaxf(elsewhere, fabsf(g - prev));
             prev = g;
         }
         CHECK(fabsf(after - before) <= elsewhere,
-              "field %g: the release stepped %.6f, more than the %.6f the movement manages "
-              "elsewhere",
+              "field %g: the release stepped the damp filter by %.6f, more than the %.6f it "
+              "manages elsewhere",
               field, fabsf(after - before), elsewhere);
     }
 }
@@ -330,14 +328,14 @@ static float breath_run(bool drag) {
     Breath b;
     breath_init(&b, SR, RATIO_GOLDEN);
     breath_drift(&b);
-    float prev = breath_tick(&b, 110.0f, 0.6f, 0.2f, 0.5f).gain;
+    float prev = breath_tick(&b, 110.0f, 0.6f, 0.2f, 0.5f).amount;
     float worst = 0.0f;
     for (int frame = 0; frame < 30; frame++) {
         if (drag) breath_drift(&b);
         for (int i = 0; i < (int)(SR * 0.016f); i++) {
             Field f = breath_tick(&b, 110.0f, 0.6f, 0.2f, 0.5f);
-            worst = fmaxf(worst, fabsf(f.gain - prev));
-            prev = f.gain;
+            worst = fmaxf(worst, fabsf(f.amount - prev));
+            prev = f.amount;
         }
     }
     return worst;
@@ -347,7 +345,7 @@ static void dragging_the_drone_pitch_starts_one_gesture(void) {
     float still = breath_run(false);
     float dragged = breath_run(true);
     CHECK(dragged <= still * 2.0f + 1e-9f,
-          "a dragged fader moved the gain by %g against %g when left alone",
+          "a dragged fader moved the damp filter by %g against %g when left alone",
           dragged, still);
 
     Breath n;
@@ -366,7 +364,7 @@ void test_breath(void) {
     the_sequencer_cannot_drive_the_rate_to_audio();
     only_harmonic_mode_loops();
     every_mode_has_its_own_movement();
-    the_pitch_movement_has_no_dc();
+    an_open_field_leaves_the_note_alone();
     the_field_is_deterministic();
     there_are_dynamics_at_the_sequencers_fastest_rate();
     the_gain_also_keeps_growing_with_the_control();

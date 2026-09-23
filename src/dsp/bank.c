@@ -68,8 +68,6 @@ static void sync_copy(VoicePair *dst, const VoicePair *src) {
     v->index = from->index;
     v->field_smooth = from->field_smooth;
     v->curve_smooth = from->curve_smooth;
-    v->field_amount = from->field_amount;
-    v->field_pitch = from->field_pitch;
     v->bend = from->bend;
     v->rip_smooth = from->rip_smooth;
     v->fb_smooth = from->fb_smooth;

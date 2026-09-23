@@ -234,8 +234,8 @@ static void apply_vals(Plug *p) {
     p->base.warmth = (float)getv(p, P_WARMTH);
 
     voice_bank_set_adsr_now(&p->voice, adsr_of_vals(p));
-    /* glide only when the hz itself moved: glide_to_hz retriggers the
-       breath gesture and overrides a sounding note's pitch */
+    /* glide only when the hz itself moved: glide_to_hz restarts the field
+       gesture, which opens the room's damp filter */
     float hz = (float)getv(p, P_DRONE_HZ);
     if (hz != p->applied_drone_hz) {
         p->applied_drone_hz = hz;

@@ -239,7 +239,7 @@ static const Verb VERBS[] = {
     CONTROL("env_decay", "<0-8s>", "set envelope decay in seconds"),
     CONTROL("sustain", "<0-1>", "set envelope sustain level"),
     CONTROL("release", "<0.05-8s>", "set envelope release in seconds"),
-    CONTROL("field", "<0-1>", "set breath depth"),
+    CONTROL("field", "<0-1>", "set how far the room damp filter opens"),
     CONTROL("curve", "<0-1>", "set breath and envelope curve"),
     CONTROL("mix", "<0-1>", "set room wet/dry mix"),
     CONTROL("ghost", "<0-1>", "set modulator bleed into the room"),

@@ -10,7 +10,6 @@
 #define MAX_FB 0.985f
 #define PARAM_SMOOTH 0.0014f
 #define FIELD_TO_DAMP 0.5f
-#define FIELD_TO_MIX 0.1f
 #define MOD_BASE_HZ 0.31f
 
 #define FC_MAX_HZ 18000.0f
@@ -272,7 +271,6 @@ Stereo verb_process(StereoVerb *v, const Frame *frame) {
     v->damp_s += PARAM_SMOOTH * (v->params.damp - v->damp_s);
 
     float damp = v->damp_s - frame->field * FIELD_TO_DAMP;
-    float wet_duck = fmaxf(1.0f - frame->field * FIELD_TO_MIX, 0.0f);
 
     float glide = glide_k(LINE_GLIDE_S, v->sample_rate);
     float rot_k = glide_k(GATE_GLIDE_S, v->sample_rate);
@@ -339,6 +337,6 @@ Stereo verb_process(StereoVerb *v, const Frame *frame) {
     wet_r = svf_process_hp(&v->room_hp_r, wet_r, v->room_hp_g, VERB_ROOM_HP_K);
     float dry = frame->mix * (1.0f - v->mix_s);
     float side = frame->side * (1.0f - v->mix_s);
-    Stereo out = { dry + side + wet_l * v->mix_s * wet_duck, dry - side + wet_r * v->mix_s * wet_duck };
+    Stereo out = { dry + side + wet_l * v->mix_s, dry - side + wet_r * v->mix_s };
     return out;
 }

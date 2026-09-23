@@ -211,8 +211,8 @@ typedef struct {
     float since_trigger;
     float boost_level;
     float interval;
-    float last_amount, last_pitch;
-    float declick_from, declick_from_pitch;
+    float last_amount;
+    float declick_from;
     float declick_left;
 } Breath;
 
@@ -245,7 +245,7 @@ typedef struct {
     float ops[NUM_OPS];
     float mix;
     float master;
-    float field;
+    float field; /* how far the room's damp filter is open */
     float base_hz;
     float side; /* dry mix difference: left gets mix + side, right mix - side */
 } Frame;
@@ -285,7 +285,7 @@ typedef struct {
     RipLine rip_line;
     float rip_sig, rip_smooth;
     Breath breath;
-    float field_smooth, curve_smooth, field_amount, field_pitch;
+    float field_smooth, curve_smooth;
     float bend, bend_to;
     float detune, detune_to; /* frequency ratio from the unison spread */
     /* Velocity is a gain outside the normalized envelope. It is smoothed on
@@ -1009,7 +1009,7 @@ static inline float fract_pos(float x) { return x - floorf(x); }
 
 /* Sine of a phase in cycles, for a slow modulation. A truncated Taylor on a
    folded quadrant: the error against libm sits under a millionth. On a delay
-   wobble of a few samples, or on the breath's pitch drift, that is nowhere.
+   wobble of a few samples, or on the room's damp movement, that is nowhere.
    Not an oscillator. */
 static inline float lfo_sin(float phase) {
     float p = phase;

@@ -1,6 +1,5 @@
 #include "dsp.h"
 
-#define FM_MAX_CENTS 21.0f
 #define REST_FRACTION (1.0f / (PHI * PHI))
 #define GESTURE_FRACTION (1.0f / PHI)
 #define LONE_NOTE_S 0.987f
@@ -53,9 +52,7 @@ void breath_init(Breath *b, float sample_rate, RatioMode mode) {
     b->since_trigger = 0.0f;
     b->interval = LONE_NOTE_S;
     b->last_amount = 0.0f;
-    b->last_pitch = 0.0f;
     b->declick_from = 0.0f;
-    b->declick_from_pitch = 0.0f;
     b->declick_left = 0.0f;
     b->boost_level = 1.0f;
 }
@@ -66,7 +63,6 @@ void breath_set_mode(Breath *b, RatioMode mode) {
 
 static void breath_begin_arrival(Breath *b) {
     b->declick_from = b->last_amount;
-    b->declick_from_pitch = b->last_pitch;
     b->declick_left = BREATH_DECLICK_S;
 }
 
@@ -145,21 +141,18 @@ Field breath_tick(Breath *b, float freq, float field, float floor_, float curve)
     }
 
     float amount = depth * swing;
-    float pitch_off = depth * FM_MAX_CENTS * (swing * 2.0f - 1.0f) / 1200.0f;
     if (b->declick_left > 0.0f) {
         float travelled = 1.0f - clampf(b->declick_left / BREATH_DECLICK_S, 0.0f, 1.0f);
         float w = 0.5f - 0.5f * cosf(travelled * PI_F);
         b->declick_left = fmaxf(b->declick_left - 1.0f / b->sample_rate, 0.0f);
         amount = b->declick_from + (amount - b->declick_from) * w;
-        pitch_off = b->declick_from_pitch + (pitch_off - b->declick_from_pitch) * w;
     }
     b->last_amount = amount;
-    b->last_pitch = pitch_off;
-    float reach = floor_ > 0.0f ? fminf(1.0f / floor_, PHI * PHI) : PHI * PHI;
+    /* the wave opens the room's damp filter. The note's level and pitch stay. */
     Field out;
     out.amount = amount;
-    out.gain = floor_ * (1.0f + (reach - 1.0f) * amount);
-    out.pitch = 1.0f + pitch_off;
+    out.gain = floor_;
+    out.pitch = 1.0f;
     return out;
 }
 

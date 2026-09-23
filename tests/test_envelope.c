@@ -4,10 +4,16 @@
 
 #define SR 48000.0f
 
-typedef struct { float gain; } GainCapture;
-
-static void capture_gain(void *userdata, size_t n, const Frame *frame) {
-    ((GainCapture *)userdata)->gain = frame->master;
+static float last_master(Voice *v, size_t count) {
+    Frame buf[64];
+    float gain = 0.0f;
+    while (count) {
+        size_t n = count < 64 ? count : 64;
+        voice_render_block(v, buf, n);
+        gain = buf[n - 1].master;
+        count -= n;
+    }
+    return gain;
 }
 
 static Envelope held(float secs, const EnvParams *p) {
@@ -115,19 +121,16 @@ static void rendered_release_follows_the_envelope_not_the_master_curve(void) {
     voice_set_adsr(&voice, adsr);
     voice_note_on(&voice, 110.0f, 0.5f);
 
-    GainCapture capture = {0};
-    voice_render_frames(&voice, (size_t)(SR * 0.1f), capture_gain, &capture);
-    float held = capture.gain;
+    float held = last_master(&voice, (size_t)(SR * 0.1f));
     CHECK_NEAR(held, master_gain(patch.master_level) * 0.5f, 1e-4f,
                "held gain %g compounds envelope and master", (double)held);
 
     voice_note_off(&voice);
-    voice_render_frames(&voice, (size_t)(SR * adsr.release_s * 0.5f),
-                        capture_gain, &capture);
+    float released = last_master(&voice, (size_t)(SR * adsr.release_s * 0.5f));
     /* 80 dB over the release, so halfway is 40 dB down */
-    CHECK_NEAR(capture.gain / held, 0.01f, 1e-3f,
+    CHECK_NEAR(released / held, 0.01f, 1e-3f,
                "halfway through the release the audible gain is %g",
-               (double)(capture.gain / held));
+               (double)(released / held));
     voice_free(&voice);
 }
 

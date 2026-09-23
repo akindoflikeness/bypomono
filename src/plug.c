@@ -478,23 +478,14 @@ static void apply_gui_event(Plug *p, Event ev) {
 
 /* ---------- rendering ---------- */
 
-typedef struct {
-    Plug *p;
-    App *gapp;
-    float *l, *r;
-    uint32_t base;
-} Emit;
-
-static void emit_frame(void *ud, size_t n, const Frame *frame) {
-    Emit *e = ud;
-    Plug *p = e->p;
+static void emit_frame(Plug *p, App *gapp, float *lbuf, float *rbuf,
+                       uint32_t index, const Frame *frame) {
     Stereo w = verb_process(&p->verb, frame);
     w = chandas_process(&p->chandas, w);
     Stereo limited = limiter_process(&p->limiter, w);
     float l = flush_tiny(limited.l), r = flush_tiny(limited.r);
-    e->l[e->base + n] = l;
-    e->r[e->base + n] = r;
-    App *gapp = e->gapp;
+    lbuf[index] = l;
+    rbuf[index] = r;
     if (gapp) {
         p->viz_decim++;
         p->peak_acc[0] = fmaxf(p->peak_acc[0], fabsf(l));
@@ -576,8 +567,17 @@ static void render_span(Plug *p, App *gapp, float *l, float *r, uint32_t base,
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(p, run);
-        Emit e = {p, gapp, l, r, base + done};
-        voice_bank_render_frames(&p->voice, run, emit_frame, &e);
+        Frame chunk[BANK_CHUNK];
+        size_t left = run;
+        uint32_t at = base + done;
+        while (left) {
+            size_t n = left < BANK_CHUNK ? left : BANK_CHUNK;
+            voice_bank_render_block(&p->voice, chunk, n);
+            for (size_t i = 0; i < n; i++)
+                emit_frame(p, gapp, l, r, at + (uint32_t)i, &chunk[i]);
+            left -= n;
+            at += (uint32_t)n;
+        }
         if (p->transport_running) melody_advance(&p->melody, run);
         if (p->transport_running || p->pitch.held)
             pitch_seq_advance(&p->pitch, run);

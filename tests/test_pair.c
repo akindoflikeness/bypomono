@@ -1,19 +1,18 @@
 #include "../src/dsp/dsp.h"
 #include "test.h"
+#include "walk.h"
 
 #define SR 48000.0f
 
-static void noop_emit(void *userdata, size_t n, const Frame *frame) {}
-
 static void settled(VoicePair *p, RatioMode mode) {
     voice_pair_init(p, SR, patch_init(ALGORITHMS[0], mode));
-    voice_pair_render_frames(p, (size_t)SR, noop_emit, NULL);
+    pair_skip(p, (size_t)SR);
 }
 
 static void held(VoicePair *p, RatioMode mode) {
     settled(p, mode);
     voice_pair_note_on(p, 110.0f, 1.0f);
-    voice_pair_render_frames(p, (size_t)(SR * 0.05f), noop_emit, NULL);
+    pair_skip(p, (size_t)(SR * 0.05f));
 }
 
 static void only_the_changes_that_cannot_be_moved_continuously_dip(void) {
@@ -42,7 +41,7 @@ static void the_sounding_shape_holds_until_silence(void) {
     CHECK(p.voice.patch.ratio_mode == RATIO_GOLDEN,
           "the sounding voice took the new mode before silence");
 
-    voice_pair_render_frames(&p, (size_t)(SR * STRUCT_DIP_SECONDS * 0.25f), noop_emit, NULL);
+    pair_skip(&p, (size_t)(SR * STRUCT_DIP_SECONDS * 0.25f));
     CHECK(voice_pair_crossing(&p), "still dipping");
     CHECK(p.dip > 0.5f, "a quarter of the way down, dip is %g", p.dip);
     CHECK(p.voice.patch.ratio_mode == RATIO_GOLDEN, "the old mode left early");
@@ -70,7 +69,7 @@ static void the_voice_takes_the_note(void) {
     VoicePair p;
     settled(&p, RATIO_GOLDEN);
     voice_pair_note_on(&p, 220.0f, 0.5f);
-    voice_pair_render_frames(&p, 64, noop_emit, NULL);
+    pair_skip(&p, 64);
     CHECK(fabsf(voice_target_hz(&p.voice) - 220.0f) < 1e-3f,
           "target hz is %g", voice_target_hz(&p.voice));
     CHECK(voice_note_sounding(&p.voice), "the voice is not sounding");
@@ -83,7 +82,7 @@ static void a_dip_lands_on_the_new_shape(void) {
     VoicePair p;
     held(&p, RATIO_GOLDEN);
     voice_pair_set_patch(&p, patch_init(ALGORITHMS[0], RATIO_HARMONIC));
-    voice_pair_render_frames(&p, (size_t)(SR * STRUCT_DIP_SECONDS * 2.0f) + 8, noop_emit, NULL);
+    pair_skip(&p, (size_t)(SR * STRUCT_DIP_SECONDS * 2.0f) + 8);
 
     CHECK(!voice_pair_crossing(&p), "the dip never ended");
     CHECK(p.dip == 1.0f, "parked at %g rather than full level", p.dip);
@@ -106,7 +105,7 @@ static void a_ratio_glides_on_the_sounding_voice(void) {
     CHECK(p.voice.patch.ops[1].ratio == next.ops[1].ratio, "the ratio was not stored");
     CHECK(p.voice.ratio_s[1] == was, "the sounding ratio jumped");
 
-    voice_pair_render_frames(&p, (size_t)(SR * 0.2f), noop_emit, NULL);
+    pair_skip(&p, (size_t)(SR * 0.2f));
     CHECK(p.voice.ratio_s[1] != was, "the ratio never moved");
     CHECK(fabsf(p.voice.ratio_s[1] - next.ops[1].ratio) < 1e-3f,
           "the ratio settled at %g", p.voice.ratio_s[1]);
@@ -118,7 +117,7 @@ static void the_voice_keeps_its_note(void) {
     VoicePair p;
     settled(&p, RATIO_GOLDEN);
     voice_pair_glide_to_hz(&p, 220.0f);
-    voice_pair_render_frames(&p, (size_t)SR, noop_emit, NULL);
+    pair_skip(&p, (size_t)SR);
     CHECK(fabsf(voice_target_hz(&p.voice) - 220.0f) < 1e-3f,
           "the voice was left on %g hz", voice_target_hz(&p.voice));
     voice_pair_free(&p);
@@ -129,7 +128,7 @@ typedef struct {
     float *acc;
 } StepCtx;
 
-static void step_emit(void *userdata, size_t n, const Frame *f) {
+static void step_emit(void *userdata, const Frame *f) {
     StepCtx *c = userdata;
     *c->acc = fmaxf(*c->acc, fabsf(f->mix - c->prev));
     c->prev = f->mix;
@@ -140,12 +139,12 @@ static void a_mode_change_introduces_no_step(void) {
     held(&p, RATIO_GOLDEN);
     float before = 0.0f;
     StepCtx ctx = { 0.0f, &before };
-    voice_pair_render_frames(&p, (size_t)SR / 2, step_emit, &ctx);
+    pair_each(&p, (size_t)SR / 2, step_emit, &ctx);
 
     voice_pair_set_patch(&p, patch_init(ALGORITHMS[0], RATIO_GOLDEN_MIRROR));
     float during = 0.0f;
     ctx.acc = &during;
-    voice_pair_render_frames(&p, (size_t)(SR * STRUCT_DIP_SECONDS * 2.0f) + 8, step_emit, &ctx);
+    pair_each(&p, (size_t)(SR * STRUCT_DIP_SECONDS * 2.0f) + 8, step_emit, &ctx);
 
     CHECK(during <= before * 1.5f,
           "the dip stepped by %g against a steady %g", during, before);

@@ -1,12 +1,9 @@
 #include "../src/dsp/dsp.h"
+#include "walk.h"
 #include "test.h"
 
 #define SR 48000.0f
 #define NOTE_HZ 220.0f
-static void copy_frame(void *userdata, size_t n, const Frame *frame) {
-    (void)n;
-    *(Frame *)userdata = *frame;
-}
 
 /* Algorithm V is the all-parallel case. Its carrier oscillators must retain
    their individual palette ratios rather than being collapsed to five 1x
@@ -30,7 +27,7 @@ static void additive_carriers_keep_their_own_frequencies(void) {
     }
 
     Frame frame;
-    voice_render_frames(&v, 1, copy_frame, &frame);
+    voice_render_block(&v, &frame, 1);
     for (int op = 1; op < NUM_OPS; op++)
         CHECK(fabsf(frame.ops[op] - frame.ops[0]) > 1e-4f,
               "additive op %d collapsed onto op 1", op + 1);
@@ -49,8 +46,9 @@ static void additive_carriers_are_summed_at_the_output(void) {
     voice_set_freq_hz(&v, NOTE_HZ);
     voice_note_on(&v, NOTE_HZ, 1.0f);
 
+    voice_skip(&v, 256);
     Frame frame;
-    voice_render_frames(&v, 257, copy_frame, &frame);
+    voice_render_block(&v, &frame, 1);
     float carriers = 0.0f;
     for (int op = 0; op < NUM_OPS; op++) carriers += frame.ops[op];
     CHECK_NEAR(frame.mix, carriers * frame.master, 1e-5f,

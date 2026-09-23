@@ -231,17 +231,8 @@ static void pitch_run_due(AudioState *s) {
     }
 }
 
-typedef struct {
-    AudioState *s;
-    float *data;
-    size_t base;
-    int channels;
-    bool rec_armed;
-} RenderCtx;
-
-static void emit_frame(void *ud, size_t n, const Frame *frame) {
-    RenderCtx *ctx = ud;
-    AudioState *s = ctx->s;
+static void emit_frame(AudioState *s, float *data, size_t index, int channels,
+                       bool rec_armed, const Frame *frame) {
     App *a = s->app;
     Stereo w = verb_process(&s->verb, frame);
     w = chandas_process(&s->chandas, w);
@@ -262,20 +253,20 @@ static void emit_frame(void *ud, size_t n, const Frame *frame) {
         VizRing_push(&a->viz, vf);
         s->peak_acc[0] = s->peak_acc[1] = 0.0f;
     }
-    size_t at = (ctx->base + n) * (size_t)ctx->channels;
-    if (ctx->channels == 1) {
+    size_t at = index * (size_t)channels;
+    if (channels == 1) {
         float m = 0.5f * (l + r);
-        ctx->data[at] = m;
-        if (ctx->rec_armed) {
+        data[at] = m;
+        if (rec_armed) {
             RecRing_push(&a->rec, m);
             RecRing_push(&a->rec, m);
         }
     } else {
         float cl = l, cr = r;
-        ctx->data[at] = cl;
-        ctx->data[at + 1] = cr;
-        for (int c = 2; c < ctx->channels; c++) ctx->data[at + c] = 0.0f;
-        if (ctx->rec_armed) {
+        data[at] = cl;
+        data[at + 1] = cr;
+        for (int c = 2; c < channels; c++) data[at + c] = 0.0f;
+        if (rec_armed) {
             RecRing_push(&a->rec, cl);
             RecRing_push(&a->rec, cr);
         }
@@ -321,8 +312,17 @@ static void render(void *ud, float *data, size_t frames, int channels) {
         if (modulating && run > MOD_BLOCK) run = MOD_BLOCK;
         if (run < 1) run = 1;
         if (modulating) mod_tick(s, run);
-        RenderCtx ctx = {s, data, done, channels, rec_armed};
-        voice_bank_render_frames(&s->voice, run, emit_frame, &ctx);
+        Frame chunk[BANK_CHUNK];
+        size_t left = run;
+        size_t at = done;
+        while (left) {
+            size_t n = left < BANK_CHUNK ? left : BANK_CHUNK;
+            voice_bank_render_block(&s->voice, chunk, n);
+            for (size_t i = 0; i < n; i++)
+                emit_frame(s, data, at + i, channels, rec_armed, &chunk[i]);
+            left -= n;
+            at += n;
+        }
         if (s->transport_running) melody_advance(&s->melody, run);
         if (s->transport_running || s->pitch.held)
             pitch_seq_advance(&s->pitch, run);

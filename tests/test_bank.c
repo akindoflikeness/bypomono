@@ -1,13 +1,12 @@
 #include "../src/dsp/dsp.h"
 #include "test.h"
+#include "walk.h"
 
 #include <stdlib.h>
 
 #include <string.h>
 
 #define SR 48000.0f
-
-static void noop_emit(void *userdata, size_t n, const Frame *frame) {}
 
 static Patch voiced(int voices, int unison, float detune) {
     Patch p = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
@@ -29,16 +28,6 @@ static bool holds_hz(const VoiceBank *b, float hz) {
     return false;
 }
 
-typedef struct {
-    Frame *frames;
-    size_t at;
-} Tape_;
-
-static void tape_emit(void *userdata, size_t n, const Frame *frame) {
-    Tape_ *t = userdata;
-    t->frames[t->at++] = *frame;
-}
-
 static void mono_is_the_pair_it_replaced(void) {
     static VoiceBank b;
     static VoicePair p;
@@ -56,9 +45,8 @@ static void mono_is_the_pair_it_replaced(void) {
             voice_pair_glide_to_hz(&p, 164.0f);
             voice_bank_glide_to_hz(&b, 164.0f);
         }
-        Tape_ tw = { want, 0 }, tg = { got, 0 };
-        voice_pair_render_frames(&p, len, tape_emit, &tw);
-        voice_bank_render_frames(&b, len, tape_emit, &tg);
+        voice_pair_render_block(&p, want, len);
+        voice_bank_render_block(&b, got, len);
         size_t differ = 0;
         for (size_t i = 0; i < len; i++)
             if (memcmp(&want[i], &got[i], sizeof want[i]) != 0) differ++;
@@ -76,7 +64,7 @@ static void four_notes_sound_together(void) {
     CHECK(voice_bank_poly(&b) == 4, "poly is %d", voice_bank_poly(&b));
     int keys[4] = { 60, 64, 67, 71 };
     for (int i = 0; i < 4; i++) voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
-    voice_bank_render_frames(&b, 2048, noop_emit, NULL);
+    bank_skip(&b, 2048);
     float held[POLY_MAX];
     CHECK(voice_bank_held_hz(&b, held) == 4, "held %d", voice_bank_held_hz(&b, held));
     for (int i = 0; i < 4; i++) {
@@ -94,7 +82,7 @@ static void a_fifth_note_takes_the_oldest(void) {
     int keys[4] = { 60, 64, 67, 71 };
     for (int i = 0; i < 4; i++) {
         voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
-        voice_bank_render_frames(&b, 256, noop_emit, NULL);
+        bank_skip(&b, 256);
     }
     voice_bank_note_on(&b, 74, midi_hz(74), 0.8f);
     CHECK(!holds_hz(&b, midi_hz(60)), "the oldest note survived the steal");
@@ -119,7 +107,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
     voice_bank_note_on(&b, 74, target, 0.8f);
     CHECK(stolen->steal_glide_seconds > 0.0f,
           "a held note reassignment did not start its safety glide");
-    voice_bank_render_frames(&b, 1, noop_emit, NULL);
+    bank_skip(&b, 1);
     CHECK(stolen->freq > from && stolen->freq < target,
           "a held reassignment stepped from %g to %g", (double)from,
           (double)stolen->freq);
@@ -130,7 +118,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
     voice_bank_note_on(&b, 71, same_target, 0.8f);
     CHECK(same_key->steal_glide_seconds == 0.0f,
           "a same-key retrigger acquired a steal glide");
-    voice_bank_render_frames(&b, 1, noop_emit, NULL);
+    bank_skip(&b, 1);
     CHECK_NEAR(same_key->freq, same_target, 1e-3f,
                "a same-key retrigger ignored zero player glide");
 
@@ -141,7 +129,7 @@ static void only_a_held_poly_reassignment_uses_the_safety_glide(void) {
     voice_bank_note_on(&b, 75, released_target, 0.8f);
     CHECK(released->steal_glide_seconds == 0.0f,
           "a released tail acquired a held-voice steal glide");
-    voice_bank_render_frames(&b, 1, noop_emit, NULL);
+    bank_skip(&b, 1);
     CHECK_NEAR(released->freq, released_target, 1e-3f,
                "a released tail ignored zero player glide");
 
@@ -158,7 +146,7 @@ static void a_key_lets_go_of_its_own_note(void) {
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
     int keys[3] = { 48, 55, 63 };
     for (int i = 0; i < 3; i++) voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
-    voice_bank_render_frames(&b, 1024, noop_emit, NULL);
+    bank_skip(&b, 1024);
     voice_bank_note_off(&b, 55);
     CHECK(holds_hz(&b, midi_hz(48)) && holds_hz(&b, midi_hz(63)), "another key was released");
     CHECK(!holds_hz(&b, midi_hz(55)), "key 55 is still held");
@@ -171,7 +159,7 @@ static void a_key_lets_go_of_its_own_note(void) {
     voice_bank_note_off(&b, -1);
     float held[POLY_MAX];
     CHECK(voice_bank_held_hz(&b, held) == 0, "a wildcard release left notes held");
-    voice_bank_render_frames(&b, (size_t)(SR * 3.0f), noop_emit, NULL);
+    bank_skip(&b, (size_t)(SR * 3.0f));
     for (int s = 1; s < BANK_PAIRS; s++)
         CHECK(voice_pair_silent(&b.pairs[s]), "slot %d still sounds after its release", s);
     voice_bank_free(&b);
@@ -200,7 +188,7 @@ static void a_held_drone_keeps_its_own_note(void) {
     voice_bank_set_drone(&b, true);
     int keys[3] = {60, 64, 67};
     for (int i = 0; i < 3; i++) voice_bank_note_on(&b, keys[i], midi_hz(keys[i]), 0.8f);
-    voice_bank_render_frames(&b, 2048, noop_emit, NULL);
+    bank_skip(&b, 2048);
     CHECK(b.key[0] == DRONE_KEY && b.held[0], "a key took the drone's note");
     CHECK(holds_hz(&b, 55.0f), "the drone's pitch is not held");
     voice_bank_note_on(&b, 71, midi_hz(71), 0.8f); /* a fourth key steals, not note 0 */
@@ -217,12 +205,12 @@ static void going_mono_lets_the_chord_go(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(4, 1, 0.0f));
     for (int k = 0; k < 3; k++) voice_bank_note_on(&b, 60 + 4 * k, midi_hz(60 + 4 * k), 0.8f);
-    voice_bank_render_frames(&b, 1024, noop_emit, NULL);
+    bank_skip(&b, 1024);
     voice_bank_set_patch(&b, voiced(1, 1, 0.0f));
     CHECK(voice_bank_poly(&b) == 1, "poly is %d", voice_bank_poly(&b));
     for (int n = 1; n < POLY_MAX; n++) CHECK(!b.held[n], "note %d still held", n);
     /* the gate is a one-pole, so silence is reached rather than stepped to */
-    voice_bank_render_frames(&b, (size_t)(SR * 0.2f), noop_emit, NULL);
+    bank_skip(&b, (size_t)(SR * 0.2f));
     for (int s = 2; s < BANK_PAIRS; s++) CHECK(b.gain[s] == 0.0f, "slot %d at gain %g", s, (double)b.gain[s]);
     voice_bank_free(&b);
 }
@@ -234,7 +222,7 @@ typedef struct {
     bool started;
 } Stereo_;
 
-static void stereo_emit(void *userdata, size_t n, const Frame *f) {
+static void stereo_emit(void *userdata, const Frame *f) {
     Stereo_ *c = userdata;
     float l = f->mix + f->side, r = f->mix - f->side;
     c->peak_side = fmaxf(c->peak_side, fabsf(f->side));
@@ -253,12 +241,12 @@ static void unison_detunes_and_spreads_the_pair(void) {
     CHECK_NEAR(b.pairs[1].voice.detune_to, exp2f(10.0f / 1200.0f), 1e-6f, "copy 1 detune %g",
                (double)b.pairs[1].voice.detune_to);
     Stereo_ ctx = { 0 };
-    voice_bank_render_frames(&b, (size_t)(SR / 4), stereo_emit, &ctx);
+    bank_each(&b, (size_t)(SR / 4), stereo_emit, &ctx);
     CHECK(ctx.peak_side > 1e-4f, "unison stayed in the middle (side %g)", (double)ctx.peak_side);
 
     voice_bank_set_patch(&b, voiced(1, 1, 20.0f));
     CHECK(b.pairs[0].voice.detune_to == 1.0f, "a lone voice kept its detune");
-    voice_bank_render_frames(&b, (size_t)(SR / 4), noop_emit, NULL);
+    bank_skip(&b, (size_t)(SR / 4));
     CHECK(b.spread == 0.0f && b.gain[1] == 0.0f, "unison never faded out");
     voice_bank_free(&b);
 }
@@ -267,21 +255,21 @@ static void switching_unison_introduces_no_step(void) {
     static VoiceBank b;
     voice_bank_init(&b, SR, voiced(1, 1, 12.0f));
     voice_bank_set_drone(&b, true);
-    voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
+    bank_skip(&b, (size_t)SR);
     Stereo_ steady = { 0 };
-    voice_bank_render_frames(&b, (size_t)(SR / 2), stereo_emit, &steady);
+    bank_each(&b, (size_t)(SR / 2), stereo_emit, &steady);
 
     voice_bank_set_patch(&b, voiced(1, 2, 12.0f));
     Stereo_ on = steady;
     on.step = 0.0f;
-    voice_bank_render_frames(&b, (size_t)(SR * 0.05f), stereo_emit, &on);
+    bank_each(&b, (size_t)(SR * 0.05f), stereo_emit, &on);
     CHECK(on.step <= steady.step * 1.5f, "unison on stepped by %g against a steady %g",
           (double)on.step, (double)steady.step);
 
     voice_bank_set_patch(&b, voiced(1, 1, 12.0f));
     Stereo_ off = on;
     off.step = 0.0f;
-    voice_bank_render_frames(&b, (size_t)(SR * 0.05f), stereo_emit, &off);
+    bank_each(&b, (size_t)(SR * 0.05f), stereo_emit, &off);
     CHECK(off.step <= steady.step * 1.5f, "unison off stepped by %g against a steady %g",
           (double)off.step, (double)steady.step);
     voice_bank_free(&b);
@@ -292,9 +280,9 @@ static void a_returning_copy_is_on_the_note(void) {
     voice_bank_init(&b, SR, voiced(1, 1, 8.0f));
     voice_bank_set_drone(&b, true);
     voice_bank_glide_to_hz(&b, 330.0f);
-    voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
+    bank_skip(&b, (size_t)SR);
     voice_bank_set_patch(&b, voiced(1, 2, 8.0f));
-    voice_bank_render_frames(&b, 64, noop_emit, NULL);
+    bank_skip(&b, 64);
     CHECK(fabsf(b.pairs[1].voice.freq - 330.0f) < 1.0f, "the second copy came back at %g hz",
           (double)b.pairs[1].voice.freq);
     voice_bank_free(&b);
@@ -308,7 +296,7 @@ typedef struct {
 
 /* a step in a control shows up as curvature, which a step in the waveform
    itself does not reach */
-static void curve_emit(void *userdata, size_t n, const Frame *f) {
+static void curve_emit(void *userdata, const Frame *f) {
     Curve *c = userdata;
     float x = f->mix + f->side;
     if (c->seen >= 2) c->worst = fmaxf(c->worst, fabsf(x - 2.0f * c->h1 + c->h2));
@@ -325,14 +313,14 @@ static void moving_rip_does_not_step_the_carriers(void) {
     voice_bank_init(&b, SR, p);
     voice_bank_drone_to_hz(&b, 110.0f);
     voice_bank_set_drone(&b, true);
-    voice_bank_render_frames(&b, (size_t)SR, noop_emit, NULL);
+    bank_skip(&b, (size_t)SR);
     Curve steady = {0};
-    voice_bank_render_frames(&b, (size_t)(SR / 4), curve_emit, &steady);
+    bank_each(&b, (size_t)(SR / 4), curve_emit, &steady);
 
     p.rip = 0.5f;
     voice_bank_set_patch(&b, p);
     Curve moved = {0};
-    voice_bank_render_frames(&b, (size_t)(SR / 4), curve_emit, &moved);
+    bank_each(&b, (size_t)(SR / 4), curve_emit, &moved);
     CHECK(moved.worst <= steady.worst * 20.0f,
           "a rip step bent the carriers by %g against a steady %g", moved.worst,
           steady.worst);

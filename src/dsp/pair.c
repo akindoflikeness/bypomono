@@ -170,36 +170,23 @@ bool voice_pair_silent(const VoicePair *p) {
     return !envelope_active(&p->voice.env);
 }
 
-typedef struct {
-    FrameEmit emit;
-    void *userdata;
-    size_t base;
-    float gain;
-} Fwd;
-
-static void fwd_emit(void *userdata, size_t n, const Frame *frame) {
-    Fwd *w = userdata;
-    Frame out = *frame;
-    float g = w->gain;
-    if (g < 1.0f) {
-        out.master *= g;
-        out.mix *= g;
-        out.side *= g;
-    }
-    w->emit(w->userdata, w->base + n, &out);
+static void scale_frame(Frame *f, float g) {
+    if (g >= 1.0f) return;
+    f->master *= g;
+    f->mix *= g;
+    f->side *= g;
 }
 
-void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *userdata) {
+void voice_pair_render_block(VoicePair *p, Frame *out, size_t count) {
     size_t done = 0;
     while (done < count) {
         if (p->dip_dir == 0) {
-            Fwd w = { emit, userdata, done, 1.0f };
-            voice_render_frames(&p->voice, count - done, fwd_emit, &w);
+            voice_render_block(&p->voice, out + done, count - done);
             return;
         }
         advance_dip(p);
-        Fwd w = { emit, userdata, done, p->dip };
-        voice_render_frames(&p->voice, 1, fwd_emit, &w);
+        voice_render_block(&p->voice, out + done, 1);
+        scale_frame(out + done, p->dip);
         done++;
     }
 }

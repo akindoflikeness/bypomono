@@ -240,7 +240,7 @@ float voice_op_phase(const Voice *v, int op) {
     return v->phase[op];
 }
 
-void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata) {
+void voice_render_block(Voice *v, Frame *out, size_t count) {
     float glide_seconds = fmaxf(v->patch.glide_seconds, 0.0f);
     float glide = glide_seconds > 0.0f
         ? expf(-1.0f / (glide_seconds * v->sample_rate))
@@ -371,14 +371,18 @@ void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata)
         frame.master = floor_;
         frame.base_hz = v->freq;
         frame.side = 0.0f;
-        emit(userdata, n, &frame);
+        out[n] = frame;
     }
 }
 
-static void voice_render_cb(void *userdata, size_t n, const Frame *frame) {
-    ((float *)userdata)[n] = frame->mix;
-}
-
 void voice_render(Voice *v, float *buf, size_t len) {
-    voice_render_frames(v, len, voice_render_cb, buf);
+    Frame chunk[64];
+    size_t done = 0;
+    while (done < len) {
+        size_t n = len - done;
+        if (n > 64) n = 64;
+        voice_render_block(v, chunk, n);
+        for (size_t i = 0; i < n; i++) buf[done + i] = chunk[i].mix;
+        done += n;
+    }
 }

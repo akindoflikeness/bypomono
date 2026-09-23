@@ -45,32 +45,30 @@ static void apply(Engine *e, Event ev) {
     }
 }
 
-typedef struct {
-    Engine *e;
-    float *data;
-    int channels;
-} RenderCtx;
-
-static void emit_frame(void *ud, size_t n, const Frame *frame) {
-    RenderCtx *ctx = ud;
-    Stereo s = verb_process(&ctx->e->verb, frame);
-    size_t base = n * (size_t)ctx->channels;
-    if (ctx->channels == 1) {
-        ctx->data[base] = soft_clip(0.5f * (s.l + s.r));
-    } else {
-        ctx->data[base] = soft_clip(s.l);
-        ctx->data[base + 1] = soft_clip(s.r);
-        for (int c = 2; c < ctx->channels; c++) ctx->data[base + c] = 0.0f;
-    }
-}
-
 static void render(void *ud, float *data, size_t frames, int channels) {
     Engine *e = ud;
     Event ev;
     while (EventRing_pop(&e->repl, &ev)) apply(e, ev);
     while (EventRing_pop(&e->midi, &ev)) apply(e, ev);
-    RenderCtx ctx = {e, data, channels};
-    voice_render_frames(&e->voice, frames, emit_frame, &ctx);
+    Frame chunk[64];
+    size_t done = 0;
+    while (done < frames) {
+        size_t n = frames - done;
+        if (n > 64) n = 64;
+        voice_render_block(&e->voice, chunk, n);
+        for (size_t i = 0; i < n; i++) {
+            Stereo s = verb_process(&e->verb, &chunk[i]);
+            size_t base = (done + i) * (size_t)channels;
+            if (channels == 1) {
+                data[base] = soft_clip(0.5f * (s.l + s.r));
+            } else {
+                data[base] = soft_clip(s.l);
+                data[base + 1] = soft_clip(s.r);
+                for (int c = 2; c < channels; c++) data[base + c] = 0.0f;
+            }
+        }
+        done += n;
+    }
 }
 
 static void on_midi(void *ud, const uint8_t msg[3]) {

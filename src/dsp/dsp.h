@@ -211,8 +211,6 @@ typedef struct {
     float side; /* dry mix difference: left gets mix + side, right mix - side */
 } Frame;
 
-typedef void (*FrameEmit)(void *userdata, size_t n, const Frame *frame);
-
 typedef struct {
     float *buf;
     size_t len;
@@ -282,7 +280,8 @@ void voice_set_patch(Voice *v, Patch patch);
 void voice_snap_ratios(Voice *v);
 void voice_set_algorithm(Voice *v, AlgorithmId algorithm);
 float voice_op_phase(const Voice *v, int op);
-void voice_render_frames(Voice *v, size_t count, FrameEmit emit, void *userdata);
+/* writes `count` frames into out */
+void voice_render_block(Voice *v, Frame *out, size_t count);
 void voice_render(Voice *v, float *buf, size_t len);
 
 /* ---------- pair ---------- */
@@ -323,7 +322,7 @@ const EnvParams *voice_pair_adsr(const VoicePair *p);
 void voice_pair_set_bend_semitones(VoicePair *p, float semitones);
 void voice_pair_note_off(VoicePair *p);
 float voice_pair_target_hz(const VoicePair *p);
-void voice_pair_render_frames(VoicePair *p, size_t count, FrameEmit emit, void *userdata);
+void voice_pair_render_block(VoicePair *p, Frame *out, size_t count);
 void voice_pair_set_adsr_now(VoicePair *p, EnvParams adsr); /* no dip */
 void voice_pair_set_detune_cents(VoicePair *p, float cents);
 void voice_pair_wake(VoicePair *p);
@@ -389,7 +388,9 @@ float voice_bank_target_hz(const VoiceBank *b); /* the newest note */
 const Envelope *voice_bank_newest_env(const VoiceBank *b);
 /* target hz of each held note (the drone counts as held); returns count */
 int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]);
-void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *userdata);
+/* writes `count` mixed frames into out. The bank renders in BANK_CHUNK
+   pieces; out must hold every frame. */
+void voice_bank_render_block(VoiceBank *b, Frame *out, size_t count);
 
 /* ---------- shared filter/delay primitives ---------- */
 

@@ -5,6 +5,7 @@
 
 #include "../src/gui/app.h"
 #include "test.h"
+#include "walk.h"
 
 #define SR 48000.0f
 
@@ -296,8 +297,6 @@ static void hostile_mods_never_escape_their_ranges(void) {
     }
 }
 
-static void nowhere(void *ud, size_t n, const Frame *f) { (void)ud; (void)n; (void)f; }
-
 /* a sequence writes fb every control block, so it glides to its target
    instead of arriving on the first sample */
 static void fb_glides(void) {
@@ -309,10 +308,10 @@ static void fb_glides(void) {
     Patch loud = patch;
     loud.feedback = 1.0f;
     voice_set_patch(&v, loud);
-    voice_render_frames(&v, 1, nowhere, NULL);
+    voice_skip(&v, 1);
     CHECK(v.fb_smooth > 0.0f && v.fb_smooth < 0.05f,
           "fb jumped to %g in one sample", v.fb_smooth);
-    voice_render_frames(&v, (size_t)(SR * 0.1f), nowhere, NULL);
+    voice_skip(&v, (size_t)(SR * 0.1f));
     CHECK(v.fb_smooth > 0.99f, "fb only reached %g in 100 ms", v.fb_smooth);
     voice_free(&v);
 }

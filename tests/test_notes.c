@@ -2,6 +2,7 @@
    starting under rip without a click. */
 #include "../src/gui/command.h"
 #include "test.h"
+#include "walk.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -78,12 +79,6 @@ static void gated_steps_play_on_the_clock(void) {
     CHECK_NEAR(h.ev[6].hz, 220.0f, 0.01f, "the move went to %g", h.ev[6].hz);
 }
 
-static void drop(void *u, size_t i, const Frame *f) {
-    (void)u;
-    (void)i;
-    (void)f;
-}
-
 static void a_gate_off_releases_only_the_sequencer_note(void) {
     static VoiceBank b;
     Patch poly = patch_init(ALGORITHMS[0], RATIO_GOLDEN);
@@ -109,7 +104,7 @@ static void a_gate_off_step_moves_the_note_without_restarting_it(void) {
     static Mod m;
     mod_init(&m, SR);
     pitch_event_play((PitchEvent){PITCH_EV_ON, 220.0f, 1.0f}, &b, &h, &m);
-    voice_bank_render_frames(&b, (size_t)(SR * 0.05f), drop, NULL);
+    bank_skip(&b, (size_t)(SR * 0.05f));
     const Envelope *e = voice_bank_newest_env(&b);
     float t_before = e->t;
     pitch_event_play((PitchEvent){PITCH_EV_MOVE, 330.0f, 0.0f}, &b, &h, &m);
@@ -248,9 +243,8 @@ static void pitch_and_melody_take_turns(void) {
    before: nothing may stand out of its own material. */
 static float mono_buf[48000 * 4];
 static size_t mono_n;
-static void keep(void *u, size_t i, const Frame *f) {
+static void keep(void *u, const Frame *f) {
     (void)u;
-    (void)i;
     if (mono_n < sizeof mono_buf / sizeof mono_buf[0]) mono_buf[mono_n++] = f->mix;
 }
 
@@ -274,7 +268,7 @@ static void a_note_under_rip_starts_without_a_click(void) {
     for (int k = 0; k < 18; k++) {
         voice_bank_note_off_all(&b);
         voice_bank_note_on(&b, -1, NOTES[k % 6], 1.0f);
-        voice_bank_render_frames(&b, 8727, keep, NULL);
+        bank_each(&b, 8727, keep, NULL);
     }
     voice_bank_free(&b);
 

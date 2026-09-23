@@ -1,11 +1,10 @@
 #include "../src/dsp/dsp.h"
+#include "walk.h"
 #include "test.h"
 #include <math.h>
 #include <stdint.h>
 
 #define SR 48000.0f
-
-static void noop_frame(void *userdata, size_t n, const Frame *frame) {}
 
 static Frame impulse_frame(float v) {
     Frame f;
@@ -187,7 +186,7 @@ static void rotators_follow_the_drone_pitch(void) {
               (double)hz[k], (double)pair.voice.rip_line.rot_to, (double)want);
         Frame quiet = impulse_frame(0.0f);
         for (size_t n = 0; n < (size_t)(SR * 0.2f); n++) verb_process(&verb, &quiet);
-        voice_pair_render_frames(&pair, (size_t)(SR * 0.2f), noop_frame, NULL);
+        pair_skip(&pair, (size_t)(SR * 0.2f));
         for (int i = 0; i < NUM_OPS; i++)
             CHECK(fabsf(verb.ghosts[i].rot.a - want) < 1e-3f, "ghost %d never arrived: %g",
                   i, (double)verb.ghosts[i].rot.a);
@@ -310,8 +309,7 @@ typedef struct {
     uint64_t n;
 } DecayCtx;
 
-static void decay_emit(void *userdata, size_t idx, const Frame *frame) {
-    (void)idx;
+static void decay_emit(void *userdata, const Frame *frame) {
     DecayCtx *ctx = (DecayCtx *)userdata;
     Stereo s = verb_process(ctx->verb, frame);
     if (ctx->pass == 4) {
@@ -345,7 +343,7 @@ static double rms_at_decay_voiced(float decay) {
     size_t sec = (size_t)SR;
     for (int pass = 0; pass < 5; pass++) {
         ctx.pass = pass;
-        voice_render_frames(&v, sec, decay_emit, &ctx);
+        voice_each(&v, sec, decay_emit, &ctx);
     }
     double out = sqrt(ctx.acc / (double)(ctx.n > 1 ? ctx.n : 1));
     voice_free(&v);

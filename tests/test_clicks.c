@@ -207,23 +207,9 @@ static void patch_to(Rig *r, Patch p) {
     verb_configure(&r->verb, voice_bank_patch(&r->bank), voice_bank_compiled(&r->bank));
 }
 
-typedef struct {
-    Rig *rig;
-    float *out;
-    size_t at;
-} Fill;
-
-static void rig_emit(void *userdata, size_t n, const Frame *f) {
-    Fill *fill = userdata;
-    Rig *r = fill->rig;
-    Stereo s = verb_process(&r->verb, f);
-    s = chandas_process(&r->chandas, s);
-    fill->out[fill->at++] = s.l;
-}
-
 static void rig_render(void *ctx, float *out, size_t n) {
     Rig *r = ctx;
-    Fill fill = {r, out, 0};
+    size_t at = 0;
     size_t done = 0;
     while (done < n) {
         size_t run = n - done;
@@ -243,7 +229,18 @@ static void rig_render(void *ctx, float *out, size_t n) {
         if (r->repeat_in > 0 && r->repeat_in <= run) {
             run = r->repeat_in;
         }
-        voice_bank_render_frames(&r->bank, run, rig_emit, &fill);
+        Frame chunk[128];
+        size_t left = run;
+        while (left) {
+            size_t k = left < 128 ? left : 128;
+            voice_bank_render_block(&r->bank, chunk, k);
+            for (size_t i = 0; i < k; i++) {
+                Stereo s = verb_process(&r->verb, &chunk[i]);
+                s = chandas_process(&r->chandas, s);
+                out[at++] = s.l;
+            }
+            left -= k;
+        }
         if (r->repeat_in > 0) {
             r->repeat_in -= run;
             if (r->repeat_in == 0) patch_to(r, r->repeat);

@@ -327,16 +327,6 @@ int voice_bank_held_hz(const VoiceBank *b, float out[POLY_MAX]) {
     return count;
 }
 
-typedef struct {
-    Frame *buf;
-    size_t i;
-} Capture;
-
-static void capture_emit(void *userdata, size_t n, const Frame *frame) {
-    Capture *c = userdata;
-    c->buf[c->i++] = *frame;
-}
-
 /* the house gate: a one-pole, because a linear ramp kinks at both ends and
    under dense playing those kinks are the crackle */
 static float ramp(float x, float target, float k) {
@@ -345,7 +335,7 @@ static float ramp(float x, float target, float k) {
     return next;
 }
 
-void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *userdata) {
+void voice_bank_render_block(VoiceBank *b, Frame *out, size_t count) {
     size_t done = 0;
     while (done < count) {
         size_t run = BANK_CHUNK < count - done ? BANK_CHUNK : count - done;
@@ -360,15 +350,14 @@ void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *
             if (s / UNISON_MAX > 0 && !voice_pair_crossing(p) && voice_pair_silent(p)) continue;
             if (wanted && s % UNISON_MAX > 0 && b->gain[s] == 0.0f)
                 sync_copy(p, &b->pairs[s - s % UNISON_MAX]);
-            Capture c = { b->scratch[n], 0 };
-            voice_pair_render_frames(p, run, capture_emit, &c);
+            voice_pair_render_block(p, b->scratch[n], run);
             live[n++] = s;
         }
         float spread_to = reach_unison(b) > 1 ? 1.0f : 0.0f;
 
         /* one voice at full gain is the mono instrument, untouched */
         if (n == 1 && live[0] == 0 && b->gain[0] == 1.0f && b->spread == 0.0f && spread_to == 0.0f) {
-            for (size_t k = 0; k < run; k++) emit(userdata, done + k, &b->scratch[0][k]);
+            for (size_t k = 0; k < run; k++) out[done + k] = b->scratch[0][k];
             for (int s = 1; s < BANK_PAIRS; s++)
                 for (size_t k = 0; k < run; k++)
                     b->gain[s] = ramp(b->gain[s], target[s], b->step);
@@ -401,7 +390,7 @@ void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *
                 for (int op = 0; op < NUM_OPS; op++) f.ops[op] /= loudest;
             f.master = loudest;
             f.base_hz = low_hz > 0.0f ? low_hz : b->scratch[0][k].base_hz;
-            emit(userdata, done + k, &f);
+            out[done + k] = f;
         }
         for (int j = 0; j < n; j++) {
             int s = live[j];

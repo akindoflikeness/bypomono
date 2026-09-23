@@ -1008,8 +1008,9 @@ static inline float glide_to(float now, float target, float k) {
 static inline float fract_pos(float x) { return x - floorf(x); }
 
 /* Sine of a phase in cycles, for a slow modulation. A truncated Taylor on a
-   folded quadrant: the error against libm sits under a millionth, which on a
-   delay wobble of a few samples is nowhere. Not an oscillator. */
+   folded quadrant: the error against libm sits under a millionth. On a delay
+   wobble of a few samples, or on the breath's pitch drift, that is nowhere.
+   Not an oscillator. */
 static inline float lfo_sin(float phase) {
     float p = phase;
     float sign = 1.0f;

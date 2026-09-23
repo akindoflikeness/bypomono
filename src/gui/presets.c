@@ -759,6 +759,49 @@ static int sync_stock_bank(const char *stock, const char *dir) {
     return synced;
 }
 
+/* the walk prepare_preset_dir just did, waiting for the first rescan */
+static struct {
+    bool fresh;
+    char dir[PATHBUF];
+    int presets;
+    int folders;
+    PresetRef names[MAX_PRESETS];
+    char banks[MAX_FOLDERS][64];
+} opened;
+
+static void scan_opened(const char *dir) {
+    snprintf(opened.dir, sizeof opened.dir, "%s", dir);
+    opened.presets = scan_presets_dir(dir, opened.names, MAX_PRESETS);
+    opened.folders = scan_folders_dir(dir, opened.banks, MAX_FOLDERS);
+    opened.fresh = true;
+}
+
+static void report_opened(const char *dir) {
+    int nf = opened.presets;
+    int nb = opened.folders;
+    if (nf == 0) {
+        printf("presets: NONE FOUND in %s — the library is empty\n", dir);
+        return;
+    }
+    char counts[2048];
+    size_t off = 0;
+    counts[0] = 0;
+    for (int i = 0; i < nb && off < sizeof counts; i++) {
+        int n = 0;
+        for (int j = 0; j < nf; j++)
+            if (strcmp(opened.names[j].bank, opened.banks[i]) == 0) n++;
+        off += (size_t)snprintf(counts + off, sizeof counts - off, "%s%s %d",
+                                off ? ", " : "", opened.banks[i], n);
+    }
+    int loose = 0;
+    for (int j = 0; j < nf; j++)
+        if (opened.names[j].bank[0] == 0) loose++;
+    if (loose > 0 && off < sizeof counts)
+        snprintf(counts + off, sizeof counts - off, "%s%s %d", off ? ", " : "",
+                 MINE_BANK, loose);
+    printf("presets: %d in %s — %s\n", nf, dir, counts);
+}
+
 void prepare_preset_dir(void) {
     const char *dir = preset_dir();
     char stock[PATHBUF];
@@ -819,31 +862,10 @@ void prepare_preset_dir(void) {
                    stock);
     }
 
-    static char banks[MAX_FOLDERS][64];
-    static PresetRef found[MAX_PRESETS];
-    int nb = scan_folders_dir(dir, banks, MAX_FOLDERS);
-    int nf = scan_presets_dir(dir, found, MAX_PRESETS);
-    if (nf == 0) {
-        printf("presets: NONE FOUND in %s — the library is empty\n", dir);
-    } else {
-        char counts[2048];
-        size_t off = 0;
-        counts[0] = 0;
-        for (int i = 0; i < nb && off < sizeof counts; i++) {
-            int n = 0;
-            for (int j = 0; j < nf; j++)
-                if (strcmp(found[j].bank, banks[i]) == 0) n++;
-            off += (size_t)snprintf(counts + off, sizeof counts - off,
-                                    "%s%s %d", off ? ", " : "", banks[i], n);
-        }
-        int loose = 0;
-        for (int j = 0; j < nf; j++)
-            if (found[j].bank[0] == 0) loose++;
-        if (loose > 0 && off < sizeof counts)
-            snprintf(counts + off, sizeof counts - off, "%s%s %d",
-                     off ? ", " : "", MINE_BANK, loose);
-        printf("presets: %d in %s — %s\n", nf, dir, counts);
-    }
+    /* opening the editor used to walk this tree here and again in
+       preset_rescan. Keep the walk and hand it to that call. */
+    scan_opened(dir);
+    report_opened(dir);
 }
 
 /* ---------- session plumbing ---------- */
@@ -1018,10 +1040,16 @@ bool app_restore_state(App *a) {
 /* ---------- App-level flows ---------- */
 
 void preset_rescan(App *a) {
-    a->preset_count =
-        scan_presets_dir(preset_dir(), a->preset_names, MAX_PRESETS);
-    a->folder_count =
-        scan_folders_dir(preset_dir(), a->preset_folders, MAX_FOLDERS);
+    const char *dir = preset_dir();
+    if (!opened.fresh || strcmp(opened.dir, dir) != 0) scan_opened(dir);
+    a->preset_count = opened.presets;
+    if (opened.presets > 0)
+        memcpy(a->preset_names, opened.names,
+               (size_t)opened.presets * sizeof(PresetRef));
+    a->folder_count = opened.folders;
+    if (opened.folders > 0)
+        memcpy(a->preset_folders, opened.banks, (size_t)opened.folders * 64);
+    opened.fresh = false;
 }
 
 static void clear_name_bar(App *a) {

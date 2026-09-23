@@ -14,7 +14,6 @@ static Frame impulse_frame(float v) {
     }
     f.mix = v;
     f.master = 1.0f;
-    f.field = 0.0f;
     f.base_hz = 50.0f;
     f.side = 0.0f;
     return f;
@@ -328,8 +327,6 @@ static double rms_at_decay_voiced(float decay) {
     patch.index = 0.241f;
     patch.rip = 0.2f;
     patch.master_level = 0.8f;
-    patch.field = 1.0f;
-    patch.curve = 0.73f;
     Voice v;
     voice_init(&v, SR, patch);
     voice_set_freq_hz(&v, 50.0f);

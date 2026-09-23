@@ -33,8 +33,6 @@ const char *cc_target_name(CcTarget t) {
     case CC_INDEX: return "index";
     case CC_RIP: return "rip";
     case CC_FB: return "fb";
-    case CC_FIELD: return "field";
-    case CC_CURVE: return "curve";
     case CC_RELEASE: return "release";
     case CC_GLIDE: return "glide";
     case CC_DRONEHZ: return "dronehz";

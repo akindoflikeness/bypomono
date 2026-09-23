@@ -55,8 +55,6 @@ static Session marked_session(void) {
     s.patch.rip = 0.61f;
     s.patch.feedback = 0.23f;
     s.patch.glide_seconds = 0.77f;
-    s.patch.field = 0.41f;
-    s.patch.curve = 0.19f;
     s.patch.master_level = 0.53f;
     for (int i = 0; i < NUM_OPS; i++) s.patch.ops[i].enabled = (i & 1) == 0;
     s.verb.mix = 0.29f;
@@ -105,8 +103,6 @@ static void check_same_session(const Session *a, const Session *b) {
     CHECK(a->patch.feedback == b->patch.feedback, "feedback %g", b->patch.feedback);
     CHECK(a->patch.glide_seconds == b->patch.glide_seconds, "glide %g",
           b->patch.glide_seconds);
-    CHECK(a->patch.field == b->patch.field, "field %g", b->patch.field);
-    CHECK(a->patch.curve == b->patch.curve, "curve %g", b->patch.curve);
     CHECK(a->patch.master_level == b->patch.master_level, "level %g",
           b->patch.master_level);
     CHECK(a->patch.voices == b->patch.voices, "voices %u", b->patch.voices);

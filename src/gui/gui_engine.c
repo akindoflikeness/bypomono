@@ -83,8 +83,6 @@ const char *cc_target_name(CcTarget t) {
     case CC_INDEX: return "index";
     case CC_RIP: return "rip";
     case CC_FB: return "fb";
-    case CC_FIELD: return "field";
-    case CC_CURVE: return "curve";
     case CC_RELEASE: return "release";
     case CC_GLIDE: return "glide";
     case CC_DRONEHZ: return "dronehz";
@@ -507,8 +505,7 @@ void gui_drain_viz(App *a) {
 /* a CC moves its control the way the fader does, along the same curve */
 static const ParamId CC_PARAM[CC_LAST + 1] = {
     [CC_INDEX] = PARAM_INDEX,       [CC_RIP] = PARAM_RIP,
-    [CC_FB] = PARAM_FB,             [CC_FIELD] = PARAM_FIELD,
-    [CC_CURVE] = PARAM_CURVE,       [CC_RELEASE] = PARAM_RELEASE,
+    [CC_FB] = PARAM_FB,             [CC_RELEASE] = PARAM_RELEASE,
     [CC_GLIDE] = PARAM_GLIDE,       [CC_DRONEHZ] = PARAM_DRONE_HZ,
     [CC_MIX] = PARAM_MIX,           [CC_GHOST] = PARAM_GHOST,
     [CC_DECAY] = PARAM_VERB_DECAY,  [CC_DAMP] = PARAM_DAMP,

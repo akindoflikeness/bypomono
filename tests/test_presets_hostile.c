@@ -77,10 +77,6 @@ static void check_clamped(const Session *s, const char *what) {
           what, (double)s->patch.master_level);
     CHECK(in_range(s->patch.glide_seconds, 0.0f, 30.0f), "%s: glide %g", what,
           (double)s->patch.glide_seconds);
-    CHECK(in_range(s->patch.field, 0.0f, 1.0f), "%s: field %g", what,
-          (double)s->patch.field);
-    CHECK(in_range(s->patch.curve, 0.0f, 1.0f), "%s: curve %g", what,
-          (double)s->patch.curve);
     for (int i = 0; i < NUM_OPS; i++) {
         CHECK(in_range(s->patch.ops[i].level, 0.0f, 1.0f), "%s: op%d level %g",
               what, i, (double)s->patch.ops[i].level);
@@ -163,8 +159,6 @@ static const NumField NUM_FIELDS[] = {
     {"\"patch\": {", "}", "rip"},
     {"\"patch\": {", "}", "master_level"},
     {"\"patch\": {", "}", "glide_seconds"},
-    {"\"patch\": {", "}", "field"},
-    {"\"patch\": {", "}", "curve"},
     {"\"patch\": {", "}", "voices"},
     {"\"patch\": {", "}", "unison"},
     {"\"patch\": {", "}", "unison_detune"},
@@ -293,8 +287,6 @@ static void an_unknown_algorithm_only_costs_the_algorithm(void) {
     CHECK(s.patch.rip == 0.75f, "rip %g did not survive", (double)s.patch.rip);
     CHECK(s.patch.feedback == 0.125f, "feedback %g did not survive",
           (double)s.patch.feedback);
-    CHECK(s.patch.curve == 0.375f, "curve %g did not survive",
-          (double)s.patch.curve);
     CHECK(s.warmth == 0.625f, "warmth %g did not survive", (double)s.warmth);
     CHECK(s.drone_hz == 220.0f, "drone_hz %g did not survive",
           (double)s.drone_hz);

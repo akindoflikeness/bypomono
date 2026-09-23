@@ -166,8 +166,6 @@ static Patch patch_of_vals(const Plug *p) {
     patch.rip = (float)getv(p, P_RIP);
     patch.master_level = (float)getv(p, P_LEVEL);
     patch.glide_seconds = (float)getv(p, P_GLIDE);
-    patch.field = (float)getv(p, P_FIELD);
-    patch.curve = (float)getv(p, P_CURVE);
     for (int i = 0; i < NUM_OPS; i++) {
         patch.ops[i].enabled = getv(p, P_OP1 + i) > 0.5;
         /* These are artist-owned operator settings. ratio_mode only loads a
@@ -234,8 +232,7 @@ static void apply_vals(Plug *p) {
     p->base.warmth = (float)getv(p, P_WARMTH);
 
     voice_bank_set_adsr_now(&p->voice, adsr_of_vals(p));
-    /* glide only when the hz itself moved: glide_to_hz retriggers the
-       breath gesture and overrides a sounding note's pitch */
+    /* glide only when the hz itself moved */
     float hz = (float)getv(p, P_DRONE_HZ);
     if (hz != p->applied_drone_hz) {
         p->applied_drone_hz = hz;
@@ -300,8 +297,8 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_RIP, s->patch.rip);
     setv(p, P_FB, s->patch.feedback);
     setv(p, P_GLIDE, s->patch.glide_seconds);
-    setv(p, P_FIELD, s->patch.field);
-    setv(p, P_CURVE, s->patch.curve);
+    setv(p, P_FIELD, SPEC[P_FIELD].def);
+    setv(p, P_CURVE, SPEC[P_CURVE].def);
     setv(p, P_LEVEL, s->patch.master_level);
     for (int i = 0; i < NUM_OPS; i++) {
         setv(p, P_OP1 + i, s->patch.ops[i].enabled ? 1 : 0);
@@ -357,8 +354,6 @@ static void mirror_patch_vals(Plug *p, const Patch *patch) {
     setv(p, P_RIP, patch->rip);
     setv(p, P_FB, patch->feedback);
     setv(p, P_GLIDE, patch->glide_seconds);
-    setv(p, P_FIELD, patch->field);
-    setv(p, P_CURVE, patch->curve);
     setv(p, P_LEVEL, patch->master_level);
     for (int i = 0; i < NUM_OPS; i++) {
         setv(p, P_OP1 + i, patch->ops[i].enabled ? 1 : 0);
@@ -761,13 +756,31 @@ static bool nports_get(const clap_plugin_t *pl, uint32_t index, bool is_input,
 static const clap_plugin_note_ports_t EXT_NOTE_PORTS = {nports_count,
                                                         nports_get};
 
-static uint32_t params_count(const clap_plugin_t *pl) { return P_COUNT; }
+/* field and curve stay in the id list so later ids do not move, and they
+   are not offered to the host. */
+static bool param_shown(int id) { return id != P_FIELD && id != P_CURVE; }
+
+static int shown_id(uint32_t index) {
+    uint32_t n = 0;
+    for (int id = 0; id < P_COUNT; id++) {
+        if (!param_shown(id)) continue;
+        if (n == index) return id;
+        n++;
+    }
+    return -1;
+}
+
+static uint32_t params_count(const clap_plugin_t *pl) {
+    (void)pl;
+    return P_COUNT - 2;
+}
 
 static bool params_get_info(const clap_plugin_t *pl, uint32_t index,
                             clap_param_info_t *info) {
-    if (index >= P_COUNT) return false;
-    const ParamSpec *s = &SPEC[index];
-    info->id = index;
+    int id = shown_id(index);
+    if (id < 0) return false;
+    const ParamSpec *s = &SPEC[id];
+    info->id = (clap_id)id;
     info->flags = CLAP_PARAM_IS_AUTOMATABLE;
     if (s->kind != K_FLOAT) info->flags |= CLAP_PARAM_IS_STEPPED;
     info->cookie = NULL;

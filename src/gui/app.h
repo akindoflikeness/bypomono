@@ -200,7 +200,7 @@ bool session_load_file(const char *path, Session *out);
 typedef enum { DREAD_NORMAL, DREAD_LOW, DREAD_CRITICAL } Dread;
 
 typedef enum {
-    CC_NONE = 0, CC_INDEX, CC_RIP, CC_FB, CC_FIELD, CC_CURVE, CC_RELEASE,
+    CC_NONE = 0, CC_INDEX, CC_RIP, CC_FB, CC_RELEASE,
     CC_GLIDE, CC_DRONEHZ, CC_MIX, CC_GHOST, CC_DECAY, CC_DAMP, CC_HAUNT,
     CC_ATTACK, CC_ENVDECAY, CC_SUSTAIN
 } CcTarget;

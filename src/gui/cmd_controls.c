@@ -26,8 +26,6 @@ static const ControlSpec SPECS[] = {
     {"rip", CT_PARAM, PARAM_RIP, 0, 0, false},
     {"fb", CT_PARAM, PARAM_FB, 0, 0, false},
     {"glide", CT_PARAM, PARAM_GLIDE, 0, 0, false},
-    {"field", CT_PARAM, PARAM_FIELD, 0, 0, false},
-    {"curve", CT_PARAM, PARAM_CURVE, 0, 0, false},
     {"level", CT_PARAM, PARAM_LEVEL, 0, 0, false},
     {"detune", CT_PARAM, PARAM_DETUNE, 0, 0, false},
     {"mix", CT_PARAM, PARAM_MIX, 0, 0, false},

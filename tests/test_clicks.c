@@ -30,7 +30,7 @@ static bool loud(void) {
 typedef enum { REACH_GAIN, REACH_PHASE, REACH_STRUCTURE, REACH_TIMING } Reach;
 
 typedef enum {
-    MV_INDEX, MV_RIP, MV_FB, MV_LEVEL, MV_FIELD, MV_CURVE, MV_GLIDE, MV_DETUNE,
+    MV_INDEX, MV_RIP, MV_FB, MV_LEVEL, MV_GLIDE, MV_DETUNE,
     MV_VOICES, MV_UNISON, MV_ALGORITHM, MV_RATIO_MODE, MV_OP_OFF, MV_OP_ON,
     MV_OP_LEVEL, MV_DRONE_HZ, MV_BEND, MV_NOTE_ON, MV_NOTE_OFF, MV_STEAL,
     MV_DRONE_OFF, MV_DRONE_ON, MV_ATTACK, MV_DECAY, MV_SUSTAIN, MV_RELEASE,
@@ -49,7 +49,7 @@ static Reach move_reach(Move m) {
     case MV_NOTE_OFF: case MV_STEAL: case MV_CHANDAS_ON: case MV_DRONE_OFF:
     case MV_DRONE_ON:
         return REACH_GAIN;
-    case MV_INDEX: case MV_RIP: case MV_FB: case MV_FIELD: case MV_CURVE:
+    case MV_INDEX: case MV_RIP: case MV_FB:
     case MV_GLIDE: case MV_DETUNE: case MV_DRONE_HZ: case MV_BEND:
         return REACH_PHASE;
     case MV_VOICES: case MV_UNISON: case MV_ALGORITHM: case MV_RATIO_MODE:
@@ -69,8 +69,6 @@ static const char *move_name(Move m) {
     case MV_RIP: return "rip";
     case MV_FB: return "fb";
     case MV_LEVEL: return "level";
-    case MV_FIELD: return "field";
-    case MV_CURVE: return "curve";
     case MV_GLIDE: return "glide";
     case MV_DETUNE: return "detune";
     case MV_VOICES: return "voices";
@@ -145,8 +143,6 @@ static Patch shun_patch(void) {
     p.rip = 0.182f;
     p.master_level = 0.6f;
     p.glide_seconds = 6.7e-6f;
-    p.field = 0.551f;
-    p.curve = 0.74f;
     p.voices = POLY_MAX;
     p.unison = UNISON_MAX;
     p.unison_detune = 6.8f;
@@ -267,8 +263,6 @@ static void rig_apply(void *ctx) {
     case MV_RIP: p.rip = 0.7f; patch_to(r, p); break;
     case MV_FB: p.feedback = 0.9f; patch_to(r, p); break;
     case MV_LEVEL: p.master_level = 0.3f; patch_to(r, p); break;
-    case MV_FIELD: p.field = 0.8f; patch_to(r, p); break;
-    case MV_CURVE: p.curve = 0.2f; patch_to(r, p); break;
     case MV_GLIDE: p.glide_seconds = 1.5f; patch_to(r, p); break;
     case MV_DETUNE: p.unison_detune = 40.0f; patch_to(r, p); break;
     case MV_VOICES: p.voices = p.voices > 1 ? 1 : POLY_MAX; patch_to(r, p); break;
@@ -333,7 +327,7 @@ static void rig_apply(void *ctx) {
         break;
     case MV_PRESET: {
         Patch n = patch_init(ALGORITHMS[6], RATIO_FIBONACCI);
-        n.index = 0.4f; n.rip = 0.35f; n.feedback = 0.2f; n.field = 0.3f;
+        n.index = 0.4f; n.rip = 0.35f; n.feedback = 0.2f;
         n.voices = p.voices; n.unison = p.unison;
         patch_to(r, n);
         break;

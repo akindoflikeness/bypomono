@@ -150,8 +150,6 @@ typedef struct {
     float rip;
     float master_level;
     float glide_seconds;
-    float field;
-    float curve;
     uint8_t voices;      /* notes at once: 1 = mono, up to POLY_MAX */
     uint8_t unison;      /* voices per note: 1 or UNISON_MAX */
     float unison_detune; /* cents between the two unison voices */
@@ -193,42 +191,6 @@ bool envelope_active(const Envelope *e);
 float envelope_level(const Envelope *e);
 float envelope_tick(Envelope *e, const EnvParams *p);
 
-/* ---------- breath ---------- */
-
-#define BREATH_RATE_RUNGS 13
-#define BREATH_RATE_MIN_HZ (27.5f / 521.002f)
-#define BREATH_RATE_MAX_HZ (440.0f / 521.002f)
-#define BREATH_DECLICK_S 0.003f
-#define BREATH_CURVE_RANGE 4.0f
-
-float curve_exponent(float curve);
-
-typedef struct {
-    float sample_rate;
-    float phase[5];
-    RatioMode mode;
-    bool has_trigger;      /* Option<f32> since_trigger */
-    float since_trigger;
-    float boost_level;
-    float interval;
-    float last_amount, last_pitch;
-    float declick_from, declick_from_pitch;
-    float declick_left;
-} Breath;
-
-typedef struct { float amount, gain, pitch; } Field;
-
-void breath_init(Breath *b, float sample_rate, RatioMode mode);
-void breath_set_mode(Breath *b, RatioMode mode);
-void breath_trigger(Breath *b);
-/* a drone pitch move: starts the gesture only once the last one has landed,
-   so dragging the fader does not restart it every frame */
-void breath_drift(Breath *b);
-void breath_release(Breath *b);
-float breath_rate_hz(float freq);
-Field breath_tick(Breath *b, float freq, float field, float floor_, float curve);
-void breath_reset(Breath *b);
-
 /* ---------- state ---------- */
 
 typedef struct {
@@ -245,7 +207,6 @@ typedef struct {
     float ops[NUM_OPS];
     float mix;
     float master;
-    float field;
     float base_hz;
     float side; /* dry mix difference: left gets mix + side, right mix - side */
 } Frame;
@@ -284,8 +245,6 @@ typedef struct {
     float level_s[NUM_OPS]; /* op levels are gains straight to the mix */
     RipLine rip_line;
     float rip_sig, rip_smooth;
-    Breath breath;
-    float field_smooth, curve_smooth, field_amount, field_pitch;
     float bend, bend_to;
     float detune, detune_to; /* frequency ratio from the unison spread */
     /* Velocity is a gain outside the normalized envelope. It is smoothed on
@@ -871,7 +830,7 @@ typedef struct {
 
 typedef enum {
     MT_NONE = 0,
-    MT_INDEX, MT_RIP, MT_FB, MT_FIELD, MT_CURVE, MT_LEVEL, MT_PITCH,
+    MT_INDEX, MT_RIP, MT_FB, MT_LEVEL, MT_PITCH,
     MT_MIX, MT_GHOST, MT_DECAY, MT_DAMP, MT_HAUNT,
     MT_CH_MIX, MT_CH_RATE, MT_CH_SPREAD, MT_CH_SIZE, MT_CH_WARP, MT_CH_DIM,
     MT_CH_TAIL, MT_MEL_RATE,
@@ -1009,7 +968,7 @@ static inline float fract_pos(float x) { return x - floorf(x); }
 
 /* Sine of a phase in cycles, for a slow modulation. A truncated Taylor on a
    folded quadrant: the error against libm sits under a millionth. On a delay
-   wobble of a few samples, or on the breath's pitch drift, that is nowhere.
+   wobble of a few samples, that is nowhere.
    Not an oscillator. */
 static inline float lfo_sin(float phase) {
     float p = phase;

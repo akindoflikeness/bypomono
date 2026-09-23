@@ -18,10 +18,6 @@ const Control PARAMS[PARAM_COUNT] = {
                   PG_PATCH},
     [PARAM_GLIDE] = {"glide", "glide s", 0, 2, CURVE_POWER, PHI4, false,
                      "%.3f", "s", "seconds", PG_PATCH},
-    [PARAM_FIELD] = {"field", "field", 0, 1, CURVE_LINEAR, 1, false, "%.2f",
-                     NULL, NULL, PG_PATCH},
-    [PARAM_CURVE] = {"curve", "curve", 0, 1, CURVE_LINEAR, 1, false, "%+.2f",
-                     NULL, NULL, PG_PATCH},
     [PARAM_LEVEL] = {"level", "level", 0, 1, CURVE_LINEAR, 1, false, "%.2f",
                      NULL, NULL, PG_PATCH},
     /* squared, so the narrow beating end gets most of the travel */
@@ -87,8 +83,6 @@ float param_get(const App *a, ParamId id) {
     case PARAM_RIP: return a->shadow.rip;
     case PARAM_FB: return a->shadow.feedback;
     case PARAM_GLIDE: return a->shadow.glide_seconds;
-    case PARAM_FIELD: return a->shadow.field;
-    case PARAM_CURVE: return a->shadow.curve;
     case PARAM_LEVEL: return a->shadow.master_level;
     case PARAM_DETUNE: return a->shadow.unison_detune;
     case PARAM_DRONE_HZ: return a->drone_hz;
@@ -127,8 +121,6 @@ void param_set(App *a, ParamId id, float v) {
     case PARAM_RIP: a->shadow.rip = v; break;
     case PARAM_FB: a->shadow.feedback = v; break;
     case PARAM_GLIDE: a->shadow.glide_seconds = v; break;
-    case PARAM_FIELD: a->shadow.field = v; break;
-    case PARAM_CURVE: a->shadow.curve = v; break;
     case PARAM_LEVEL: a->shadow.master_level = v; break;
     case PARAM_DETUNE: a->shadow.unison_detune = v; break;
     case PARAM_DRONE_HZ: a->drone_hz = v; break;
@@ -172,8 +164,6 @@ float param_default(const App *a, ParamId id) {
     case PARAM_RIP: return p.rip;
     case PARAM_FB: return p.feedback;
     case PARAM_GLIDE: return p.glide_seconds;
-    case PARAM_FIELD: return p.field;
-    case PARAM_CURVE: return p.curve;
     case PARAM_LEVEL: return p.master_level;
     case PARAM_DETUNE: return p.unison_detune;
     case PARAM_DRONE_HZ: return START_HZ;
@@ -231,7 +221,6 @@ float param_at(ParamId id, float pos) {
 
 void param_text(const App *a, ParamId id, char *out, size_t cap) {
     float v = param_get(a, id);
-    if (id == PARAM_CURVE) v = v * 2.0f - 1.0f; /* shown as a bend, -1..1 */
     if (PARAMS[id].fmt)
         snprintf(out, cap, PARAMS[id].fmt, (double)v);
     else if (v < 0.1f)

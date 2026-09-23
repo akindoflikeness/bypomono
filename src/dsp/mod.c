@@ -7,8 +7,6 @@ const ModTargetSpec MOD_TARGETS[MT_COUNT] = {
     [MT_INDEX] = {"index", 0.0f, 1.0f},
     [MT_RIP] = {"rip", 0.0f, 1.0f},
     [MT_FB] = {"fb", 0.0f, 1.0f},
-    [MT_FIELD] = {"field", 0.0f, 1.0f},
-    [MT_CURVE] = {"curve", 0.0f, 1.0f},
     [MT_LEVEL] = {"level", 0.0f, 1.0f},
     [MT_PITCH] = {"pitch", -MOD_PITCH_SEMITONES, MOD_PITCH_SEMITONES},
     [MT_MIX] = {"mix", 0.0f, 1.0f},
@@ -225,8 +223,7 @@ void mod_advance(Mod *m, size_t samples, float bpm) {
 
 static int target_group(ModTarget t) {
     switch (t) {
-    case MT_INDEX: case MT_RIP: case MT_FB: case MT_FIELD: case MT_CURVE:
-    case MT_LEVEL: return MOD_G_PATCH;
+    case MT_INDEX: case MT_RIP: case MT_FB: case MT_LEVEL: return MOD_G_PATCH;
     case MT_PITCH: return MOD_G_BEND;
     case MT_MIX: case MT_GHOST: case MT_DECAY: case MT_DAMP: case MT_HAUNT:
         return MOD_G_VERB;
@@ -242,8 +239,6 @@ static float *target_slot(ModBase *b, ModTarget t) {
     case MT_INDEX: return &b->patch.index;
     case MT_RIP: return &b->patch.rip;
     case MT_FB: return &b->patch.feedback;
-    case MT_FIELD: return &b->patch.field;
-    case MT_CURVE: return &b->patch.curve;
     case MT_LEVEL: return &b->patch.master_level;
     case MT_PITCH: return &b->bend;
     case MT_MIX: return &b->verb.mix;

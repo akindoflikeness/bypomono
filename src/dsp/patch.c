@@ -53,8 +53,6 @@ Patch patch_init(AlgorithmId algorithm, RatioMode ratio_mode) {
     p.rip = 0.0f;
     p.master_level = 0.8f;
     p.glide_seconds = 0.05f;
-    p.field = 0.0f;
-    p.curve = 0.5f;
     p.voices = 1;
     p.unison = 1;
     p.unison_detune = UNISON_DETUNE_DEFAULT;

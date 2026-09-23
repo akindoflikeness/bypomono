@@ -66,10 +66,6 @@ static void sync_copy(VoicePair *dst, const VoicePair *src) {
     v->velocity = from->velocity;
     v->velocity_to = from->velocity_to;
     v->index = from->index;
-    v->field_smooth = from->field_smooth;
-    v->curve_smooth = from->curve_smooth;
-    v->field_amount = from->field_amount;
-    v->field_pitch = from->field_pitch;
     v->bend = from->bend;
     v->rip_smooth = from->rip_smooth;
     v->fb_smooth = from->fb_smooth;
@@ -78,7 +74,6 @@ static void sync_copy(VoicePair *dst, const VoicePair *src) {
         v->ratio_s[op] = from->ratio_s[op];
     }
     v->env = from->env;
-    v->breath = from->breath;
     voice_wake(v);
     park_dip(dst);
 }
@@ -386,7 +381,7 @@ void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *
             b->spread = ramp(b->spread, spread_to, b->step);
             float trim = 1.0f + b->spread * (UNISON_TRIM - 1.0f);
             float width = b->spread * UNISON_WIDTH;
-            Frame f = { { 0.0f }, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+            Frame f = { { 0.0f }, 0.0f, 0.0f, 0.0f, 0.0f };
             float loudest = 0.0f, low_hz = 0.0f;
             for (int j = 0; j < n; j++) {
                 int s = live[j];
@@ -400,7 +395,6 @@ void voice_bank_render_frames(VoiceBank *b, size_t count, FrameEmit emit, void *
                 loudest = fmaxf(loudest, w);
                 f.mix += g * x->mix;
                 f.side += g * x->mix * pan;
-                f.field = fmaxf(f.field, x->field);
                 if (w > 0.0f && (low_hz == 0.0f || x->base_hz < low_hz)) low_hz = x->base_hz;
             }
             if (loudest > 0.0f)

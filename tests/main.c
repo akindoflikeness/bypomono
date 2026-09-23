@@ -10,7 +10,6 @@ void test_patch(void);
 void test_state(void);
 void test_session(void);
 void test_envelope(void);
-void test_breath(void);
 void test_pair(void);
 void test_bank(void);
 void test_clicks(void);
@@ -31,7 +30,7 @@ int main(void) {
         {"master", test_master},       {"gate", test_gate},
         {"algorithm", test_algorithm}, {"patch", test_patch},
         {"state", test_state},         {"session", test_session},
-        {"envelope", test_envelope},   {"breath", test_breath},
+        {"envelope", test_envelope},
         {"pair", test_pair},           {"bank", test_bank},
         {"clicks", test_clicks},
         {"chamber", test_chamber},

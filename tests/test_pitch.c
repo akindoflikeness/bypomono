@@ -44,7 +44,6 @@ static void additive_carriers_are_summed_at_the_output(void) {
     patch.index = 0.0f;
     patch.feedback = 0.0f;
     patch.rip = 0.0f;
-    patch.field = 0.0f;
     Voice v;
     voice_init(&v, SR, patch);
     voice_set_freq_hz(&v, NOTE_HZ);

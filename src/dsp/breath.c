@@ -134,7 +134,7 @@ Field breath_tick(Breath *b, float freq, float field, float floor_, float curve)
     for (int i = 0; i < 5; i++) {
         b->phase[i] += f * sig[i] / b->sample_rate;
         b->phase[i] = fract_pos(b->phase[i]);
-        sum += sinf(b->phase[i] * TAU_F);
+        sum += lfo_sin(b->phase[i]);
     }
     float swing = (sum / 5.0f + 1.0f) * 0.5f;
 

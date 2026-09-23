@@ -1006,6 +1006,28 @@ static inline float glide_to(float now, float target, float k) {
     return now + (target - now) * k;
 }
 static inline float fract_pos(float x) { return x - floorf(x); }
+
+/* Sine of a phase in cycles, for a slow modulation. A truncated Taylor on a
+   folded quadrant: the error against libm sits under a millionth, which on a
+   delay wobble of a few samples is nowhere. Not an oscillator. */
+static inline float lfo_sin(float phase) {
+    float p = phase;
+    float sign = 1.0f;
+    if (p >= 0.5f) {
+        p -= 0.5f;
+        sign = -1.0f;
+    }
+    if (p > 0.25f) p = 0.5f - p;
+    float x = p * TAU_F;
+    float z = x * x;
+    float s = -1.0f / 39916800.0f;
+    s = s * z + 1.0f / 362880.0f;
+    s = s * z - 1.0f / 5040.0f;
+    s = s * z + 1.0f / 120.0f;
+    s = s * z - 1.0f / 6.0f;
+    s = s * z + 1.0f;
+    return sign * s * x;
+}
 /* NaN fails both comparisons, so it has to be rejected explicitly */
 static inline float clampf(float x, float lo, float hi) {
     return isnan(x) ? lo : (x < lo ? lo : (x > hi ? hi : x));

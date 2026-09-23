@@ -415,6 +415,16 @@ static void every_mode_and_algorithm_configures_within_buffers(void) {
     }
 }
 
+static void the_delay_wobble_sine_stays_on_the_libm_curve(void) {
+    float worst = 0.0f;
+    for (int i = 0; i <= 4096; i++) {
+        float phase = (float)i / 4096.0f;
+        float err = fabsf(lfo_sin(phase) - sinf(TAU_F * phase));
+        if (err > worst) worst = err;
+    }
+    CHECK(worst < 1e-6f, "wobble sine strays by %g", (double)worst);
+}
+
 void test_reverb(void) {
     the_room_high_pass_rolls_off_on_a_shoulder_not_a_corner();
     the_rooms_floor_always_sits_under_the_note();
@@ -430,4 +440,5 @@ void test_reverb(void) {
     commanded_decay_is_real_and_damp_invariant();
     resonant_damp_screams_but_never_runs_away();
     every_mode_and_algorithm_configures_within_buffers();
+    the_delay_wobble_sine_stays_on_the_libm_curve();
 }

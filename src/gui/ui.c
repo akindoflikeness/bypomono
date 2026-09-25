@@ -55,8 +55,10 @@ Resp ui_interact(Ui *ui, UiId id, Rct r, float slop) {
 
 Resp ui_interact_drag(Ui *ui, UiId id, Rct r, float slop) {
     Resp out = interact(ui, id, r, slop, true);
-    if (ui->active == id && ui->in.down) {
-        /* per-frame delta, both axes */
+    /* per-frame delta, both axes. Movement before the press is not a drag. */
+    if (out.drag_started) {
+        out.drag_delta = (P2){0.0f, 0.0f};
+    } else if (ui->active == id && ui->in.down) {
         out.drag_delta = (P2){ui->in.mouse.x - ui->drag_prev.x,
                               ui->in.mouse.y - ui->drag_prev.y};
     }

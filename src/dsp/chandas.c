@@ -34,6 +34,11 @@ const float chandas_subdivisions[CHANDAS_STREAMS] = {1.0f, 2.0f, 3.0f};
 
 #define SPRAY_PERIODS 1.0f
 #define REGEN 0.45f
+/* note gaps outside this range are chords or pauses, not a pulse */
+#define PULSE_MIN_SECONDS 0.06f
+#define PULSE_MAX_SECONDS 4.0f
+/* a reset zeroes the history over this long rather than in one sample */
+#define CLEAR_SECONDS 0.05f
 
 #define CHORUS_CENTRE_SECONDS 0.006f
 #define CHORUS_SWEEP_SECONDS 0.005f
@@ -208,6 +213,8 @@ void chandas_init(Chandas *h, float sample_rate) {
     dc_block_clear(&h->dc_out_r);
     h->spawned = 0;
     h->fade = 0.0f;
+    h->clear_at = 0;
+    h->clear_left = 0;
     h->fade_len = fmaxf(CHANDAS_RESET_FADE_SECONDS * sample_rate, 1.0f);
     h->harmony_interval = 0.0f;
     h->since_pulse = 0.0f;
@@ -239,8 +246,9 @@ void chandas_set_tempo(Chandas *h, float bpm) {
 }
 
 void chandas_note_pulse(Chandas *h) {
-    if (h->since_pulse > 0.0f) {
-        h->harmony_interval = h->since_pulse / fmaxf(h->sample_rate, 1.0f);
+    float gap = h->since_pulse / fmaxf(h->sample_rate, 1.0f);
+    if (gap >= PULSE_MIN_SECONDS && gap <= PULSE_MAX_SECONDS) {
+        h->harmony_interval = gap;
     }
     h->since_pulse = 0.0f;
 }
@@ -253,11 +261,22 @@ void chandas_reset(Chandas *h) {
     }
 }
 
-static void chandas_clear(Chandas *h) {
-    for (size_t i = 0; i < h->len; i++) {
-        h->buf_l[i] = 0.0f;
-        h->buf_r[i] = 0.0f;
+/* zeroes the next stretch of old history. The cursor starts just ahead of
+   the write head and runs faster than it, so it never erases a fresh write. */
+static void chandas_clear_step(Chandas *h) {
+    size_t n = (size_t)ceilf((float)h->len / (CLEAR_SECONDS * h->sample_rate));
+    if (n > h->clear_left) n = h->clear_left;
+    for (size_t i = 0; i < n; i++) {
+        h->buf_l[h->clear_at] = 0.0f;
+        h->buf_r[h->clear_at] = 0.0f;
+        h->clear_at = (h->clear_at + 1) % h->len;
     }
+    h->clear_left -= n;
+}
+
+static void chandas_clear(Chandas *h) {
+    h->clear_at = (h->w + 1) % h->len;
+    h->clear_left = h->len - 1;
     for (size_t i = 0; i < CHANDAS_MAX_GRAINS; i++) {
         Grain g = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false};
         h->grains[i] = g;
@@ -266,7 +285,6 @@ static void chandas_clear(Chandas *h) {
         h->slot[k] = 0;
         h->countdown[k] = 0.0f;
     }
-    h->w = 0;
     h->spawned = 0;
     chorus_clear(&h->chorus);
     chamber_clear(&h->chamber);
@@ -329,6 +347,7 @@ Stereo chandas_process(Chandas *h, Stereo dry) {
        nothing: returning the dry signal outright drops the wet in one sample */
     if (!h->params.enabled && h->mix_s <= 0.0f) {
         Stereo zero = {0.0f, 0.0f};
+        if (h->clear_left > 0) chandas_clear_step(h);
         chandas_write(h, dry, zero);
         h->mix_s += (0.0f - h->mix_s) * (1.0f - h->glide);
         if (h->mix_s < 1e-4f) {
@@ -342,12 +361,17 @@ Stereo chandas_process(Chandas *h, Stereo dry) {
         }
         return dry;
     }
+    bool clearing = h->clear_left > 0;
+    if (clearing) chandas_clear_step(h);
     float base = chandas_base_seconds(h) * h->sample_rate;
     for (size_t k = 0; k < CHANDAS_STREAMS; k++) {
         float entry = fmaxf(base / chandas_subdivisions[k], 8.0f);
+        /* a shorter period takes over now, not after the old one runs out */
+        if (h->countdown[k] > entry) h->countdown[k] = entry;
         if (h->countdown[k] <= 0.0f) {
-            /* no new grains once it is switched off; the ones in the air finish */
-            if (h->params.enabled && h->transport_running)
+            /* no new grains once it is switched off; the ones in the air finish.
+               None while old history is still being zeroed either. */
+            if (h->params.enabled && h->transport_running && !clearing)
                 chandas_spawn(h, k, entry);
             h->countdown[k] += entry;
         }

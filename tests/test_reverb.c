@@ -420,6 +420,39 @@ static void the_delay_wobble_sine_stays_on_the_libm_curve(void) {
     CHECK(worst < 1e-6f, "wobble sine strays by %g", (double)worst);
 }
 
+static float haunt_return_step(StereoVerb *a, StereoVerb *b, int n, float in, float haunt_a) {
+    VerbParams pa = verb_params(a);
+    pa.haunt = haunt_a;
+    verb_set_params(a, pa);
+    float worst = 0.0f;
+    for (int i = 0; i < n; i++) {
+        Frame f = impulse_frame(in * sinf(TAU_F * 110.0f * (float)i / SR));
+        Stereo x = verb_process(a, &f);
+        Stereo y = verb_process(b, &f);
+        worst = fmaxf(worst, fmaxf(fabsf(x.l - y.l), fabsf(x.r - y.r)));
+    }
+    return worst;
+}
+
+static void haunt_returning_after_silence_does_not_replay_old_audio(void) {
+    StereoVerb a, b;
+    configured(&a, RATIO_GOLDEN);
+    configured(&b, RATIO_GOLDEN);
+    VerbParams p = verb_params(&a);
+    p.haunt = 1.0f;
+    verb_set_params(&a, p);
+    verb_set_params(&b, p);
+    haunt_return_step(&a, &b, (int)SR, 0.5f, 1.0f);
+    p.haunt = 0.0f;
+    verb_set_params(&b, p);
+    haunt_return_step(&a, &b, (int)SR, 0.5f, 0.0f);
+    haunt_return_step(&a, &b, (int)SR, 0.0f, 0.0f);
+    float worst = haunt_return_step(&a, &b, (int)(SR * 0.3f), 0.0f, 1.0f);
+    CHECK(worst < 1e-3f, "haunt came back with stale audio: %g", worst);
+    verb_free(&a);
+    verb_free(&b);
+}
+
 void test_reverb(void) {
     the_room_high_pass_rolls_off_on_a_shoulder_not_a_corner();
     the_rooms_floor_always_sits_under_the_note();
@@ -430,6 +463,7 @@ void test_reverb(void) {
     ghost_allpass_rotates_the_design_pitch_by_pi_over_five();
     rotators_follow_the_drone_pitch();
     haunt_zero_leaves_the_room_untouched_and_full_haunt_is_stable();
+    haunt_returning_after_silence_does_not_replay_old_audio();
     longer_decay_is_never_quieter();
     decay_lengthens_the_tail_without_squaring_the_room();
     commanded_decay_is_real_and_damp_invariant();

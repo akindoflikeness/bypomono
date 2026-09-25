@@ -211,8 +211,12 @@ static void engine_apply(AudioState *s, Event ev) {
         break;
     case EV_SET_ADSR: voice_bank_set_adsr_now(&s->voice, ev.u.adsr); break;
     case EV_ENGAGE: voice_bank_set_drone(&s->voice, ev.u.flag); break;
-    case EV_RECORD:
     case EV_SET_MIDI_DRIVING:
+        /* a closed port never sends the NOTE_OFFs for keys still down */
+        if (!ev.u.flag)
+            for (int k = 0; k < 128; k++) voice_bank_note_off(&s->voice, k);
+        break;
+    case EV_RECORD:
         break;
     }
 }

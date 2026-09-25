@@ -790,6 +790,7 @@ typedef struct {
     DcBlock dc_loop_l, dc_loop_r, dc_out_l, dc_out_r;
     uint32_t spawned;
     float fade, fade_len;
+    size_t clear_at, clear_left; /* buffer samples still to zero after a reset */
     float harmony_interval;
     float since_pulse;
 } Chandas;

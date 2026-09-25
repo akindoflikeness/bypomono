@@ -671,11 +671,19 @@ static bool parse_words(char *const words[], int n, Command *out, char *err,
     int ngiven = npos;
     if (npos > 0 && v->nargs == 0)
         return reason(err, err_len, "%s takes nothing", v->name);
-    if (npos > v->nargs)
-        return reason(err, err_len, "%s takes %d argument%s", v->name,
-                      v->nargs, v->nargs == 1 ? "" : "s");
-    for (int i = 0; i < ngiven; i++)
-        snprintf(given[i], sizeof given[i], "%s", pos[i]);
+    /* a verb taking one free-form name reads every word as part of it */
+    if (npos > 1 && v->nargs == 1 && !v->words) {
+        given[0][0] = '\0';
+        for (int i = 0; i < npos; i++)
+            scat(given[0], sizeof given[0], "%s%s", i ? " " : "", pos[i]);
+        ngiven = 1;
+    } else {
+        if (npos > v->nargs)
+            return reason(err, err_len, "%s takes %d argument%s", v->name,
+                          v->nargs, v->nargs == 1 ? "" : "s");
+        for (int i = 0; i < ngiven; i++)
+            snprintf(given[i], sizeof given[i], "%s", pos[i]);
+    }
     if (ngiven < v->required) {
         if (v->required >= 2)
             return reason(err, err_len, "%s wants <%s>%s<%s>", v->name,
@@ -1629,6 +1637,8 @@ static bool run_where(App *a, const Command *c, char *err, size_t n) {
 static bool run_clear(App *a, const Command *c, char *err, size_t n) {
     a->log_len = 0;
     a->log_head = 0;
+    a->console_typing[0] = '\0';
+    a->console_revealed = 0;
     return true;
 }
 
@@ -1823,7 +1833,9 @@ static bool run_rename(App *a, const Command *c, char *err, size_t n) {
 
     PresetRef dest;
     const char *slash = strchr(c->arg[1], '/');
-    if (slash) {
+    if (strcasecmp(c->arg[1], MINE_BANK) == 0) {
+        dest = ref_make("", p.name);
+    } else if (slash) {
         char bank[64];
         snprintf(bank, sizeof bank, "%.*s", (int)(slash - c->arg[1]),
                  c->arg[1]);

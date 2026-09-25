@@ -1,5 +1,6 @@
 *.o
 *.pic.o
+*.d
 *.exe
 blow-your-phase-off
 blow-your-phase-off-gui

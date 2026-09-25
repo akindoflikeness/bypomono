@@ -149,7 +149,8 @@ int main(void) {
     Event ev = {.kind = EV_GLIDE_TO, .u.f = a->drone_hz};
     app_send(a, ev);
 
-    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    /* SDL turns Ctrl+C and SIGTERM into SDL_QUIT, so the usual quit path
+       saves state and finishes a recording */
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "SDL: %s\n", SDL_GetError());
         return 1;

@@ -250,6 +250,9 @@ static void every_verb_parses_its_forms(void) {
     CHECK(c.argc == 2 && strcmp(c.arg[0], "my_long_name") == 0
               && strcmp(c.arg[1], "my_folder") == 0,
           "two-argument split: '%s' / '%s'", c.arg[0], c.arg[1]);
+    parse_line("save my new sound", &c, err, sizeof err);
+    CHECK(c.kind == CMD_RUN && c.argc == 1 && strcmp(c.arg[0], "my_new_sound") == 0,
+          "multi-word save: '%s' (%s)", c.arg[0], err);
     parse_line("rec a_take --end 30", &c, err, sizeof err);
     CHECK(c.has_end && c.end == 30.0f && strcmp(c.arg[0], "a_take") == 0,
           "rec flag: end=%g name='%s'", (double)c.end, c.arg[0]);
@@ -739,6 +742,9 @@ static void trash_and_undo_round_trip(void) {
     CHECK(!run_ok("rmdir lab", err, sizeof err), "rmdir removed nonempty lab");
     CHECK(run_ok("undo", err, sizeof err), "undo move: %s", err);
     CHECK(present(drift) && !present(lab_drift), "undo unfiled it");
+    CHECK(run_ok("mv drift lab", err, sizeof err), "refile: %s", err);
+    CHECK(run_ok("mv lab/drift USER", err, sizeof err), "move to USER: %s", err);
+    CHECK(present(drift) && !present(lab_drift), "USER did not take drift back");
 
     /* rename, undo */
     CHECK(run_ok("mv drift drifted", err, sizeof err), "rename: %s", err);

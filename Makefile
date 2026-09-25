@@ -1,6 +1,8 @@
 CC ?= gcc
 CFLAGS ?= -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter
 CPPFLAGS = -Isrc -Isrc/dsp -include src/compat.h $(EXTRA_CPPFLAGS)
+# every object also writes a .d listing the headers it read
+CPPFLAGS += -MMD -MP
 
 # ---------- platform ----------
 # Linux: ALSA for audio and MIDI, X11 for the CLAP editor.
@@ -287,6 +289,10 @@ endif
 clean:
 	rm -f $(DSP_OBJ) $(TEST_OBJ) $(GUI_OBJ) $(PIC_OBJ) src/audio.o src/midi.o \
 	      src/app.o $(CLI) $(GUI) $(TESTS)
+	rm -f src/*.d src/dsp/*.d src/gui/*.d src/cli/*.d tests/*.d
 	rm -rf bypomono-* bypo.clap
+
+DEP_FILES = $(wildcard src/*.d src/dsp/*.d src/gui/*.d src/cli/*.d tests/*.d)
+-include $(DEP_FILES)
 
 .PHONY: all check clean stage dist

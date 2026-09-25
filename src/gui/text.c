@@ -149,22 +149,18 @@ static GlyphEntry *lookup(int face, int px, uint32_t cp) {
     return NULL;
 }
 
-static uint32_t utf8_next(const char **p) {
-    const uint8_t *s = (const uint8_t *)*p;
-    uint32_t cp = *s;
-    int len = 1;
-    if (cp >= 0xF0) {
-        cp = (cp & 0x07) << 18 | (s[1] & 0x3F) << 12 | (s[2] & 0x3F) << 6
-             | (s[3] & 0x3F);
-        len = 4;
-    } else if (cp >= 0xE0) {
-        cp = (cp & 0x0F) << 12 | (s[1] & 0x3F) << 6 | (s[2] & 0x3F);
-        len = 3;
-    } else if (cp >= 0xC0) {
-        cp = (cp & 0x1F) << 6 | (s[1] & 0x3F);
-        len = 2;
-    }
-    *p += len;
+/* stops at any byte that is not a continuation, so a truncated sequence
+   never reads past the terminator */
+static uint32_t utf8_next(const char **s) {
+    const unsigned char *p = (const unsigned char *)*s;
+    uint32_t cp = *p;
+    int extra = 0;
+    if (cp >= 0xF0) { cp &= 0x07; extra = 3; }
+    else if (cp >= 0xE0) { cp &= 0x0F; extra = 2; }
+    else if (cp >= 0xC0) { cp &= 0x1F; extra = 1; }
+    p++;
+    while (extra-- && (*p & 0xC0) == 0x80) cp = (cp << 6) | (*p++ & 0x3F);
+    *s = (const char *)p;
     return cp;
 }
 

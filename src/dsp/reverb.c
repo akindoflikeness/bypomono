@@ -138,6 +138,11 @@ static float ghost_process(GhostLine *g, float x) {
     return y;
 }
 
+static void ghost_record(GhostLine *g, float x) {
+    g->buf[g->write] = flush_tiny(x);
+    g->write = (g->write + 1) % g->len;
+}
+
 static void allpass_new(Allpass *a, float seconds, float sample_rate) {
     size_t delay = (size_t)(seconds * sample_rate);
     if (delay < 1) {
@@ -294,6 +299,10 @@ Stereo verb_process(StereoVerb *v, const Frame *frame) {
             v->ghosts[i].fb = GHOST_MAX_FB * v->haunt_s;
             haunted[i] = ghost_process(&v->ghosts[i], sends[i]);
         }
+    } else {
+        /* silent lines still record the sends, so haunt coming back reads
+           the programme that is playing now rather than a frozen stretch */
+        for (int i = 0; i < NUM_OPS; i++) ghost_record(&v->ghosts[i], sends[i]);
     }
     float wet_l = 0.0f;
     float wet_r = 0.0f;

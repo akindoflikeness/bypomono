@@ -93,12 +93,26 @@ static char *read_all(const char *path) {
     return buf;
 }
 
+/* writes beside the target and renames over it, so a failed write leaves
+   the old file whole instead of truncated */
 static bool write_all(const char *path, const char *text) {
-    FILE *f = fopen(path, "wb");
+    char tmp[JOINBUF];
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return false;
+    FILE *f = fopen(tmp, "wb");
     if (!f) return false;
     size_t n = strlen(text);
     bool ok = fwrite(text, 1, n, f) == n;
+    if (fflush(f) != 0) ok = false;
+#if !defined(_WIN32)
+    if (ok && fsync(fileno(f)) != 0) ok = false;
+#endif
     if (fclose(f) != 0) ok = false;
+#if defined(_WIN32)
+    if (ok) ok = MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    if (ok) ok = rename(tmp, path) == 0;
+#endif
+    if (!ok) remove(tmp);
     return ok;
 }
 

@@ -681,6 +681,29 @@ static void sync_locks_to_the_measured_harmony_interval(void) {
     chandas_free(&h);
 }
 
+static void chords_and_pauses_do_not_retune_sync(void) {
+    Chandas h;
+    chandas_init(&h, SR);
+    ChandasParams p = chandas_params_default();
+    p.sync = true;
+    chandas_set_params(&h, p);
+    size_t gaps[] = {(size_t)(SR * 0.3f), (size_t)(SR * 0.005f), (size_t)(SR * 10.0f)};
+    chandas_note_pulse(&h);
+    float locked = 0.0f;
+    for (size_t g = 0; g < 3; g++) {
+        for (size_t i = 0; i < gaps[g]; i++) {
+            Stereo d = {0.0f, 0.0f};
+            chandas_process(&h, d);
+        }
+        chandas_note_pulse(&h);
+        if (g == 0) locked = chandas_base_seconds(&h);
+    }
+    CHECK(fabsf(chandas_base_seconds(&h) - locked) < 1e-6f,
+          "a chord or a pause moved sync from %g to %g", locked,
+          chandas_base_seconds(&h));
+    chandas_free(&h);
+}
+
 void test_chandas(void) {
     the_division_ladder_runs_from_8_1_down_to_1_32();
     no_setting_can_outrun_the_buffer();
@@ -705,4 +728,5 @@ void test_chandas(void) {
     stopped_transport_does_not_spawn_new_grains();
     sync_falls_back_to_the_transport_before_the_first_pulse();
     sync_locks_to_the_measured_harmony_interval();
+    chords_and_pauses_do_not_retune_sync();
 }

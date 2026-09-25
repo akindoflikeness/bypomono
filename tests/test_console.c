@@ -665,6 +665,19 @@ static bool run_ok(const char *line, char *err, size_t cap) {
     return command_run(&app, &c, err, cap);
 }
 
+static void odd_file_names_are_reachable(void) {
+    char err[768];
+    char odd[1024];
+    in_dir("shun~1.json", odd, sizeof odd);
+    Session s = session_default();
+    char *json = session_to_json(&s);
+    CHECK(json != NULL && write_file(odd, json), "wrote %s", odd);
+    free(json);
+    preset_rescan(&app);
+    CHECK(run_ok("rm USER/shun~1", err, sizeof err), "rm odd name: %s", err);
+    CHECK(!present(odd), "shun~1 still there");
+}
+
 static void trash_and_undo_round_trip(void) {
     char err[768];
     char drift[1024], trashed[1024], lab[1024], lab_drift[1024], drifted[1024];
@@ -794,6 +807,7 @@ void test_console(void) {
     history_records_every_submitted_line();
     utility_clock_transport_and_midi_commands();
     trash_and_undo_round_trip();
+    odd_file_names_are_reachable();
     /* the temp home is two levels up: <home>/bypo/presets */
     char root[1024];
     snprintf(root, sizeof root, "%s", preset_dir());

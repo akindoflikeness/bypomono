@@ -1340,7 +1340,13 @@ static bool resolve(App *a, const char *name, PresetRef *out, char *err,
         for (int i = 0; i < a->preset_count; i++) {
             const PresetRef *p = &a->preset_names[i];
             if (strcmp(p->bank, TRASH_DIR) == 0) continue;
-            if (want_bank && strcasecmp(p->bank, want_bank) != 0) continue;
+            /* typed names arrive cleaned, so a file named with characters
+               the cleaner replaces is matched by its cleaned spelling too */
+            char clean[192];
+            sanitise_segment(p->bank, clean, sizeof clean);
+            if (want_bank && strcasecmp(p->bank, want_bank) != 0
+                && strcasecmp(clean, want_bank) != 0)
+                continue;
             bool in_view = true;
             switch (a->preset_filter.kind) {
             case FILTER_ALL: break;
@@ -1352,7 +1358,9 @@ static bool resolve(App *a, const char *name, PresetRef *out, char *err,
             if (!want_bank && pass == 0 && !in_view) continue;
             char low[192];
             lower_into(p->name, low, sizeof low);
-            if (strcmp(low, want_name) != 0) continue;
+            sanitise_segment(p->name, clean, sizeof clean);
+            if (strcmp(low, want_name) != 0 && strcasecmp(clean, want_name) != 0)
+                continue;
             hits++;
             hit = p;
         }

@@ -160,7 +160,7 @@ flowchart LR
 
 There are some additional controls that allow for even deeper timbral exploration that I encourage you to experiment with those being
 RIP, haunt, and ghost. Operators can be turned off removing not only its signal from the output but from the modulation signal chain.
-I'd highly recommend experimenting with turning off operators to find unique mixtures (especially in conjunction with The Room's ghost).
+I'd highly recommend experimenting with turning off operators to find fun mixtures (especially in conjunction with The Room's ghost).
 
 A sum of the carriers leaks into a short delay through an all pass filter to actively try to cause phase cancellation by modulating the phase of the voice with its own altered past. The delay and the phase rotation of the allpass filter work together - bending time to modulate away the voice, the modulation rarely manages to stop the voice - merely tearing it apart as it drones on.
 
@@ -256,7 +256,7 @@ A sum of the carriers leaks into a short delay through an all pass filter to act
 <tr>
 <td width="50%" valign="top">
 
-The Room is a uniquely close sounding reverb with a dirty tank and a modulation linked dampener (via field).
+The Room is a close sounding reverb with a dirty tank and a modulation linked dampener (via field).
 It has its own tricks with haunt and ghost that have novel effects, and of course The Room was structured using fibonacci recursion.
 Here it was used to define phase offsets via the all pass filter networks.
 
@@ -320,7 +320,7 @@ rₙ = ρⁿ⁻¹    ρ = 1.3247…</pre></td>
 <td width="50%" align="center"><img src=".github/readme/chandas.png" width="320" alt="Chandas"></td>
 <td width="50%" valign="top">
 
-**Chandas listens to the signal before and after we do.** It's a unique granular delay that can sync with the internal sequencer.
+**Chandas listens to the signal before and after we do.** It's a granular delay that can sync with the internal sequencer.
 Whilst syncing it has a polyrhythmic texture though Chandas also features its own massive lush reverb with two multi controls to tune
 its bloom.
 

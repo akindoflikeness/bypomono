@@ -35,7 +35,7 @@
 ┌────────────────────────────────────────────────────────────────────┐
 │  <a href="#download">DOWNLOAD</a>  ·  <a href="#install">INSTALL</a>  ·  <a href="#build-from-source">BUILD</a>  ·  <a href="#algorithmic-phase-modulation">PM</a>  ·  <a href="#phase-violence">VIOLENCE</a>  ·  <a href="#operator-structures">OPERATORS</a>  │
 │     <a href="#chambers">CHAMBERS</a>  ·  <a href="#ratio-palettes">RATIOS</a>  ·  <a href="#progenitor">PROGENITOR</a>  ·  <a href="#output">OUTPUT</a>  ·  <a href="#console">CONSOLE</a>      │
-│           <a href="#playing">PLAYING</a>  ·  <a href="#presets">PRESETS</a>  ·  <a href="#contributors">CONTRIBUTORS</a>  ·  <a href="#on-ai">ON AI</a>           │
+│                   <a href="#playing">PLAYING</a>  ·  <a href="#presets">PRESETS</a>  ·  <a href="#on-ai">ON AI</a>                    │
 └────────────────────────────────────────────────────────────────────┘
 </pre>
 
@@ -132,8 +132,6 @@ Loading a palette writes those five ratios directly to the operators; their
 ratios can then be tuned independently and are preserved when the algorithm
 changes.
 PM depth is tuned through these recursive algorithms
-
-<!-- TODO(you): check the arrows below — drawn from the README's own description of the chain; Chandas listens "before and after". -->
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"primaryColor":"#000000","primaryTextColor":"#ffffff","primaryBorderColor":"#ffffff","lineColor":"#ffffff","secondaryColor":"#000000","tertiaryColor":"#000000","background":"#000000","clusterBkg":"#000000","clusterBorder":"#ffffff","edgeLabelBackground":"#000000"}}}%%
@@ -309,8 +307,7 @@ rₙ = ρⁿ⁻¹    ρ = 1.3247…</pre></td>
 &nbsp;
 φ² = φ + 1
 ρ³ = ρ + 1
-&nbsp;
-<!-- TODO(you): index response is φ-shaped too: index^φ^(depth−2) --></pre></td>
+&nbsp;</pre></td>
 </tr>
 </table>
 
@@ -429,26 +426,6 @@ discovered_harmony  lil_glider          saturated_woof
 drama               logarhythm          shim
 drifting            mathsmatic          shuffling_a_deck
 </pre>
-
-## Contributors
-
-
-
-<table align="center">
-<tr>
-<td valign="top"><pre>PRESETS → core bank
-</pre></td>
-<td valign="top"><pre>BUGS → issues
-</pre></td>
-<td valign="top"><pre>CODE
-</pre></td>
-</tr>
-</table>
-
-<!-- contributors: replace with names/handles as they land -->
-<p align="center"><sub>akindoflikeness / AKOL</sub></p>
-
-<br>
 
 ## On AI
 

@@ -48,6 +48,11 @@ float soft_clip_to(float x, float ceiling);
 #define LIMITER_CEILING_DB_MAX (-0.1f)
 #define LIMITER_LOOKAHEAD_S 0.001f
 #define LIMITER_RELEASE_S 0.080f
+/* output gain, applied just ahead of the limiter */
+#define OUTPUT_GAIN_DB_MIN (-24.0f)
+#define OUTPUT_GAIN_DB_MAX 24.0f
+#define OUTPUT_GAIN_DB_DEFAULT 0.0f
+#define OUTPUT_GAIN_GLIDE_S 0.02f
 
 typedef struct {
     Stereo *delay;
@@ -55,6 +60,7 @@ typedef struct {
     size_t len, write;
     float history_l[4], history_r[4];
     float gain, release_k, ceiling, reduction_db;
+    float drive, drive_to, drive_k; /* output gain as a linear factor */
     bool enabled;
 } Limiter;
 
@@ -62,6 +68,7 @@ void limiter_init(Limiter *l, float sample_rate);
 void limiter_free(Limiter *l);
 void limiter_clear(Limiter *l);
 void limiter_set(Limiter *l, bool enabled, float ceiling_db);
+void limiter_set_gain(Limiter *l, float gain_db);
 Stereo limiter_process(Limiter *l, Stereo x);
 float limiter_reduction_db(const Limiter *l);
 
@@ -937,6 +944,7 @@ typedef struct {
     float warmth;
     bool limiter_enabled;
     float limiter_ceiling_db;
+    float output_gain_db;
     /* the note envelope (State.adsr), which lives outside Patch */
     float attack_s, decay_s, sustain, release_s;
     bool drone;

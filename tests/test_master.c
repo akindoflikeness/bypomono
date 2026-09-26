@@ -55,9 +55,35 @@ static void output_limiter_is_linked_bounded_and_recovers(void) {
     limiter_free(&l);
 }
 
+static void output_gain_glides_to_its_level_and_the_limiter_still_holds(void) {
+    Limiter l;
+    limiter_init(&l, 48000.0f);
+    limiter_set(&l, false, -1.0f);
+    for (int i = 0; i < 480; i++) limiter_process(&l, (Stereo){0.1f, 0.1f});
+    limiter_set_gain(&l, 6.0f);
+    float prev = 0.1f, worst = 0.0f, y = 0.0f;
+    for (int i = 0; i < 48000; i++) {
+        y = limiter_process(&l, (Stereo){0.1f, 0.1f}).l;
+        worst = fmaxf(worst, fabsf(y - prev));
+        prev = y;
+    }
+    CHECK(fabsf(y - 0.1f * powf(10.0f, 6.0f / 20.0f)) < 1e-4f,
+          "+6 dB settled at %g", y);
+    CHECK(worst < 0.01f, "the gain stepped by %g", worst);
+
+    limiter_set(&l, true, -1.0f);
+    limiter_set_gain(&l, OUTPUT_GAIN_DB_MAX);
+    float ceiling = powf(10.0f, -1.0f / 20.0f), peak = 0.0f;
+    for (int i = 0; i < 48000; i++)
+        peak = fmaxf(peak, fabsf(limiter_process(&l, (Stereo){0.5f, 0.5f}).l));
+    CHECK(peak <= ceiling + 1e-6f, "pushed output escaped the ceiling: %g", peak);
+    limiter_free(&l);
+}
+
 void test_master(void) {
     quiet_passes_untouched_and_loud_cannot_escape();
     the_knee_has_no_corner();
     a_raised_ceiling_does_not_move_quiet_signal();
     output_limiter_is_linked_bounded_and_recovers();
+    output_gain_glides_to_its_level_and_the_limiter_still_holds();
 }

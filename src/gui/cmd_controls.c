@@ -41,6 +41,7 @@ static const ControlSpec SPECS[] = {
     {"note", CT_NOTE, 0, 0, 127, true},
     {"limiter", CT_LIMITER, 0, 0, 1, true},
     {"ceiling", CT_PARAM, PARAM_CEILING, 0, 0, false},
+    {"output", CT_PARAM, PARAM_OUTPUT, 0, 0, false},
 };
 
 static float spec_lo(const ControlSpec *s) {

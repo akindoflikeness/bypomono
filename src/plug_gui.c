@@ -131,6 +131,7 @@ static void refresh_shadows(App *a, Plug *p) {
     a->shadow_warmth = s.warmth;
     a->shadow_limiter_enabled = s.limiter_enabled;
     a->shadow_limiter_ceiling_db = s.limiter_ceiling_db;
+    a->shadow_output_gain_db = s.output_gain_db;
     a->drone_hz = s.drone_hz;
     a->shadow_attack_s = s.attack_s;
     a->shadow_decay_s = s.decay_s;

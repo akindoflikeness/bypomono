@@ -157,8 +157,6 @@ void draw_space_column(App *a, Ui *ui, Rct r) {
     FontId f = ui_font(12.0f);
     r = rct_shrink(r, 6.0f);
 
-    param_fader(a, ui, cut_bottom(&r, FADER_H), PARAM_CEILING);
-    cut_bottom(&r, GROUP);
     Rct gr = cut_bottom(&r, text_row_height(f));
     char meter[32];
     snprintf(meter, sizeof meter, "GR %.1f dB", (double)a->limiter_reduction_db);
@@ -169,6 +167,8 @@ void draw_space_column(App *a, Ui *ui, Rct r) {
         a->shadow_limiter_enabled = !a->shadow_limiter_enabled;
         params_send(a, PG_LIMITER);
     }
+    cut_bottom(&r, GROUP);
+    param_fader(a, ui, cut_bottom(&r, FADER_H), PARAM_OUTPUT);
     cut_bottom(&r, SECTION);
 
     paint_pentagram(a, ui, cut_top(&r, PENTAGRAM_H));

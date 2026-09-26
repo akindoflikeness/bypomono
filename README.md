@@ -34,7 +34,7 @@
 <pre align="center">
 ┌────────────────────────────────────────────────────────────────────┐
 │  <a href="#download">DOWNLOAD</a>  ·  <a href="#install">INSTALL</a>  ·  <a href="#build-from-source">BUILD</a>  ·  <a href="#algorithmic-phase-modulation">PM</a>  ·  <a href="#phase-violence">VIOLENCE</a>  ·  <a href="#operator-structures">OPERATORS</a>  │
-│     <a href="#chambers">CHAMBERS</a>  ·  <a href="#ratio-palettes">RATIOS</a>  ·  <a href="#progenitor">PROGENITOR</a>  ·  <a href="#safe-output">OUTPUT</a>  ·  <a href="#console">CONSOLE</a>      │
+│     <a href="#chambers">CHAMBERS</a>  ·  <a href="#ratio-palettes">RATIOS</a>  ·  <a href="#progenitor">PROGENITOR</a>  ·  <a href="#output">OUTPUT</a>  ·  <a href="#console">CONSOLE</a>      │
 │           <a href="#playing">PLAYING</a>  ·  <a href="#presets">PRESETS</a>  ·  <a href="#contributors">CONTRIBUTORS</a>  ·  <a href="#on-ai">ON AI</a>           │
 └────────────────────────────────────────────────────────────────────┘
 </pre>
@@ -149,7 +149,7 @@ flowchart LR
   OPS -. pre .-> CH
   ROOM -. post .-> CH
   SEQ["melody · pitch sequencer"] -. sync .-> CH
-  CH --> LIM["SAFE OUTPUT"]
+  CH --> LIM["output · SAFE OUTPUT"]
   LIM --> OUT[".wav 48k/32f"]
   MIDI["MIDI CC · console"] -.-> OPS
 ```
@@ -333,12 +333,13 @@ Named chandas, the ancient Indian study of Sanskrit poetic metre. In the work tr
 </tr>
 </table>
 
-## Safe Output
+## Output
 
 The signal path is transparent: nothing colours the sound after Chandas.
-SAFE OUTPUT switches on a true-peak limiter at the very end. It looks one
-millisecond ahead, links left and right, and holds a ceiling you set from
--12 to -0.1 dBTP (default -1). The GR readout shows how hard it is working.
+The output fader sets the level from -24 to +24 dB, saved with each preset,
+so a quiet patch can be brought up. It feeds SAFE OUTPUT, a true-peak limiter
+that holds everything under -1 dBTP; the GR readout shows how hard it is
+working.
 
 ## Console
 

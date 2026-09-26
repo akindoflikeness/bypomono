@@ -110,6 +110,7 @@ void app_init_defaults(App *a) {
     a->shadow_warmth = s.warmth;
     a->shadow_limiter_enabled = s.limiter_enabled;
     a->shadow_limiter_ceiling_db = s.limiter_ceiling_db;
+    a->shadow_output_gain_db = s.output_gain_db;
     a->shadow_attack_s = s.attack_s;
     a->shadow_decay_s = s.decay_s;
     a->shadow_sustain = s.sustain;

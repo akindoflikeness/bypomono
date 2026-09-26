@@ -108,7 +108,10 @@ void limiter_init(Limiter *l, float sample_rate) {
     l->delay = calloc(l->len, sizeof *l->delay);
     l->peaks = calloc(l->len, sizeof *l->peaks);
     l->release_k = expf(-1.0f / (LIMITER_RELEASE_S * fmaxf(sample_rate, 1.0f)));
+    l->drive_k = 1.0f - expf(-1.0f / (OUTPUT_GAIN_GLIDE_S * fmaxf(sample_rate, 1.0f)));
     limiter_set(l, true, LIMITER_CEILING_DB_DEFAULT);
+    limiter_set_gain(l, OUTPUT_GAIN_DB_DEFAULT);
+    l->drive = l->drive_to;
     limiter_clear(l);
 }
 
@@ -134,7 +137,15 @@ void limiter_set(Limiter *l, bool enabled, float ceiling_db) {
     l->ceiling = powf(10.0f, ceiling_db / 20.0f);
 }
 
+void limiter_set_gain(Limiter *l, float gain_db) {
+    gain_db = clampf(gain_db, OUTPUT_GAIN_DB_MIN, OUTPUT_GAIN_DB_MAX);
+    l->drive_to = powf(10.0f, gain_db / 20.0f);
+}
+
 Stereo limiter_process(Limiter *l, Stereo x) {
+    l->drive += (l->drive_to - l->drive) * l->drive_k;
+    x.l *= l->drive;
+    x.r *= l->drive;
     if (!l->delay || !l->peaks || l->len == 0) return x;
     float peak = reconstructed_peak(l, x);
     l->delay[l->write] = x;

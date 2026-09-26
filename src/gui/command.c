@@ -246,6 +246,7 @@ static const Verb VERBS[] = {
     CONTROL("haunt", "<0-1>", "set phase-inverting cross-feed"),
     CONTROL("limiter", "<0|1>", "toggle the final true-peak safety limiter"),
     CONTROL("ceiling", "<-12 to -0.1 dBTP>", "set the safety limiter ceiling"),
+    CONTROL("output", "<-24 to 24 dB>", "set the output gain, ahead of the safety limiter"),
     CONTROL("level", "<0-1>", "set master output level"),
     {.name = "chandas", .group = G_SOUND,
      .about = "show or shape the Chandas granular delay",

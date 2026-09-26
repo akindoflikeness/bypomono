@@ -369,7 +369,7 @@ static const char *const SESSION_KEYS[] = {
     "patch",   "verb",    "melody",    "drone_hz",  "chandas",
     "tempo_bpm", "warmth", "harmony",  "release_s", "drone",
     "attack_s",  "decay_s", "sustain", "mods", "limiter_enabled",
-    "limiter_ceiling_db", "pitch"};
+    "limiter_ceiling_db", "pitch", "output_gain_db"};
 static const char *const MODS_KEYS[] = {"seqs", "routes", "lfos"};
 /* older presets also carry "gates", which are no longer read */
 static const char *const SEQ_KEYS[] = {"slot",     "mode",   "smooth",
@@ -956,7 +956,7 @@ bool session_from_json(const char *json, Session *out) {
     char key[64];
     int r;
     while ((r = js_obj_next(&j, &first, key, sizeof key)) == 1) {
-        int k = js_key(key, SESSION_KEYS, 17);
+        int k = js_key(key, SESSION_KEYS, 18);
         if (k == 7) k = 4;
         if (k >= 0 && js_dup(&j, &seen, k)) return false;
         switch (k) {
@@ -976,6 +976,7 @@ bool session_from_json(const char *json, Session *out) {
         case 14: s.limiter_enabled = js_bool(&j, s.limiter_enabled); break;
         case 15: s.limiter_ceiling_db = js_f32(&j, s.limiter_ceiling_db); break;
         case 16: parse_pitch(&j, &s.pitch); break;
+        case 17: s.output_gain_db = js_f32(&j, s.output_gain_db); break;
         default: js_skip(&j); break;
         }
         if (j.err) return false;
@@ -1260,6 +1261,7 @@ char *session_to_json(const Session *s) {
     sb_key_f(&b, "  ", "warmth", s->warmth, true);
     sb_key_b(&b, "  ", "limiter_enabled", s->limiter_enabled, true);
     sb_key_f(&b, "  ", "limiter_ceiling_db", s->limiter_ceiling_db, true);
+    sb_key_f(&b, "  ", "output_gain_db", s->output_gain_db, true);
     sb_key_f(&b, "  ", "attack_s", s->attack_s, true);
     sb_key_f(&b, "  ", "decay_s", s->decay_s, true);
     sb_key_f(&b, "  ", "sustain", s->sustain, true);

@@ -75,6 +75,8 @@ const ParamSpec PLUG_SPEC[P_COUNT] = {
     [P_LIMITER_CEILING] = {"ceiling dbtp", "output", LIMITER_CEILING_DB_MIN,
                             LIMITER_CEILING_DB_MAX, LIMITER_CEILING_DB_DEFAULT,
                             K_FLOAT},
+    [P_OUTPUT_GAIN] = {"output db", "output", OUTPUT_GAIN_DB_MIN,
+                       OUTPUT_GAIN_DB_MAX, OUTPUT_GAIN_DB_DEFAULT, K_FLOAT},
 };
 
 double plug_getv(const Plug *p, int id) {
@@ -225,6 +227,7 @@ static void apply_vals(Plug *p) {
     tape_set(&p->tape, (float)getv(p, P_WARMTH));
     limiter_set(&p->limiter, getv(p, P_LIMITER) > 0.5,
                 (float)getv(p, P_LIMITER_CEILING));
+    limiter_set_gain(&p->limiter, (float)getv(p, P_OUTPUT_GAIN));
     p->base.patch = *voice_bank_patch(&p->voice);
     p->base.verb = vp;
     p->base.chandas = cp;
@@ -279,6 +282,7 @@ Session plug_session_of_vals(const Plug *p) {
     s.warmth = (float)getv(p, P_WARMTH);
     s.limiter_enabled = getv(p, P_LIMITER) > 0.5;
     s.limiter_ceiling_db = (float)getv(p, P_LIMITER_CEILING);
+    s.output_gain_db = (float)getv(p, P_OUTPUT_GAIN);
     s.attack_s = (float)getv(p, P_ATTACK);
     s.decay_s = (float)getv(p, P_ENV_DECAY);
     s.sustain = (float)getv(p, P_SUSTAIN);
@@ -334,6 +338,7 @@ static void vals_of_session(Plug *p, const Session *s) {
     setv(p, P_WARMTH, s->warmth);
     setv(p, P_LIMITER, s->limiter_enabled ? 1 : 0);
     setv(p, P_LIMITER_CEILING, s->limiter_ceiling_db);
+    setv(p, P_OUTPUT_GAIN, s->output_gain_db);
     setv(p, P_ATTACK, s->attack_s);
     setv(p, P_ENV_DECAY, s->decay_s);
     setv(p, P_SUSTAIN, s->sustain);
@@ -430,6 +435,8 @@ static void apply_gui_event(Plug *p, Event ev) {
         limiter_set(&p->limiter, ev.u.limiter.enabled, ev.u.limiter.ceiling_db);
         setv(p, P_LIMITER, ev.u.limiter.enabled ? 1 : 0);
         setv(p, P_LIMITER_CEILING, ev.u.limiter.ceiling_db);
+        limiter_set_gain(&p->limiter, ev.u.limiter.gain_db);
+        setv(p, P_OUTPUT_GAIN, ev.u.limiter.gain_db);
         break;
     case EV_RESET_CHANDAS: chandas_reset(&p->chandas); break;
     case EV_SET_TEMPO: plug_set_tempo(p, ev.u.f); break;

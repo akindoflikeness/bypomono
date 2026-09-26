@@ -46,6 +46,9 @@ const Control PARAMS[PARAM_COUNT] = {
     [PARAM_CEILING] = {"ceiling", "ceiling", LIMITER_CEILING_DB_MIN,
                        LIMITER_CEILING_DB_MAX, CURVE_LINEAR, 1, false,
                        "%.1f dBTP", "dbtp", NULL, PG_LIMITER},
+    [PARAM_OUTPUT] = {"output", "output", OUTPUT_GAIN_DB_MIN, OUTPUT_GAIN_DB_MAX,
+                      CURVE_LINEAR, 1, false, "%+.1f dB", "db", NULL,
+                      PG_LIMITER},
     [PARAM_MEL_RATE] = {"mel rate", "rate hz", 0.1f, 8, CURVE_LOG, 1, false,
                         "%.2f", "hz", NULL, PG_MELODY},
     [PARAM_MEL_RANGE] = {"mel range", "range", 1, 13, CURVE_LINEAR, 1, true,
@@ -96,6 +99,7 @@ float param_get(const App *a, ParamId id) {
     case PARAM_SUSTAIN: return a->shadow_sustain;
     case PARAM_RELEASE: return a->shadow_release_s;
     case PARAM_CEILING: return a->shadow_limiter_ceiling_db;
+    case PARAM_OUTPUT: return a->shadow_output_gain_db;
     case PARAM_MEL_RATE: return a->shadow_melody.rate_hz;
     case PARAM_MEL_RANGE: return (float)a->shadow_melody.range_degrees;
     case PARAM_MEL_ROOT: return (float)a->shadow_melody.root_midi;
@@ -134,6 +138,7 @@ void param_set(App *a, ParamId id, float v) {
     case PARAM_SUSTAIN: a->shadow_sustain = v; break;
     case PARAM_RELEASE: a->shadow_release_s = v; break;
     case PARAM_CEILING: a->shadow_limiter_ceiling_db = v; break;
+    case PARAM_OUTPUT: a->shadow_output_gain_db = v; break;
     case PARAM_MEL_RATE: a->shadow_melody.rate_hz = v; break;
     case PARAM_MEL_RANGE: a->shadow_melody.range_degrees = (uint8_t)v; break;
     case PARAM_MEL_ROOT: a->shadow_melody.root_midi = (uint8_t)v; break;
@@ -177,6 +182,7 @@ float param_default(const App *a, ParamId id) {
     case PARAM_SUSTAIN: return e.sustain;
     case PARAM_RELEASE: return e.release_s;
     case PARAM_CEILING: return LIMITER_CEILING_DB_DEFAULT;
+    case PARAM_OUTPUT: return OUTPUT_GAIN_DB_DEFAULT;
     case PARAM_MEL_RATE: return m.rate_hz;
     case PARAM_MEL_RANGE: return (float)m.range_degrees;
     case PARAM_MEL_ROOT: return (float)m.root_midi;
@@ -244,7 +250,8 @@ void params_send(App *a, int groups) {
     if (groups & PG_LIMITER)
         app_send(a, (Event){.kind = EV_SET_LIMITER,
                             .u.limiter = {a->shadow_limiter_enabled,
-                                          a->shadow_limiter_ceiling_db}});
+                                          a->shadow_limiter_ceiling_db,
+                                          a->shadow_output_gain_db}});
     if (groups & PG_DRONE)
         app_send(a, (Event){.kind = EV_GLIDE_TO, .u.f = a->drone_hz});
     if (groups & PG_ENV) gui_sync_adsr(a);

@@ -74,7 +74,7 @@ typedef struct {
         VerbParams verb;
         MelodyParams melody;
         ChandasParams chandas;
-        struct { bool enabled; float ceiling_db; } limiter;
+        struct { bool enabled; float ceiling_db, gain_db; } limiter;
         EnvParams adsr;
         float f;
         bool flag;
@@ -228,6 +228,7 @@ typedef struct App {
     float shadow_warmth;
     bool shadow_limiter_enabled;
     float shadow_limiter_ceiling_db;
+    float shadow_output_gain_db;
     float limiter_reduction_db;
     float shadow_attack_s, shadow_decay_s, shadow_sustain, shadow_release_s;
     float tempo_bpm;

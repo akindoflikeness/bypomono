@@ -177,6 +177,7 @@ static void engine_apply(AudioState *s, Event ev) {
         break;
     case EV_SET_LIMITER:
         limiter_set(&s->limiter, ev.u.limiter.enabled, ev.u.limiter.ceiling_db);
+        limiter_set_gain(&s->limiter, ev.u.limiter.gain_db);
         break;
     case EV_SET_SEQ: mod_set_seq(&s->mod, ev.u.seq.slot, ev.u.seq.p); break;
     case EV_SET_ROUTE:
@@ -378,6 +379,7 @@ int gui_audio_start(App *a) {
     tape_init(&s->tape, a->sample_rate);
     limiter_init(&s->limiter, a->sample_rate);
     limiter_set(&s->limiter, a->shadow_limiter_enabled, a->shadow_limiter_ceiling_db);
+    limiter_set_gain(&s->limiter, a->shadow_output_gain_db);
     mod_init(&s->mod, a->sample_rate);
     s->base.patch = a->shadow;
     s->base.verb = a->shadow_verb;

@@ -1,0 +1,95 @@
+{
+  "patch": {
+    "algorithm": "SSSP",
+    "ratio_mode": "Plastic",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 2.3247182,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 1.7548778,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 1.324718,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.452459,
+    "index": 0.08713529,
+    "rip": 0.16171618,
+    "master_level": 0.6,
+    "glide_seconds": 0.0,
+    "field": 0.6639344,
+    "curve": 0.08000012,
+    "voices": 1,
+    "unison": 2,
+    "unison_detune": 14.280568
+  },
+  "verb": {
+    "mix": 0.12391304,
+    "ghost": 0.23043478,
+    "decay": 1.2396969,
+    "damp": 0.22813043,
+    "haunt": 0.6118421
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "Scale",
+    "scale": "NeapolitanMinor",
+    "root_midi": 52,
+    "range_degrees": 12,
+    "rate_hz": 6.0599856,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 94.24923,
+  "chandas": {
+    "enabled": true,
+    "mix": 0.12826087,
+    "sync": false,
+    "division": 22,
+    "rate_hz": 4.225721,
+    "spread": 0.5326087,
+    "size": 0.76913047,
+    "warp": 0.79565215,
+    "dimension": 0.21304348,
+    "tail": 0.75652176
+  },
+  "mods": {
+    "lfos": [
+      {"slot": 1, "shape": "sine", "mode": "free", "unipolar": true, "rate_hz": 1.0, "division": "1/1", "phase": 0.0},
+      {"slot": 2, "shape": "tri", "mode": "free", "unipolar": false, "rate_hz": 1.0, "phase": 0.0}
+    ],
+    "routes": [
+      {"lfo": 1, "target": "index", "depth": 0.4},
+      {"lfo": 1, "target": "decay", "depth": 0.0},
+      {"lfo": 2, "target": "decay", "depth": -1.0}
+    ]
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.59565216,
+  "attack_s": 0.0035191064,
+  "decay_s": 0.13903007,
+  "sustain": 0.5666666,
+  "release_s": 0.35614824,
+  "drone": false
+}

@@ -666,7 +666,35 @@ static void preset_save_in_writes_nothing_outside_the_preset_dir(void) {
     CHECK(present(want), "a plain save did not write %s", want);
 }
 
+/* every preset in the shipped bank loads in this build */
+static void the_shipped_bank_parses(void) {
+    DIR *d = opendir("presets/BYPO");
+    CHECK(d != NULL, "no presets/BYPO beside the tests");
+    if (!d) return;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        size_t len = strlen(e->d_name);
+        if (len < 6 || strcmp(e->d_name + len - 5, ".json") != 0) continue;
+        char path[512];
+        snprintf(path, sizeof path, "presets/BYPO/%s", e->d_name);
+        FILE *f = fopen(path, "rb");
+        CHECK(f != NULL, "cannot open %s", path);
+        if (!f) continue;
+        static char buf[1 << 16];
+        size_t got = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[got] = 0;
+        Session s;
+        CHECK(session_from_json(buf, &s), "%s does not parse", path);
+        n++;
+    }
+    closedir(d);
+    CHECK(n > 0, "the shipped bank is empty");
+}
+
 void test_presets_hostile(void) {
+    the_shipped_bank_parses();
     if (!tmp_home_open()) {
         CHECK(false, "could not make a temp data home under /tmp");
         return;

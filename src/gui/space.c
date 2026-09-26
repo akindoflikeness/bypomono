@@ -150,8 +150,8 @@ static const Tab SPACE[SPACE_TABS] = {
     [TAB_CHANDAS] = {"CHANDAS", draw_chandas_page},
 };
 
-/* warmth and the limiter sit at the bottom, the same under either page;
-   they are cut from the bottom up so the pages get whatever is left */
+/* the limiter sits at the bottom, the same under either page;
+   it is cut from the bottom up so the pages get whatever is left */
 void draw_space_column(App *a, Ui *ui, Rct r) {
     Canvas *c = ui->canvas;
     FontId f = ui_font(12.0f);

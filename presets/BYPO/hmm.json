@@ -1,0 +1,94 @@
+{
+  "patch": {
+    "algorithm": "PPSP",
+    "ratio_mode": "Fibonacci",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 16.659405,
+        "detune_cents": 0.0,
+        "level": 0.05232558
+      },
+      {
+        "enabled": true,
+        "ratio": 2.1110005,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.71,
+    "index": 0.10889319,
+    "rip": 0.21975806,
+    "master_level": 0.8,
+    "glide_seconds": 0.0012295281,
+    "field": 1.0,
+    "curve": 0.7400001,
+    "voices": 4,
+    "unison": 2,
+    "unison_detune": 23.943197
+  },
+  "verb": {
+    "mix": 0.24009901,
+    "ghost": 0.24,
+    "decay": 0.12,
+    "damp": 0.55,
+    "haunt": 0.45
+  },
+  "melody": {
+    "enabled": false,
+    "tuning": "Scale",
+    "scale": "Phrygian",
+    "root_midi": 28,
+    "range_degrees": 5,
+    "rate_hz": 5.5,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 50.0,
+  "chandas": {
+    "enabled": false,
+    "mix": 0.35,
+    "sync": true,
+    "division": 12,
+    "rate_hz": 1.0,
+    "spread": 0.35,
+    "size": 0.75,
+    "warp": 0.0,
+    "dimension": 0.0,
+    "tail": 0.0
+  },
+  "mods": {
+    "seqs": [
+      {"slot": 1, "mode": "once", "smooth": true, "length_s": 0.33088705, "values": [1.0, 0.9324324, 0.8581081, 0.8175676, 0.6418919, 0.6554054, 0.6047297, 0.5945946, 0.527027, 0.39864865, 0.19256757, 0.14527027, 0.08445946, 0.02364865, 0.0, 0.0], "gates": []}
+    ],
+    "routes": [
+      {"seq": 1, "target": "index", "depth": 1.0, "snap": false}
+    ]
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.5,
+  "limiter_enabled": true,
+  "limiter_ceiling_db": -1.0,
+  "attack_s": 0.004120271,
+  "decay_s": 0.7668299,
+  "sustain": 0.42333335,
+  "release_s": 3.677258,
+  "drone": false
+}

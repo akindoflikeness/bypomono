@@ -1,0 +1,94 @@
+{
+  "patch": {
+    "algorithm": "PSSP",
+    "ratio_mode": "Fibonacci",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 5.5251083,
+        "detune_cents": 0.0,
+        "level": 0.479798
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.42929292
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 0.3030303
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 0.25757575
+      },
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 0.33333334
+      }
+    ],
+    "feedback": 0.88360655,
+    "index": 0.5959541,
+    "rip": 0.6518152,
+    "master_level": 0.6,
+    "glide_seconds": 0.00077789585,
+    "field": 0.5508197,
+    "curve": 0.7500001,
+    "voices": 1,
+    "unison": 2,
+    "unison_detune": 6.802607
+  },
+  "verb": {
+    "mix": 0.0,
+    "ghost": 0.20217392,
+    "decay": 1.2396969,
+    "damp": 0.22813043,
+    "haunt": 0.6118421
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "Scale",
+    "scale": "Phrygian",
+    "root_midi": 40,
+    "range_degrees": 8,
+    "rate_hz": 5.5,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 94.24923,
+  "chandas": {
+    "enabled": true,
+    "mix": 0.39565217,
+    "sync": true,
+    "division": 10,
+    "rate_hz": 4.225721,
+    "spread": 0.38043478,
+    "size": 0.78978264,
+    "warp": 0.79565215,
+    "dimension": 0.18913044,
+    "tail": 0.2521739
+  },
+  "mods": {
+    "lfos": [
+      {"slot": 1, "shape": "sine", "mode": "free", "unipolar": true, "rate_hz": 1.0, "division": "2/1", "phase": 0.0},
+      {"slot": 2, "shape": "tri", "mode": "free", "unipolar": false, "rate_hz": 1.0, "phase": 0.0},
+      {"slot": 3, "shape": "drift", "mode": "free", "unipolar": false, "rate_hz": 1.0, "phase": 0.0},
+      {"slot": 4, "shape": "sine", "mode": "free", "unipolar": false, "rate_hz": 1.0, "phase": 0.1388889},
+      {"slot": 5, "shape": "sh", "mode": "free", "unipolar": false, "rate_hz": 0.5, "phase": 0.0}
+    ],
+    "routes": []
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.6956522,
+  "attack_s": 0.004844531,
+  "decay_s": 0.48926094,
+  "sustain": 0.38333353,
+  "release_s": 2.8052566,
+  "drone": true
+}

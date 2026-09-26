@@ -1,0 +1,98 @@
+{
+  "patch": {
+    "algorithm": "SSSS",
+    "ratio_mode": "Fibonacci",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.0,
+    "index": 0.007643179,
+    "rip": 0.0660066,
+    "master_level": 0.8,
+    "glide_seconds": 0.0012133662,
+    "field": 0.66885245,
+    "curve": 0.4033335,
+    "voices": 1,
+    "unison": 2,
+    "unison_detune": 0.62133837
+  },
+  "verb": {
+    "mix": 0.08478261,
+    "ghost": 0.0,
+    "decay": 0.09586771,
+    "damp": 0.0,
+    "haunt": 0.2609649
+  },
+  "melody": {
+    "enabled": false,
+    "tuning": "Scale",
+    "scale": "Phrygian",
+    "root_midi": 28,
+    "range_degrees": 5,
+    "rate_hz": 5.5,
+    "source": "GoldenWeyl"
+  },
+  "drone_hz": 46.17054,
+  "chandas": {
+    "enabled": false,
+    "mix": 0.0,
+    "sync": false,
+    "division": 16,
+    "rate_hz": 0.9116314,
+    "spread": 0.35,
+    "size": 0.75,
+    "warp": 0.0,
+    "dimension": 0.0,
+    "tail": 0.0
+  },
+  "mods": {
+    "lfos": [
+      {"slot": 1, "shape": "exp", "mode": "once", "unipolar": false, "rate_hz": 1.0, "division": "1/8", "phase": 0.0},
+      {"slot": 2, "shape": "exp", "mode": "once", "unipolar": false, "rate_hz": 1.0, "division": "1/2", "phase": 0.7222222},
+      {"slot": 3, "shape": "sine", "mode": "once", "unipolar": false, "rate_hz": 1.2, "phase": 0.6944444}
+    ],
+    "routes": [
+      {"lfo": 1, "target": "pitch", "depth": 1.0},
+      {"lfo": 2, "target": "rip", "depth": 0.8},
+      {"lfo": 2, "target": "index", "depth": 0.6},
+      {"lfo": 3, "target": "index", "depth": 0.8},
+      {"lfo": 1, "target": "index", "depth": 0.5}
+    ]
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.6434783,
+  "attack_s": 0.012401829,
+  "decay_s": 0.38819465,
+  "sustain": 0.0,
+  "release_s": 1.8069572,
+  "drone": false
+}

@@ -1,0 +1,107 @@
+{
+  "patch": {
+    "algorithm": "PPPP",
+    "ratio_mode": "Fibonacci",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": false,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.71,
+    "index": 0.43520603,
+    "rip": 0.2,
+    "master_level": 0.8,
+    "glide_seconds": 6.4349265e-6,
+    "voices": 4,
+    "unison": 2,
+    "unison_detune": 11.907201
+  },
+  "verb": {
+    "mix": 0.44059405,
+    "ghost": 0.24,
+    "decay": 0.9104299,
+    "damp": 0.55,
+    "haunt": 0.45
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "Scale",
+    "scale": "PhrygianDominant",
+    "root_midi": 47,
+    "range_degrees": 10,
+    "rate_hz": 3.8539696,
+    "source": "Xorshift",
+    "sync": false,
+    "division": "1/8"
+  },
+  "drone_hz": 50.0,
+  "chandas": {
+    "enabled": true,
+    "mix": 0.26980197,
+    "sync": true,
+    "division": 7,
+    "rate_hz": 1.0,
+    "spread": 0.5470297,
+    "size": 0.75,
+    "warp": 0.39356434,
+    "dimension": 0.0,
+    "tail": 0.0
+  },
+  "mods": {
+    "seqs": [
+      {"slot": 1, "mode": "loop", "smooth": false, "division": "1/16", "values": [0.47972974, 0.69134176, 0.8535534, 0.96193975, 1.0, 0.96193975, 0.8535534, 0.69134164, 0.49999997, 0.3086583, 0.14644656, 0.03806016, 0.0, 0.038060278, 0.14644673, 0.3086583]},
+      {"slot": 2, "mode": "loop", "smooth": true, "division": "1/16", "values": [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 0.875, 0.75, 0.625, 0.5, 0.375, 0.25, 0.125]}
+    ],
+    "routes": [
+      {"seq": 1, "target": "pitch", "depth": 0.04, "snap": false},
+      {"seq": 2, "target": "index", "depth": 0.73, "snap": false}
+    ]
+  },
+  "pitch": {
+    "enabled": false,
+    "division": "1/16",
+    "length": 16,
+    "root_midi": 45,
+    "snap": false,
+    "gate_len": 0.5,
+    "pitches": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "gates": [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+    "velocities": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.5,
+  "limiter_enabled": true,
+  "limiter_ceiling_db": -0.7774763,
+  "attack_s": 0.0060677086,
+  "decay_s": 0.92543966,
+  "sustain": 0.24666665,
+  "release_s": 3.9347064,
+  "drone": true
+}

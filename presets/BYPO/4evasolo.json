@@ -1,0 +1,97 @@
+{
+  "patch": {
+    "algorithm": "SSSP",
+    "ratio_mode": "Fibonacci",
+    "ops": [
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.23606797
+      },
+      {
+        "enabled": true,
+        "ratio": 1.0,
+        "detune_cents": 0.0,
+        "level": 0.381966
+      },
+      {
+        "enabled": true,
+        "ratio": 2.0,
+        "detune_cents": 0.0,
+        "level": 0.618034
+      },
+      {
+        "enabled": true,
+        "ratio": 3.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      },
+      {
+        "enabled": true,
+        "ratio": 5.0,
+        "detune_cents": 0.0,
+        "level": 1.0
+      }
+    ],
+    "feedback": 0.452459,
+    "index": 0.013173895,
+    "rip": 0.16171618,
+    "master_level": 0.6,
+    "glide_seconds": 0.0,
+    "field": 0.6639344,
+    "curve": 0.52666664,
+    "voices": 4,
+    "unison": 1,
+    "unison_detune": 14.280568
+  },
+  "verb": {
+    "mix": 0.45,
+    "ghost": 0.2173913,
+    "decay": 1.2396969,
+    "damp": 0.22813043,
+    "haunt": 0.6118421
+  },
+  "melody": {
+    "enabled": true,
+    "tuning": "Scale",
+    "scale": "NaturalMinor",
+    "root_midi": 52,
+    "range_degrees": 12,
+    "rate_hz": 1.9546245,
+    "source": "Xorshift"
+  },
+  "drone_hz": 94.24923,
+  "chandas": {
+    "enabled": true,
+    "mix": 0.4173913,
+    "sync": false,
+    "division": 22,
+    "rate_hz": 4.225721,
+    "spread": 0.5326087,
+    "size": 0.76913047,
+    "warp": 0.79565215,
+    "dimension": 0.21304348,
+    "tail": 0.75652176
+  },
+  "mods": {
+    "lfos": [
+      {"slot": 1, "shape": "sine", "mode": "free", "unipolar": true, "rate_hz": 1.0, "division": "1/2", "phase": 0.0},
+      {"slot": 2, "shape": "tri", "mode": "free", "unipolar": false, "rate_hz": 1.0, "phase": 0.0}
+    ],
+    "routes": [
+      {"lfo": 1, "target": "index", "depth": 0.6},
+      {"lfo": 1, "target": "decay", "depth": 0.0},
+      {"lfo": 2, "target": "decay", "depth": -1.0}
+    ]
+  },
+  "tempo_bpm": 120.0,
+  "warmth": 0.17608696,
+  "limiter_enabled": true,
+  "limiter_ceiling_db": -0.10000038,
+  "attack_s": 0.018486394,
+  "decay_s": 0.9457299,
+  "sustain": 0.32,
+  "release_s": 2.1041281,
+  "drone": false
+}

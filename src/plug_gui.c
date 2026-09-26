@@ -190,11 +190,15 @@ void gui_in_release_button(Gui *g) {
     g->pending.released = true;
 }
 
+void gui_in_drop_keys(Gui *g) {
+    memset(g->pending.key_down, 0, sizeof g->pending.key_down);
+    memset(g->pending.key_pressed, 0, sizeof g->pending.key_pressed);
+}
+
 void gui_in_cancel(Gui *g) {
     gui_in_release_button(g);
     g->pending.mouse_in_window = false;
-    memset(g->pending.key_down, 0, sizeof g->pending.key_down);
-    memset(g->pending.key_pressed, 0, sizeof g->pending.key_pressed);
+    gui_in_drop_keys(g);
 }
 
 void gui_in_text(Gui *g, const char *utf8, int n) {

@@ -99,6 +99,8 @@ void gui_in_text(Gui *g, const char *utf8, int n);
 void gui_in_release_button(Gui *g);
 /* focus left the editor: button, pointer and every held key */
 void gui_in_cancel(Gui *g);
+/* keyboard focus left while the pointer may still be dragging: keys only */
+void gui_in_drop_keys(Gui *g);
 
 /* the window lost its content: present again even if the editor did not
    change anything (X11 Expose) */

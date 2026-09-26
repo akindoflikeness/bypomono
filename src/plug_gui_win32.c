@@ -259,8 +259,9 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_GETDLGCODE: return DLGC_WANTALLKEYS;
     case WM_KILLFOCUS:
-        ReleaseCapture();
-        gui_in_cancel(g);
+        /* hosts take keyboard focus back mid-drag; losing the mouse is
+           WM_CAPTURECHANGED's job, so only keys are dropped here */
+        gui_in_drop_keys(g);
         return 0;
     case WM_CAPTURECHANGED:
         /* sent to the window that lost capture, including when this window

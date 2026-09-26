@@ -221,7 +221,9 @@ void backend_pump(Gui *g) {
         case Expose: gui_invalidate(g); break;
         case EnterNotify: gui_in_inside(g, true); break;
         case LeaveNotify: gui_in_inside(g, false); break;
-        case FocusOut: gui_in_cancel(g); break;
+        /* hosts take keyboard focus back mid-drag; the button-up still comes
+           here through the implicit pointer grab, so only keys are dropped */
+        case FocusOut: gui_in_drop_keys(g); break;
         default: break;
         }
     }

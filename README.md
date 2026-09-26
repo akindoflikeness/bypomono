@@ -10,7 +10,7 @@
   <a href="https://github.com/akindoflikeness/bypomono/releases/latest"><img src="https://img.shields.io/github/v/release/akindoflikeness/bypomono?style=flat-square&labelColor=000000&color=ffffff&label=release" alt="latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-000000?style=flat-square&labelColor=000000&color=ffffff" alt="MIT"></a>
   <img src="https://img.shields.io/badge/format-standalone%20%2B%20CLAP-000000?style=flat-square&labelColor=000000&color=ffffff&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExLjMsMTQuMmgxLjFjLTAuMSwwLjUtMC4yLDEtMC4yLDEuNXYxLjVoLTAuOWMtMS4yLDAtMi4xLDEtMi4xLDIuMWMwLDEuMiwxLDIuMSwyLjEsMi4xczIuMS0xLDIuMS0yLjF2LTMuN2MwLTIuOSwyLjMtNS4yLDUuMi01LjJjMC4yLDAsMC4zLDAsMC41LDBMMTYsNS4ybC01LjIsOUMxMSwxNC4yLDExLjEsMTQuMiwxMS4zLDE0LjJ6Ii8%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIzLjMsMTcuOWMtMC44LDEuOC0yLjYsMy00LjcsM2gtMS4xYzAuMS0wLjUsMC4yLTEsMC4yLTEuNXYtMS41aDAuOWMxLjIsMCwyLjEtMSwyLjEtMi4xYzAtMS4yLTEtMi4xLTIuMS0yLjFjLTEuMiwwLTIuMSwxLTIuMSwyLjFsMCwzLjdjMCwyLjktMi4zLDUuMi01LjIsNS4yYy0yLjEsMC0zLjktMS4yLTQuNy0zTDQsMjZoMjRMMjMuMywxNy45eiIvPjwvc3ZnPg%3D%3D" alt="standalone + CLAP">
-  <a href="https://discord.com/invite/xBtGXU7Etf"><img src="https://img.shields.io/badge/discord-invite-000000?style=flat-square&labelColor=000000&color=ffffff&logo=discord&logoColor=ffffff" alt="Discord"></a>
+
   <img src="https://img.shields.io/badge/os-linux%20%C2%B7%20macos%20%C2%B7%20windows-000000?style=flat-square&labelColor=000000&color=ffffff" alt="linux · macos · windows">
 </p>
 
@@ -160,7 +160,7 @@ flowchart LR
 
 There are some additional controls that allow for even deeper timbral exploration that I encourage you to experiment with those being
 RIP, haunt, and ghost. Operators can be turned off removing not only its signal from the output but from the modulation signal chain.
-I'd highly recommend experimenting with turning off operators to find unique mixtures (especially in conjunction with The Room's ghost).
+I'd highly recommend experimenting with turning off operators to find fun mixtures (especially in conjunction with The Room's ghost).
 
 A sum of the carriers leaks into a short delay through an all pass filter to actively try to cause phase cancellation by modulating the phase of the voice with its own altered past. The delay and the phase rotation of the allpass filter work together - bending time to modulate away the voice, the modulation rarely manages to stop the voice - merely tearing it apart as it drones on.
 
@@ -256,7 +256,7 @@ A sum of the carriers leaks into a short delay through an all pass filter to act
 <tr>
 <td width="50%" valign="top">
 
-The Room is a uniquely close sounding reverb with a dirty tank and a modulation linked dampener (via field).
+The Room is a close sounding reverb with a dirty tank and a modulation linked dampener (via field).
 It has its own tricks with haunt and ghost that have novel effects, and of course The Room was structured using fibonacci recursion.
 Here it was used to define phase offsets via the all pass filter networks.
 
@@ -320,7 +320,7 @@ rₙ = ρⁿ⁻¹    ρ = 1.3247…</pre></td>
 <td width="50%" align="center"><img src=".github/readme/chandas.png" width="320" alt="Chandas"></td>
 <td width="50%" valign="top">
 
-**Chandas listens to the signal before and after we do.** It's a unique granular delay that can sync with the internal sequencer.
+**Chandas listens to the signal before and after we do.** It's a granular delay that can sync with the internal sequencer.
 Whilst syncing it has a polyrhythmic texture though Chandas also features its own massive lush reverb with two multi controls to tune
 its bloom.
 

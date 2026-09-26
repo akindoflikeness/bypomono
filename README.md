@@ -24,7 +24,7 @@
 <br>
 
 <p align="center">
-  <img src=".github/readme/window.png" width="880" alt="BYPO standalone">
+  <img src=".github/readme/hero.gif" width="880" alt="BYPO standalone">
 </p>
 
 <p align="center"><b>One tone, many voices.</b> An untamed, opinionated instrument that uses<br>mathematical irrationality to reach uniquely stable inharmonic timbres.</p>

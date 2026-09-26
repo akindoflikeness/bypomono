@@ -676,6 +676,20 @@ static void odd_file_names_are_reachable(void) {
     preset_rescan(&app);
     CHECK(run_ok("rm USER/shun~1", err, sizeof err), "rm odd name: %s", err);
     CHECK(!present(odd), "shun~1 still there");
+
+    /* an exact name wins over a legacy spelling that cleans to the same */
+    char spaced[1024], joined[1024];
+    in_dir("the conch.json", spaced, sizeof spaced);
+    in_dir("the_conch.json", joined, sizeof joined);
+    json = session_to_json(&s);
+    CHECK(json && write_file(spaced, json) && write_file(joined, json),
+          "wrote both conches");
+    free(json);
+    preset_rescan(&app);
+    CHECK(run_ok("rm the_conch", err, sizeof err), "rm exact: %s", err);
+    CHECK(!present(joined) && present(spaced), "rm took the wrong conch");
+    CHECK(run_ok("rm the_conch", err, sizeof err), "rm legacy: %s", err);
+    CHECK(!present(spaced), "the conch still there");
 }
 
 static void trash_and_undo_round_trip(void) {

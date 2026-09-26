@@ -48,7 +48,7 @@
 #define INFO_BUTTON_W (INFO_BUTTON_SIDE + 2.0f * GAP)
 #define BEND_SEMITONES 2.0f
 #define VEIL 0.5f
-#define APP_VERSION "1.2.3"
+#define APP_VERSION "1.2.4"
 
 /* scale.c */
 /* largest quarter step whose magnified grid fits avail_w x avail_h less

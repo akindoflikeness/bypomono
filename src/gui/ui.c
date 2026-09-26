@@ -55,9 +55,11 @@ Resp ui_interact(Ui *ui, UiId id, Rct r, float slop) {
 
 Resp ui_interact_drag(Ui *ui, UiId id, Rct r, float slop) {
     Resp out = interact(ui, id, r, slop, true);
-    /* per-frame delta, both axes. Movement before the press is not a drag. */
+    /* per-frame delta, both axes. On the press frame only the movement since
+       the press counts, not what the pointer did before it. */
     if (out.drag_started) {
-        out.drag_delta = (P2){0.0f, 0.0f};
+        out.drag_delta = (P2){ui->in.mouse.x - ui->last_press_pos.x,
+                              ui->in.mouse.y - ui->last_press_pos.y};
     } else if (ui->active == id && ui->in.down) {
         out.drag_delta = (P2){ui->in.mouse.x - ui->drag_prev.x,
                               ui->in.mouse.y - ui->drag_prev.y};

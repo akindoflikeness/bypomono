@@ -309,7 +309,8 @@ static void gui_frame(Plug *p, Gui *g) {
     ui->hot = 0;
     ui->repaint_soon = false;
     if (ui->in.pressed) {
-        ui->last_press_pos = ui->in.mouse;
+        /* where the button went down, not where the pointer is by now */
+        ui->last_press_pos = g->last_click_pos;
         ui->last_press_time = t;
     }
 

@@ -134,8 +134,9 @@ changes.
 PM depth is tuned through these recursive algorithms
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#000000","primaryTextColor":"#ffffff","primaryBorderColor":"#ffffff","lineColor":"#ffffff","secondaryColor":"#000000","tertiaryColor":"#000000","background":"#000000","clusterBkg":"#000000","clusterBorder":"#ffffff","edgeLabelBackground":"#000000"}}}%%
-flowchart LR
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#111111","primaryTextColor":"#ffffff","primaryBorderColor":"#111111","lineColor":"#111111","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","background":"#ffffff","clusterBkg":"#f6f8fa","clusterBorder":"#111111","edgeLabelBackground":"#ffffff","titleColor":"#111111","textColor":"#111111"}}}%%
+flowchart TD
+  MIDI["MIDI CC · console"] --> OPS
   subgraph OPS["OPERATORS · I–VIII · ratio palette"]
     direction LR
     O1["1"] --> O2["2"] --> O3["3"]
@@ -143,13 +144,12 @@ flowchart LR
   end
   OPS --> RIP["RIP · haunt · ghost"]
   RIP --> ROOM["THE ROOM"]
-  ROOM --> CH["CHANDAS"]
-  OPS -. pre .-> CH
-  ROOM -. post .-> CH
-  SEQ["melody · pitch sequencer"] -. sync .-> CH
-  CH --> LIM["output · SAFE OUTPUT"]
-  LIM --> OUT[".wav 48k/32f"]
-  MIDI["MIDI CC · console"] -.-> OPS
+  SEQ["melody · pitch sequencer"] -->|sync| CH["CHANDAS"]
+  ROOM --> CH
+  OPS -.->|pre| CH
+  ROOM -.->|post| CH
+  CH --> LIM["SAFE OUTPUT"]
+  LIM --> OUT[".wav · 48 kHz / 32f"]
 ```
 
 ## Phase Violence
@@ -239,7 +239,7 @@ A sum of the carriers leaks into a short delay through an all pass filter to act
 
 | #    | ID     | Structure                                         | Carriers | Max depth | Feedback on        |
 | ---- | ------ | ------------------------------------------------- | -------- | --------- | ------------------ |
-| I    | `SSSS` | full FM tree: `(1→2→3)` and `4` both modulate `5` | 1        | 4         | op 1 (depth 4)     |
+| I    | `SSSS` | full FM tree: `(1→2→3)` and `4` into 5           | 1        | 4         | op 1 (depth 4)     |
 | II   | `SSSP` | true 4-op stack `1→2→3→4`, plus sine `5`          | 2        | 4         | op 1 (depth 4)     |
 | III  | `PSSP` | 3-op stack `1→2→3`, plus sines `4`, `5`           | 3        | 3         | op 1 (depth 3)     |
 | IV   | `PPSP` | FM pair `1→2`, plus sines `3`, `4`, `5`           | 4        | 2         | op 1 (depth 2)     |
@@ -285,24 +285,24 @@ op  1  2  3  4  5
 rₙ = Fₙ</pre></td>
 <td valign="top"><pre>golden  ·  default
 &nbsp;
-op  1     2     3     4     5
-×   1     φ     φ²    φ³    φ⁴
+op  1   2   3   4   5
+×   1   φ   φ²  φ³  φ⁴
 &nbsp;
-rₙ = φⁿ⁻¹    φ = 1.618…</pre></td>
+rₙ = φⁿ⁻¹   φ = 1.618…</pre></td>
 </tr>
 <tr>
 <td valign="top"><pre>mirror
 &nbsp;
-op  1     2     3     4     5
-×   φ⁻²   φ⁻¹   1     φ     φ²
+op  1   2   3   4   5
+×   φ⁻² φ⁻¹ 1   φ   φ²
 &nbsp;
 rₙ = φⁿ⁻³</pre></td>
 <td valign="top"><pre>plastic
 &nbsp;
-op  1     2     3     4     5
-×   1     ρ     ρ²    ρ³    ρ⁴
+op  1   2   3   4   5
+×   1   ρ   ρ²  ρ³  ρ⁴
 &nbsp;
-rₙ = ρⁿ⁻¹    ρ = 1.3247…</pre></td>
+rₙ = ρⁿ⁻¹   ρ = 1.3247…</pre></td>
 <td valign="top"><pre>&nbsp;
 &nbsp;
 φ² = φ + 1
@@ -373,6 +373,8 @@ DRONE holds a note open</pre></td>
 sample and hold, golden or random
 tuning, scale, rate, range, root
 SYNC locks it to the clock</pre></td>
+</tr>
+<tr>
 <td valign="top"><pre>PITCH
 &nbsp;
 16 steps: pitch, gate, velocity
@@ -391,6 +393,7 @@ browser) and INFO.
 
 ## Presets
 
+<pre>
 ┌──────────┬─────────────────────────────────────────────┐
 │ Platform │                Your presets                 │
 ├──────────┼─────────────────────────────────────────────┤
@@ -400,6 +403,7 @@ browser) and INFO.
 ├──────────┼─────────────────────────────────────────────┤
 │ Windows  │ %APPDATA%\bypo\presets\                     │
 └──────────┴─────────────────────────────────────────────┘
+</pre>
 
 The shipped bank lives in presets/BYPO/ beside the app. On first run the app copies it into your folder under BYPO/, and anything you save lands in your folder from then on. Presets are plain JSON, one file each, the filename is the preset's name.
 

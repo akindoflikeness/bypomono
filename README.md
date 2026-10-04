@@ -193,6 +193,8 @@ A sum of the carriers leaks into a short delay through an all pass filter to act
  │
 [4] [5]
 ═╧═══╧═ out</pre></td>
+</tr>
+<tr>
 <td valign="top"><pre>III · PSSP
 &nbsp;
 [1]↺
@@ -219,6 +221,8 @@ A sum of the carriers leaks into a short delay through an all pass filter to act
              │
 [1] [2] [3] [5]↺
 ═╧═══╧═══╧═══╧═ out</pre></td>
+</tr>
+<tr>
 <td valign="top"><pre>VII · PPFF
 &nbsp;
 [1]     [4]

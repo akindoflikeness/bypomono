@@ -132,26 +132,6 @@ Loading a palette writes those five ratios directly to the operators; their
 ratios can then be tuned independently and are preserved when the algorithm
 changes.
 PM depth is tuned through these recursive algorithms
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#111111","primaryTextColor":"#ffffff","primaryBorderColor":"#111111","lineColor":"#111111","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","background":"#ffffff","clusterBkg":"#f6f8fa","clusterBorder":"#111111","edgeLabelBackground":"#ffffff","titleColor":"#111111","textColor":"#111111"}}}%%
-flowchart TD
-  MIDI["MIDI CC · console"] --> OPS
-  subgraph OPS["OPERATORS · I–VIII · ratio palette"]
-    direction LR
-    O1["1"] --> O2["2"] --> O3["3"]
-    O4["4"] --> O5["5"]
-  end
-  OPS --> RIP["RIP · haunt · ghost"]
-  RIP --> ROOM["THE ROOM"]
-  SEQ["melody · pitch sequencer"] -->|sync| CH["CHANDAS"]
-  ROOM --> CH
-  OPS -.->|pre| CH
-  ROOM -.->|post| CH
-  CH --> LIM["SAFE OUTPUT"]
-  LIM --> OUT[".wav · 48 kHz / 32f"]
-```
-
 ## Phase Violence
 
 <table>
@@ -410,30 +390,6 @@ browser) and INFO.
 </pre>
 
 The shipped bank lives in presets/BYPO/ beside the app. On first run the app copies it into your folder under BYPO/, and anything you save lands in your folder from then on. Presets are plain JSON, one file each, the filename is the preset's name.
-
-73 in the core bank · `presets/BYPO/*.json`
-
-<pre>
-4evasolo            eddie_the_eagle     minority            shun
-BRUTALISM           eleventeen          miopic              slinky
-Fluffy              fall_of_rome        moaner              space_battleships
-GlassD              fibbing             mr_bojangles        stellar_breeze
-Summon              filthy_plucker      mustang_ballaie     storyteller
-Woofer              fromheavenabove     narsty              symmetriad
-barbershop          ghetto              neo_bass            test_flip_point
-binky               goodbye-            net_terminal_gene   the_conch
-bong                hexD                nightmares          the_nine
-chakra              hexD_alt            one                 throaty
-church              hmm                 orthogonal          thudner
-cinematic           init                oslo                tokyo_ghost
-click               instability         phraze              unbeknownst
-clog                it_had_the_power    plinky              washed_out
-crash               jiggle_physics      present             wet_bong
-default             landoger            pressure            wibbly
-discovered_harmony  lil_glider          saturated_woof
-drama               logarhythm          shim
-drifting            mathsmatic          shuffling_a_deck
-</pre>
 
 ## On AI
 
